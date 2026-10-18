@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Xcode – personal state and build output
+xcuserdata/
+DerivedData/
+build/
+
+# Local working files – not part of the source code
+_zaloha/
+DXF/
+DATA/
+CODE*.txt
+.git-stare/
