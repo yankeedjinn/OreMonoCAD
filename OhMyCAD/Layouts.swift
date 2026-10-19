@@ -1129,6 +1129,7 @@ final class BlockManagerController: NSObject, NSTableViewDataSource, NSTableView
         let open = NSOpenPanel()
         open.allowedContentTypes = [OhMyCADFile.contentType, UTType(filenameExtension: "dxf") ?? .data]
         open.message = "Find the drawing of the external reference “\(definition.name)”"
+        open.prompt = "Choose"
         open.beginSheetModal(for: panel) { [weak self] response in
             guard let self = self, response == .OK, let url = open.url else { return }
             source.accessedURL?.stopAccessingSecurityScopedResource()

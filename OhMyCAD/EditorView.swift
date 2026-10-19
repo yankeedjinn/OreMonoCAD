@@ -159,7 +159,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
         .filter: (
             summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name or a piece of text.",
-            usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Only visible objects on unlocked layers are found; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
+            usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Whole drawing = its visible objects on unlocked layers, Current selection = all selected objects; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
         .fillet: (
             summary: "Rounds the corner between two lines or polyline segments with an arc.",
             usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; a polyline end + a line are joined into one polyline."),
@@ -1860,7 +1860,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .dimRadius, .dimDiameter:
             text = picked.isEmpty ? "\(currentTool.title): click a circle or an arc" : "\(currentTool.title): text position"
         case .leader:
-            text = points.isEmpty ? "Leader: arrow point" : "Leader: next point · ↩/right-click = enter text"
+            text = points.isEmpty ? "Leader: arrow point" : "Leader: next point · ↩/right-click = enter text · ⌫ = undo point"
         case .scaleBar:
             if let scale = scaleBarScale(near: currentWorldPoint ?? .zero) {
                 text = "Scale Bar (\(scale.title)\(paperSpace != nil ? ", nearest viewport" : "")): click where its left end goes · hold the button for the North Arrow"
@@ -1887,7 +1887,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             switch (revisionCloudShape, points.isEmpty) {
             case (.polygon, true): text = what + ": first corner of the outline · R = rectangle · A = arc size"
             case (.polygon, false):
-                text = what + ": next corner · ↩, right-click, double-click or the first corner = close · ⌫ = undo corner"
+                text = what + ": next corner · ↩, right-click, double-click, C or the first corner = close · ⌫ = undo corner"
             case (.rectangle, true): text = what + ": first corner of the rectangle · P = by corners · A = arc size"
             case (.rectangle, false): text = what + ": opposite corner (or type width and height + ↩)"
             }
@@ -1897,7 +1897,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             case (.rectangle, false): text = "Wipeout: opposite corner (or type width and height + ↩)"
             case (.polygon, true): text = "Wipeout: first corner of the outline · R = rectangle"
             case (.polygon, false):
-                text = "Wipeout: next corner · ↩, right-click, double-click or the first corner = close · ⌫ = undo corner"
+                text = "Wipeout: next corner · ↩, right-click, double-click, C or the first corner = close · ⌫ = undo corner"
             }
         case .text:
             if inlineText != nil {
@@ -3215,7 +3215,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .spline:
             onCommit?([], [Spline(controlPoints: points, closed: closed && points.count >= 3, layer: layer)], "Add Spline")
         case .leader:
-            guard let text = askForText(title: "Leader Text", message: "Enter the text of the leader:") else { return }
+            guard let text = askForText(title: "Leader – Text", message: "Text of the leader:") else { return }
             let leader = styled(DimensionEntity(kind: .leader, points: points, text: text, textHeight: dimensionTextHeight, layer: layer))
             Associativity.attach(leader, to: snapEntities)
             onCommit?([], [leader], "Add Leader")
@@ -4228,7 +4228,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     func askPolygonSides() {
         let alert = NSAlert()
         alert.messageText = "Polygon – Number of Sides"
-        alert.informativeText = "From \(RegularPolygon.minimumSides) to \(RegularPolygon.maximumSides):"
+        alert.informativeText = "Number of sides (from \(RegularPolygon.minimumSides) to \(RegularPolygon.maximumSides)):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 24))

@@ -1730,6 +1730,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         ends.selectItem(at: DimArrowStyle.allCases.firstIndex(of: AppSettings.dimArrowStyle) ?? 0)
         let height = NSTextField(string: LineType.format(AppSettings.dimTextHeightMM))
+        height.toolTip = "Height of capital letters in mm on paper"
         let size = NSTextField(string: LineType.format(AppSettings.dimArrowSizeMM))
         let decimals = NSTextField(string: "\(AppSettings.dimDecimals)")
         for field in [height, size, decimals] { field.widthAnchor.constraint(equalToConstant: 70).isActive = true }
@@ -2296,6 +2297,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [OhMyCADFile.contentType, UTType(filenameExtension: "dxf") ?? .data]
         panel.allowsMultipleSelection = true
+        panel.message = "Choose one or more drawings – OhMyCAD or DXF, each opens in its own tab"
+        panel.prompt = "Open"
         guard let window = view.window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK else { return }
@@ -2582,6 +2585,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         panel.message = activeTab.geoReference == nil
             ? "No geodetic base point is set – the drawing is exported as if its coordinates were already S-JTSK"
             : "The model in S-JTSK, meters – for the surveyor or the cadastral map"
+        panel.prompt = "Export"
         guard let window = view.window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self = self, response == .OK, let url = panel.url else { return }
@@ -2828,6 +2832,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         panel.nameFieldStringValue = baseName + "." + OhMyCADFile.fileExtension
         panel.message = "OhMyCAD drawing – keeps everything (to share with other CAD apps use File › Export DXF…)"
+        panel.prompt = "Save"
         return panel
     }
 
@@ -2874,6 +2879,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let baseName = currentFileURL?.deletingPathExtension().lastPathComponent ?? activeTab.title
         panel.nameFieldStringValue = baseName + ".dxf"
         panel.message = "DXF does not keep everything (exact colors, hatch patterns, printable layers, layouts…)"
+        panel.prompt = "Export"
         guard let window = view.window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self = self, response == .OK, let url = panel.url else { return }
@@ -3042,6 +3048,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         panel.allowedContentTypes = [settings.rasterFormat?.contentType ?? .pdf]
         panel.nameFieldStringValue = plotFileName(for: settings)
         panel.message = settings.rasterFormat == nil ? "Vector PDF" : "\(settings.rasterFormat!.title) image at \(Int(settings.dpi)) dpi"
+        panel.prompt = "Export"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self = self, response == .OK, let url = panel.url else { return }
             do {
@@ -3554,7 +3561,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func setFilletRadius(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = "Fillet Radius"
-        alert.informativeText = "Radius used by the Fillet tool (0 = sharp corner):"
+        alert.informativeText = "Radius of the fillet (0 = sharp corner):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
@@ -4700,7 +4707,7 @@ extension MainViewController {
             if FileManager.default.fileExists(atPath: own.path) { directory = own }
         }
         panel.directoryURL = directory
-        panel.message = "Backups of earlier versions (one folder per drawing). The backup opens as a copy and stays unchanged."
+        panel.message = "Backups of earlier versions (one folder per drawing) – the backup opens as a copy and stays unchanged"
         panel.prompt = "Open Copy"
         guard let window = view.window else { return }
         let sourceURL = currentFileURL

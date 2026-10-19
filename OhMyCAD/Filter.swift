@@ -263,7 +263,7 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
         let alert = NSAlert()
         alert.messageText = "Filter"
         alert.informativeText = "Selects the objects that match all ticked properties. "
-            + "Only visible objects on unlocked layers are searched."
+            + "Whole drawing = its visible objects on unlocked layers · Current selection = all selected objects."
         alert.addButton(withTitle: "Select")
         alert.addButton(withTitle: "Cancel")
         alert.accessoryView = grid

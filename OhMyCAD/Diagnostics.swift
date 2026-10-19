@@ -624,7 +624,7 @@ enum ProblemReporter {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = "OhMyCAD Problem Report \(stamp.string(from: Date())).zip"
-        panel.message = "Save the problem report, then attach the file to a message."
+        panel.message = "Save the problem report, then attach the file to a message"
         panel.prompt = "Save Report"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 

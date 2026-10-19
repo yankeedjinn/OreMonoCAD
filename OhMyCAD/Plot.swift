@@ -6,7 +6,8 @@
 //
 //  - Devices: macOS printers, PDF (vector), PNG / JPEG / TIFF.
 //  - Paper and orientation, plot area (Extents / Display / Window / Layout), scale or
-//    “Fit to paper”, offset (centered / X,Y), style (color, monochrome, grayscale), lineweights.
+//    “Fit to paper”, offset (centered / X,Y), lineweights.
+//  - Plot style: Color, Monochrome, Grayscale or an imported AutoCAD .ctb table (see PlotStyles.swift).
 //  - Named settings (Page Setups) are stored in the drawing.
 //  - A live page preview on the right.
 //
@@ -37,8 +38,10 @@ nonisolated struct PlotSettings: Codable, Equatable {
     var centered: Bool = true
     var offsetX: CGFloat = 0
     var offsetY: CGFloat = 0
-    /// color | monochrome | grayscale
+    /// color | monochrome | grayscale | table (= styleTable)
     var style: String = "color"
+    /// Imported plot style table (.ctb), used when style == "table".
+    var styleTable: PlotStyleTable?
     var plotLineweights: Bool = true
     var marginMM: CGFloat = 10
     var dpi: CGFloat = 300
@@ -65,6 +68,7 @@ nonisolated struct PlotSettings: Codable, Equatable {
         offsetX = try c.decodeIfPresent(CGFloat.self, forKey: .offsetX) ?? d.offsetX
         offsetY = try c.decodeIfPresent(CGFloat.self, forKey: .offsetY) ?? d.offsetY
         style = try c.decodeIfPresent(String.self, forKey: .style) ?? d.style
+        styleTable = try c.decodeIfPresent(PlotStyleTable.self, forKey: .styleTable)
         plotLineweights = try c.decodeIfPresent(Bool.self, forKey: .plotLineweights) ?? d.plotLineweights
         marginMM = try c.decodeIfPresent(CGFloat.self, forKey: .marginMM) ?? d.marginMM
         dpi = try c.decodeIfPresent(CGFloat.self, forKey: .dpi) ?? d.dpi
@@ -73,6 +77,16 @@ nonisolated struct PlotSettings: Codable, Equatable {
     }
 
     static let defaults = PlotSettings()
+
+    /// The plot style table in use (built-in or imported).
+    var plotStyleTable: PlotStyleTable {
+        switch style {
+        case "monochrome": return .monochrome
+        case "grayscale": return .grayscale
+        case "table": return styleTable ?? .color
+        default: return .color
+        }
+    }
 
     @MainActor var paperSize: PaperSize { return PaperSize(rawValue: paper) ?? .a4 }
     @MainActor var scale: DrawingScale { return DrawingScale(paper: max(scalePaper, 1e-9), model: max(scaleModel, 1e-9)) }
@@ -227,23 +241,6 @@ enum PlotRenderer {
                         effectiveScale: effective, area: box, landscape: landscape, overflows: overflows)
     }
 
-    // MARK: Colors and styles
-
-    static func plotColor(_ color: NSColor, style: String) -> NSColor {
-        let c = color.usingColorSpace(.sRGB) ?? color
-        let nearWhite = c.brightnessComponent > 0.85 && c.saturationComponent < 0.2
-        switch style {
-        case "monochrome":
-            return NSColor(white: 0, alpha: c.alphaComponent)
-        case "grayscale":
-            if nearWhite { return .black }
-            let luminance = 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent
-            return NSColor(white: min(luminance * 0.85, 0.8), alpha: c.alphaComponent)
-        default:
-            return nearWhite ? .black : c
-        }
-    }
-
     // MARK: Drawing
 
     /// Draws the page into a context whose coordinates are page points (origin bottom left).
@@ -262,9 +259,13 @@ enum PlotRenderer {
         let patternPointsPerMM = source.layout == nil
             ? plan.pointsPerUnit * source.drawingScale.factor / max(source.modelMMPerUnit, 1e-9)
             : plan.pointsPerUnit
+        // plot style: output color and lineweight by the object's color
+        let plotStyles = PlotStyleResolver(settings.plotStyleTable)
         func style(_ entity: CADEntity, patternPointsPerMM: CGFloat) -> StrokeStyle {
-            let color = plotColor(layerManager.resolvedColor(for: entity), style: settings.style)
-            let mm = layerManager.lineWeight(for: entity)
+            let objectColor = layerManager.resolvedColor(for: entity)
+            let plotStyle = plotStyles.style(for: objectColor)
+            let color = PlotStyleResolver.plotColor(objectColor, style: plotStyle)
+            let mm = plotStyle.lineweight ?? layerManager.lineWeight(for: entity)
             let width = settings.plotLineweights ? max(0.25, mm * pointsPerMM) : 0.3
             var dash: [CGFloat] = []
             let type = layerManager.lineType(for: entity)
@@ -517,6 +518,20 @@ final class PlotDialog: NSObject, NSWindowDelegate {
     private let transparentBox = NSButton(checkboxWithTitle: "Transparent background", target: nil, action: nil)
 
     private static let dpiValues: [CGFloat] = [96, 150, 200, 300, 600]
+
+    /// Entries of the style popup.
+    private enum StyleItem {
+        case builtIn(String)
+        case table(Int)
+        case separator
+        case importFile
+    }
+    private static let builtInStyles: [(key: String, title: String)] = [
+        ("color", "Color"), ("monochrome", "Monochrome (all black)"), ("grayscale", "Grayscale")
+    ]
+    private var styleItems: [StyleItem] = []
+    /// Imported plot style tables known to this dialog (current settings, page setups, imported now).
+    private var styleTables: [PlotStyleTable] = []
     private let printers = NSPrinter.printerNames
     private let papers = PaperSize.allCases
 
@@ -526,6 +541,12 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         self.source = source
         self.pageSetups = pageSetups
         self.onSetupsChanged = onSetupsChanged
+        var tables: [PlotStyleTable] = []
+        for table in ([settings.styleTable] + pageSetups.map { $0.styleTable }).compactMap({ $0 })
+        where !tables.contains(where: { $0.name == table.name }) {
+            tables.append(table)
+        }
+        styleTables = tables
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         super.init()
@@ -634,9 +655,10 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         numberField(marginField)
         marginField.toolTip = "Distance of the plot from the paper edge"
 
-        stylePopup.addItems(withTitles: ["Color", "Monochrome (all black)", "Grayscale"])
         stylePopup.target = self
-        stylePopup.action = #selector(controlChanged)
+        stylePopup.action = #selector(styleChosen)
+        stylePopup.toolTip = "How colors are printed: as they are, all black, in gray, or by an AutoCAD plot style table (.ctb). "
+            + "Choose “Import .ctb…” to load a table; it is saved in the drawing."
         lineweightBox.target = self
         lineweightBox.action = #selector(controlChanged)
         lineweightBox.toolTip = "Off = all lines thin (0.1 mm)"
@@ -742,6 +764,40 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         }
     }
 
+    private func rebuildStyles() {
+        stylePopup.removeAllItems()
+        styleItems = []
+        for style in PlotDialog.builtInStyles {
+            stylePopup.addItem(withTitle: style.title)
+            styleItems.append(.builtIn(style.key))
+        }
+        if !styleTables.isEmpty {
+            stylePopup.menu?.addItem(.separator())
+            styleItems.append(.separator)
+            for (index, table) in styleTables.enumerated() {
+                stylePopup.addItem(withTitle: "\(table.name).ctb")
+                styleItems.append(.table(index))
+            }
+        }
+        stylePopup.menu?.addItem(.separator())
+        styleItems.append(.separator)
+        stylePopup.addItem(withTitle: "Import .ctb…")
+        styleItems.append(.importFile)
+
+        var selected = 0
+        for (i, item) in styleItems.enumerated() {
+            switch item {
+            case .builtIn(let key) where key == settings.style:
+                selected = i
+            case .table(let index) where settings.style == "table" && styleTables[index].name == settings.styleTable?.name:
+                selected = i
+            default:
+                break
+            }
+        }
+        stylePopup.selectItem(at: selected)
+    }
+
     private var areaKeys: [String] {
         return source.layout == nil ? ["extents", "display", "window"] : ["layout", "extents", "display", "window"]
     }
@@ -767,7 +823,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         centerBox.state = s.centered ? .on : .off
         offsetXField.stringValue = LineType.format(s.offsetX)
         offsetYField.stringValue = LineType.format(s.offsetY)
-        stylePopup.selectItem(at: ["color", "monochrome", "grayscale"].firstIndex(of: s.style) ?? 0)
+        rebuildStyles()
         lineweightBox.state = s.plotLineweights ? .on : .off
         dpiPopup.selectItem(at: PlotDialog.dpiValues.firstIndex(of: s.dpi) ?? 3)
         transparentBox.state = s.transparent ? .on : .off
@@ -794,7 +850,17 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         s.centered = centerBox.state == .on
         s.offsetX = number(offsetXField) ?? s.offsetX
         s.offsetY = number(offsetYField) ?? s.offsetY
-        s.style = ["color", "monochrome", "grayscale"][max(0, stylePopup.indexOfSelectedItem)]
+        let styleIndex = stylePopup.indexOfSelectedItem
+        switch styleItems.indices.contains(styleIndex) ? styleItems[styleIndex] : .builtIn("color") {
+        case .builtIn(let key):
+            s.style = key
+            s.styleTable = nil
+        case .table(let index):
+            s.style = "table"
+            s.styleTable = styleTables[index]
+        case .separator, .importFile:
+            break
+        }
         s.plotLineweights = lineweightBox.state == .on
         s.dpi = PlotDialog.dpiValues[max(0, dpiPopup.indexOfSelectedItem)]
         s.transparent = transparentBox.state == .on
@@ -903,6 +969,44 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         refresh()
     }
 
+    @objc private func styleChosen() {
+        let index = stylePopup.indexOfSelectedItem
+        guard styleItems.indices.contains(index), case .importFile = styleItems[index] else {
+            controlChanged()
+            return
+        }
+        rebuildStyles()      // back to the current style until a file is read
+        let panel = NSOpenPanel()
+        panel.message = "Choose an AutoCAD color-dependent plot style table (.ctb) – it is saved in the drawing"
+        panel.prompt = "Import"
+        panel.allowedContentTypes = [UTType(filenameExtension: "ctb") ?? .data, UTType(filenameExtension: "stb") ?? .data]
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: url)
+                let table = try PlotStyleTable.readCTB(data, name: url.deletingPathExtension().lastPathComponent)
+                self.styleTables.removeAll { $0.name == table.name }
+                self.styleTables.append(table)
+                var s = self.settings
+                s.style = "table"
+                s.styleTable = table
+                s.name = nil
+                self.settings = s
+                self.rebuildStyles()
+                self.rebuildSetups()
+                self.refresh()
+            } catch {
+                Log.error("Error Importing Plot Style Table: \(error.localizedDescription) [\(String(describing: error))]")
+                let alert = NSAlert()
+                alert.messageText = "Error Importing Plot Style Table"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .critical
+                alert.beginSheetModal(for: self.window) { _ in }
+            }
+        }
+    }
+
     @objc private func setupChosen() {
         let index = setupPopup.indexOfSelectedItem - 1
         guard pageSetups.indices.contains(index) else {
@@ -916,7 +1020,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         read()
         let alert = NSAlert()
         alert.messageText = "Save Page Setup"
-        alert.informativeText = "Name for these plot settings (saved in the drawing):"
+        alert.informativeText = "Name of the page setup (saved in the drawing):"
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
         field.stringValue = settings.name ?? "\(settings.paperSize.shortTitle) \(settings.device == "printer" ? "print" : settings.device.uppercased())\(settings.fitToPaper ? "" : " \(settings.scale.title)")"
         alert.accessoryView = field

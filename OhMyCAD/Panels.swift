@@ -1535,7 +1535,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             showWarning("Layer 0 is the default layer and cannot be renamed.")
             return
         }
-        guard let newName = askForName(title: "Rename Layer", message: "New name for layer “\(name)”:",
+        guard let newName = askForName(title: "Rename Layer", message: "New name of the layer “\(name)”:",
                                        initial: name, button: "Rename"), newName != name else { return }
         onRenameLayer?(name, newName)
         reloadData()
@@ -2170,16 +2170,16 @@ final class PropertiesPanelView: NSView {
         case let line as Line:
             addSection("Line")
             addNumber("Start X", line.startPoint.x) { [weak self] v in
-                self?.edit("Edit Line", Line.self) { l in let c = l.clone() as! Line; c.startPoint.x = v; return c }
+                self?.edit("Move Start Point", Line.self) { l in let c = l.clone() as! Line; c.startPoint.x = v; return c }
             }
             addNumber("Start Y", line.startPoint.y) { [weak self] v in
-                self?.edit("Edit Line", Line.self) { l in let c = l.clone() as! Line; c.startPoint.y = v; return c }
+                self?.edit("Move Start Point", Line.self) { l in let c = l.clone() as! Line; c.startPoint.y = v; return c }
             }
             addNumber("End X", line.endPoint.x) { [weak self] v in
-                self?.edit("Edit Line", Line.self) { l in let c = l.clone() as! Line; c.endPoint.x = v; return c }
+                self?.edit("Move End Point", Line.self) { l in let c = l.clone() as! Line; c.endPoint.x = v; return c }
             }
             addNumber("End Y", line.endPoint.y) { [weak self] v in
-                self?.edit("Edit Line", Line.self) { l in let c = l.clone() as! Line; c.endPoint.y = v; return c }
+                self?.edit("Move End Point", Line.self) { l in let c = l.clone() as! Line; c.endPoint.y = v; return c }
             }
             let angle = Geometry.angle(from: line.startPoint, to: line.endPoint)
             addNumber("Length", line.length, tip: "The start point stays, the direction is kept") { [weak self] length in
@@ -2354,7 +2354,7 @@ final class PropertiesPanelView: NSView {
         let same = images.allSatisfy { $0.opacity == first.opacity }
         addNumber("Opacity %", same ? first.opacity * 100 : nil, tip: "100 = opaque · less = faded, easier to draw over (5–100)") { [weak self] v in
             guard v >= 5 && v <= 100 else { NSSound.beep(); return }
-            self?.edit("Image Opacity", ImageEntity.self) { o in
+            self?.edit("Change Opacity", ImageEntity.self) { o in
                 guard abs(o.opacity * 100 - v) > 1e-9 else { return nil }
                 let c = o.clone() as! ImageEntity
                 c.opacity = v / 100
@@ -2535,7 +2535,7 @@ final class PropertiesPanelView: NSView {
         }
         addNumber("Width", same({ $0.boxWidth.map { LineType.format($0) } ?? "-" }) ? (first.boxWidth ?? 0) : nil,
                   tip: "Paragraph width in drawing units – longer lines wrap. 0 = no wrapping") { [weak self] v in
-            self?.edit("Text Width", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.boxWidth = v > 0 ? v : nil; return c }
+            self?.edit("Change Text Width", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.boxWidth = v > 0 ? v : nil; return c }
         }
         if texts.count == 1 {
             addNumber("X", first.position.x) { [weak self] v in
@@ -2556,7 +2556,7 @@ final class PropertiesPanelView: NSView {
         addSection("Viewport")
         addText("Scale", viewport.scale.title, placeholder: "1:50") { [weak self] text in
             guard let scale = PlotDialog.parseScale(text) else { NSSound.beep(); self?.needsVertexRefresh?(); return }
-            self?.edit("Viewport Scale", ViewportEntity.self) { v in
+            self?.edit("Change Viewport Scale", ViewportEntity.self) { v in
                 guard !v.isLocked else { return nil }
                 let c = v.clone() as! ViewportEntity
                 c.scale = scale
@@ -2571,7 +2571,7 @@ final class PropertiesPanelView: NSView {
         let choose = ControlAction { [weak self] control in
             guard let popup = control as? NSPopUpButton, popup.indexOfSelectedItem > 0 else { return }
             let scale = DrawingScale.presets[popup.indexOfSelectedItem - 1]
-            self?.edit("Viewport Scale", ViewportEntity.self) { v in
+            self?.edit("Change Viewport Scale", ViewportEntity.self) { v in
                 guard !v.isLocked else { return nil }
                 let c = v.clone() as! ViewportEntity
                 c.scale = scale
@@ -2633,7 +2633,7 @@ final class PropertiesPanelView: NSView {
         layers.toolTip = "Checked layers are shown in this viewport; uncheck to hide a layer here only"
         let toggle = ControlAction { [weak self] control in
             guard let popup = control as? NSPopUpButton, let name = popup.selectedItem?.representedObject as? String else { return }
-            self?.edit("Viewport Layers", ViewportEntity.self) { o in
+            self?.edit("Change Viewport Layers", ViewportEntity.self) { o in
                 let c = o.clone() as! ViewportEntity
                 if c.frozenLayers.contains(name) { c.frozenLayers.remove(name) } else { c.frozenLayers.insert(name) }
                 return c
@@ -2718,14 +2718,15 @@ final class PropertiesPanelView: NSView {
             }
             addText("Below", same({ $0.belowText }) ? first.belowText : "",
                     placeholder: same({ $0.belowText }) ? "e.g. 1500 (window height)" : "*varies*") { [weak self] text in
-                self?.edit("Text Below Dimension", DimensionEntity.self) { d in
+                self?.edit("Change Text Below Dimension", DimensionEntity.self) { d in
                     let c = d.clone() as! DimensionEntity
                     c.belowText = text.trimmingCharacters(in: .whitespaces)
                     return c
                 }
             }
         }
-        addNumber("Text height", same({ LineType.format($0.textHeight) }) ? first.textHeight : nil) { [weak self] v in
+        addNumber("Text height", same({ LineType.format($0.textHeight) }) ? first.textHeight : nil,
+                  tip: "Height of capital letters in drawing units") { [weak self] v in
             guard v > 0 else { NSSound.beep(); return }
             self?.edit("Change Text Height", DimensionEntity.self) { d in let c = d.clone() as! DimensionEntity; c.textHeight = v; return c }
         }
@@ -2762,7 +2763,7 @@ final class PropertiesPanelView: NSView {
         addNumber("Decimals", same({ "\($0.precision)" }) ? CGFloat(first.precision) : nil) { [weak self] v in
             guard v.isFinite, v >= 0, v <= 8 else { NSSound.beep(); return }
             let decimals = Int(v.rounded())
-            self?.edit("Change Precision", DimensionEntity.self) { d in let c = d.clone() as! DimensionEntity; c.precision = decimals; return c }
+            self?.edit("Change Decimals", DimensionEntity.self) { d in let c = d.clone() as! DimensionEntity; c.precision = decimals; return c }
         }
         // associativity: the dimension follows the objects its points are attached to
         let linked = dimensions.filter { !$0.links.isEmpty }.count
@@ -2804,7 +2805,7 @@ final class PropertiesPanelView: NSView {
 
     /// Changing a rectangle via its bounds (vertices are recomputed, the order stays).
     private func editRectangle(_ change: @escaping (inout CGRect) -> Void) {
-        edit("Edit Rectangle", Polyline.self) { p in
+        edit("Change Rectangle", Polyline.self) { p in
             guard let box = PropertiesPanelView.rectangleBox(p) else { return nil }
             var target = box
             change(&target)
