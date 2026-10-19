@@ -89,10 +89,10 @@ final class ToolbarView: NSView {
         var y: CGFloat = 8
         for group in ToolGroup.allCases {
             let caption = NSTextField(labelWithString: group.title.uppercased())
-            caption.font = NSFont.systemFont(ofSize: 8.5, weight: .semibold)
-            caption.textColor = Theme.textCaption
+            caption.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+            caption.textColor = Theme.textHeading
             caption.alignment = .center
-            caption.frame = NSRect(x: 0, y: y, width: bounds.width, height: 12)
+            caption.frame = NSRect(x: 0, y: y, width: bounds.width, height: 13)
             content.addSubview(caption)
             y += 14
 
@@ -291,7 +291,8 @@ final class ToolbarView: NSView {
         guard let family = tool.paletteFamily else { return "" }
         let others = family.filter { $0 != tool }.map { $0.title }
         guard !others.isEmpty else { return "" }
-        let extra = family.contains(.dimLinear) ? ", the dimension ends and the Dimension Style" : ""
+        let extra = family.contains(.dimLinear) ? ", the dimension ends and the Dimension Style"
+            : family.contains(.polygon) ? ", the polygon method and the number of sides" : ""
         return "\nHold the button (or right-click it) for " + others.joined(separator: ", ") + extra + "."
     }
 
@@ -452,7 +453,7 @@ final class ToolbarView: NSView {
         blockMenuItems.removeAll()
         let definitions = delegate?.toolbarBlockDefinitions() ?? []
         let current = delegate?.toolbarCurrentBlock()
-        let header = NSMenuItem(title: definitions.isEmpty ? "No blocks in this drawing yet" : "Insert – which block", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: definitions.isEmpty ? "No blocks in this drawing yet" : "Insert Block – which block", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         for (index, definition) in definitions.enumerated() {
@@ -460,7 +461,7 @@ final class ToolbarView: NSView {
             let item = NSMenuItem(title: definition.name, action: #selector(blockChosen(_:)), keyEquivalent: "")
             item.target = self
             item.image = BlockPreview.image(of: definition, size: 22)
-            var subtitle = "\(definition.entities.count) object(s)"
+            var subtitle = "\(definition.entities.count) object\(definition.entities.count == 1 ? "" : "s")"
             if let source = definition.source { subtitle = "External reference · \(source.fileName)" + (source.error != nil ? " · ⚠︎ not loaded" : "") }
             else if !definition.note.isEmpty { subtitle += " · \(definition.note)" }
             item.subtitle = subtitle
@@ -809,7 +810,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             switch self {
             case .current: return "Current layer – new objects are drawn on it"
             case .visible: return "Visible – unchecked layers are hidden on screen"
-            case .locked: return "Locked – objects on the layer can't be selected or edited"
+            case .locked: return "Locked – objects on the layer cannot be selected or edited"
             case .printable: return "Printable – unchecked layers stay visible on screen but are skipped when printing or exporting to PDF"
             case .color: return "Layer color (used by objects set to ByLayer)"
             case .name: return "Layer name – double-click to rename"
@@ -1092,7 +1093,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             let symbol = isVisibleColumn ? (isOn ? "eye" : "eye.slash") : (isOn ? "lock.fill" : "lock.open")
             let tip = isVisibleColumn
                 ? (isOn ? "Visible – click to hide · ⌥-click = show only this layer" : "Hidden – click to show")
-                : (isOn ? "Locked – click to unlock" : "Unlocked – click to lock (objects can't be selected or edited)")
+                : (isOn ? "Locked – click to unlock" : "Unlocked – click to lock (objects cannot be selected or edited)")
             let button = NSButton(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
             button.imageScaling = .scaleProportionallyDown
@@ -1917,8 +1918,8 @@ final class PropertiesPanelView: NSView {
 
     private func addSection(_ title: String) {
         let label = NSTextField(labelWithString: title.uppercased())
-        label.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
-        label.textColor = Theme.textCaption
+        label.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = Theme.textHeading
         if !stack.arrangedSubviews.isEmpty { stack.setCustomSpacing(12, after: stack.arrangedSubviews.last!) }
         stack.addArrangedSubview(label)
     }
@@ -2063,7 +2064,7 @@ final class PropertiesPanelView: NSView {
         if !selection.isEmpty {
             let orders = Set(selection.map { $0.drawOrder })
             addNumber("Draw order", orders.count == 1 ? CGFloat(orders.first ?? 0) : nil,
-                      tip: "Pseudo Z position: higher numbers are drawn over lower ones (hatches stay under lines with the same number). Edit › Draw Order: ⇧⌘F front, ⇧⌘B back") { [weak self] value in
+                      tip: "Pseudo Z position: higher numbers are drawn over lower ones (with the same number: images and hatches under lines, wipeouts over them, texts and dimensions on top). Edit › Draw Order: ⇧⌘F front, ⇧⌘B back") { [weak self] value in
                 let order = Int(value.rounded())
                 self?.onEdit?("Change Draw Order") { entity in
                     guard entity.drawOrder != order else { return nil }
@@ -2158,6 +2159,8 @@ final class PropertiesPanelView: NSView {
                 addDimensionRows(selection.compactMap { $0 as? DimensionEntity })
             } else if selection.allSatisfy({ $0 is TextEntity }) {
                 addTextRows(selection.compactMap { $0 as? TextEntity })
+            } else if selection.allSatisfy({ $0 is ImageEntity }) {
+                addImageRows(selection.compactMap { $0 as? ImageEntity })
             }
             return
         }
@@ -2333,8 +2336,30 @@ final class PropertiesPanelView: NSView {
         case let text as TextEntity:
             addTextRows([text])
 
+        case let image as ImageEntity:
+            addImageRows([image])
+
         default:
             break
+        }
+    }
+
+    /// Images and PDF underlays: the file and the opacity (for all selected ones).
+    private func addImageRows(_ images: [ImageEntity]) {
+        guard let first = images.first else { return }
+        addSection(images.allSatisfy { $0.isPDF } ? "PDF Underlay" : "Image")
+        if images.count == 1 {
+            addInfo(first.fileName + (first.isPDF ? " · page \(first.page)" : "") + (first.picture == nil ? "\n⚠︎ The picture could not be read" : ""))
+        }
+        let same = images.allSatisfy { $0.opacity == first.opacity }
+        addNumber("Opacity %", same ? first.opacity * 100 : nil, tip: "100 = opaque · less = faded, easier to draw over (5–100)") { [weak self] v in
+            guard v >= 5 && v <= 100 else { NSSound.beep(); return }
+            self?.edit("Image Opacity", ImageEntity.self) { o in
+                guard abs(o.opacity * 100 - v) > 1e-9 else { return nil }
+                let c = o.clone() as! ImageEntity
+                c.opacity = v / 100
+                return c
+            }
         }
     }
 
@@ -2401,9 +2426,9 @@ final class PropertiesPanelView: NSView {
             reload.action = #selector(ControlAction.run(_:))
             actions.append(reloadAction)
             addRow("", reload)
-            addInfo("Updates by itself when the file is saved · Insert › Block Manager can bind it as a block")
+            addInfo("Updates by itself when the file is saved · Insert › Block Manager… can bind it as a block")
         } else {
-            addInfo("Explode (X) turns it back into objects · Insert › Block Manager renames or deletes blocks")
+            addInfo("Explode" + (DrawingTool.explode.shortcut.map { " (\($0))" } ?? "") + " turns it back into objects · Insert › Block Manager… renames or deletes blocks")
         }
     }
 
@@ -2481,7 +2506,7 @@ final class PropertiesPanelView: NSView {
         actions.append(faceAction)
         addRow("Typeface", facePopup)
 
-        addNumber("Height", same({ LineType.format($0.height) }) ? first.height : nil, tip: "Font size in drawing units") { [weak self] v in
+        addNumber("Height", same({ LineType.format($0.height) }) ? first.height : nil, tip: "Height of capital letters in drawing units") { [weak self] v in
             guard v > 0 else { NSSound.beep(); return }
             self?.edit("Change Text Height", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.height = v; return c }
         }
@@ -2509,7 +2534,7 @@ final class PropertiesPanelView: NSView {
             self?.edit("Underline Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.underline = on; return c }
         }
         addNumber("Width", same({ $0.boxWidth.map { LineType.format($0) } ?? "-" }) ? (first.boxWidth ?? 0) : nil,
-                  tip: "Paragraph width – longer lines wrap. 0 = no wrapping") { [weak self] v in
+                  tip: "Paragraph width in drawing units – longer lines wrap. 0 = no wrapping") { [weak self] v in
             self?.edit("Text Width", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.boxWidth = v > 0 ? v : nil; return c }
         }
         if texts.count == 1 {
@@ -2599,7 +2624,7 @@ final class PropertiesPanelView: NSView {
         layers.controlSize = .small
         layers.font = NSFont.systemFont(ofSize: 11)
         let hidden = viewport.frozenLayers
-        layers.addItem(withTitle: hidden.isEmpty ? "All layers shown" : "\(hidden.count) layer(s) hidden")
+        layers.addItem(withTitle: hidden.isEmpty ? "All layers shown" : "\(hidden.count) layer\(hidden.count == 1 ? "" : "s") hidden")
         for name in modelLayerNames?() ?? [] {
             layers.addItem(withTitle: name)
             layers.lastItem?.state = hidden.contains(name) ? .off : .on
@@ -2999,9 +3024,9 @@ final class StatusBarView: NSView {
         separator()
 
         // display: LWT (the value box at the cursor no longer has a toggle – typing values always works)
-        lineWeightButton = toggle("LWT", "Show lineweights\nShortcut: ⌥5 · ⌘⇧L", #selector(lineWeightClicked))
+        lineWeightButton = toggle("LWT", "Show lineweights\nShortcut: ⌥5 · ⇧⌘L", #selector(lineWeightClicked))
         askToCloseButton = toggle("CLS", "Ask whether to close polylines and splines when you finish them\nShortcut: ⌥4", #selector(askToCloseClicked))
-        lineContinueButton = toggle("LNC", "Continuous lines – each new line starts at the end of the previous one (separate lines, not a polyline); works also while drawing\nShortcut: ⌥7 · in the Line tool also the Line key (L) again", #selector(lineContinueClicked))
+        lineContinueButton = toggle("LNC", "Continuous lines – each new line starts at the end of the previous one (separate lines, not a polyline); works also while drawing\nShortcut: ⌥7 · in the Line tool also the Line key (\(DrawingTool.line.shortcut ?? "–")) again", #selector(lineContinueClicked))
         fkeysButton = toggle("FNK", "", #selector(fkeysClicked))
         setFunctionKeysState(nil)
         separator()
@@ -3183,7 +3208,7 @@ final class StatusBarView: NSView {
         let state: String
         switch standard {
         case true?: state = "ON – the top row sends F1, F2… (F3, F7–F10 and F12 work directly)."
-        case false?: state = "OFF – the top row controls brightness, volume…; hold fn (🌐) for F1, F2…"
+        case false?: state = "OFF – the top row controls brightness, volume…; hold fn (Globe) for F1, F2…"
         case nil: state = "unknown"
         }
         fkeysButton.toolTip = """

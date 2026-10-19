@@ -236,6 +236,8 @@ nonisolated struct EntityRecord: Codable {
     var lineWeight: CGFloat?
     /// Draw order (pseudo Z), nil = 0.
     var drawOrder: Int?
+    /// The group the object belongs to.
+    var group: UUID?
 
     // geometry
     /// point elevation (m, Bpv)
@@ -298,6 +300,11 @@ nonisolated struct EntityRecord: Codable {
     // dimension: terminator (arrow, oblique…) and the fixed direction of a linear dimension (radians)
     var arrowStyle: String?
     var dimAngle: CGFloat?
+
+    // image / PDF underlay: points = lower-left, lower-right and upper-left corner, kind = "pdf", text = file name
+    var imageData: Data?
+    var page: Int?
+    var opacity: CGFloat?
 
     init(type: String) {
         self.type = type
@@ -404,6 +411,17 @@ enum NativeEntityCoder {
             r.scaleModel = viewport.scale.model
             r.hiddenLayers = viewport.frozenLayers.isEmpty ? nil : viewport.frozenLayers.sorted()
             r.locked = viewport.isLocked ? true : nil
+        case let image as ImageEntity:
+            r = EntityRecord(type: "image")
+            r.points = [image.origin, image.xCorner, image.yCorner]
+            r.imageData = image.data
+            r.kind = image.isPDF ? "pdf" : nil
+            r.page = image.isPDF ? image.page : nil
+            r.text = image.fileName
+            r.opacity = image.opacity == 1 ? nil : image.opacity
+        case let wipeout as WipeoutEntity:
+            r = EntityRecord(type: "wipeout")
+            r.points = wipeout.vertices
         default:
             return nil
         }
@@ -411,6 +429,7 @@ enum NativeEntityCoder {
         r.color = entity.color.map { RGBARecord($0) }
         r.lineWeight = entity.lineWeight
         r.drawOrder = entity.drawOrder == 0 ? nil : entity.drawOrder
+        r.group = entity.groupID
         return r
     }
 
@@ -423,6 +442,15 @@ enum NativeEntityCoder {
         case "point":
             guard let position = r.center else { return nil }
             entity = SurveyPoint(position: position, z: r.z, number: r.text ?? "", code: r.kind ?? "", layer: layer, color: color)
+        case "image":
+            guard let corners = r.points, corners.count == 3, let data = r.imageData, !data.isEmpty else { return nil }
+            let image = ImageEntity(data: data, isPDF: r.kind == "pdf", page: max(r.page ?? 1, 1), fileName: r.text ?? "",
+                                    origin: corners[0], xCorner: corners[1], yCorner: corners[2], layer: layer, color: color)
+            image.opacity = min(max(r.opacity ?? 1, 0.05), 1)
+            entity = image
+        case "wipeout":
+            guard let corners = r.points, corners.count >= 3 else { return nil }
+            entity = WipeoutEntity(vertices: corners, layer: layer, color: color)
         case "xline":
             guard let point = r.center, let angle = r.angle else { return nil }
             entity = ConstructionLine(point: point, angle: angle, isRay: r.ray ?? false, layer: layer, color: color)
@@ -500,6 +528,7 @@ enum NativeEntityCoder {
         }
         entity?.lineWeight = r.lineWeight
         entity?.drawOrder = r.drawOrder ?? 0
+        entity?.groupID = r.group
         return entity
     }
 }

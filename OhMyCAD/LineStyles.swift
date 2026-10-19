@@ -323,7 +323,7 @@ enum LineWeightDialog {
             if let value = ExpressionEvaluator.evaluate(field.stringValue), value >= 0, value <= 5 {
                 return LineWeights.addCustom(CGFloat(value))
             }
-            alert.informativeText = "“\(field.stringValue)” is not a valid weight – enter a number between 0 and 5 mm."
+            alert.informativeText = "“\(field.stringValue)” is not a valid lineweight – enter a number between 0 and 5 mm."
             NSSound.beep()
         }
         return nil

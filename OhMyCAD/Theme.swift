@@ -21,6 +21,7 @@ enum Theme {
 
     // MARK: Backgrounds
 
+    static let windowBackground = NSColor.darkGray  // main window behind the panels
     static let listBackground = gray(0.12)          // layer list
     static let panelBackground = gray(0.15)         // layer, properties and Info panels, docked panel
     static let toolbarBackground = gray(0.17)       // tool panel
@@ -60,10 +61,11 @@ enum Theme {
     static let textMuted = gray(0.65)               // unselected tab name, dynamic input labels
     static let textNote = gray(0.60)
     static let textInfoCaption = gray(0.58)         // labels in the Info panel
-    static let textCaption = gray(0.55)             // group and section headings, summaries
-    static let textDimmed = gray(0.50)              // hidden layer, non-plotting layer
+    static let textHeading = gray(0.62)             // toolbar group and Properties section headings
+    static let textCaption = gray(0.55)             // summaries
+    static let textDimmed = gray(0.56)              // hidden layer, non-plotting layer
     static let stripSeparator = gray(0.45)
-    static let iconOff = gray(0.40)                 // layer icon when off
+    static let iconOff = gray(0.48)                 // layer icon when off
 
     // MARK: Drawing area
 
@@ -109,6 +111,7 @@ enum Theme {
 
     static let splashBackground = NSColor(srgbRed: 0.114, green: 0.114, blue: 0.137, alpha: 1)
     static let splashBorder = gray(1, 0.08)
+    static let splashTitle = gray(1)                // app name
     static let splashVersion = gray(1, 0.5)
     static let splashText = gray(1, 0.68)
 }

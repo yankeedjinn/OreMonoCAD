@@ -153,7 +153,7 @@ enum AppSettings {
 
     // MARK: Object snap (SNAP)
 
-    /// After the set of snap points changes (SNAP popup, Settings, menu View › Snap Points).
+    /// After the set of snap points changes (SNAP popup, Settings, menu View › Drawing Aids › Snap Points).
     static let snapsDidChange = Notification.Name("OhMyCADSnapsDidChange")
 
     /// Enabled kinds of snap points.
@@ -231,7 +231,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         valueBoxCheck?.state = AppSettings.valueBoxAlways ? .on : .off
         textStyleLabel.stringValue = textStyleSummary?() ?? ""
         dimStyleLabel.stringValue = "\(AppSettings.dimArrowStyle.title) · text \(LineType.format(AppSettings.dimTextHeightMM)) mm"
-            + " · ends \(LineType.format(AppSettings.dimArrowSizeMM)) mm on paper · \(AppSettings.dimDecimals) decimal(s)"
+            + " · ends \(LineType.format(AppSettings.dimArrowSizeMM)) mm on paper · \(AppSettings.dimDecimals) decimal\(AppSettings.dimDecimals == 1 ? "" : "s")"
         shortcutsPane?.reload()
         snapPane?.reload()
     }
@@ -286,7 +286,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.valueBoxCheck = valueBoxCheck
         let general = pane([
             check("Show the welcome screen at launch", AppSettings.showWelcomeScreen,
-                  tip: "The window with New / Open / Open Recent when OhMyCAD starts") { AppSettings.showWelcomeScreen = $0 },
+                  tip: "The window with New Drawing / Open File… / Open Recent when OhMyCAD starts") { AppSettings.showWelcomeScreen = $0 },
             check("Repeat the last tool with ↩, Space or right-click", AppSettings.repeatLastTool,
                   tip: "Only when the Select tool is active and nothing is in progress") { AppSettings.repeatLastTool = $0 },
             check("Smooth lines and text (antialiasing)", AppSettings.smoothLines,
@@ -387,7 +387,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             NSTextField(labelWithString: "Default style of new text:"),
             textStyleLabel,
             editStyle,
-            note("Used by the Text tool. Every text can still get its own font, typeface and size with the ☰ menu next to it."),
+            note("Used by the Text tool. Every text can still get its own font, typeface and height with the ☰ menu next to it."),
             separator(),
             NSTextField(labelWithString: "Default style of new dimensions:"),
             dimStyleLabel,
@@ -550,7 +550,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 // MARK: - Snap point selection (SNAP popup and the Settings tab)
 
 /// Checkboxes for snap point kinds. A change is saved immediately (AppSettings.enabledSnaps)
-/// and takes effect everywhere – in the SNAP popup, in Settings and in the menu View › Snap Points.
+/// and takes effect everywhere – in the SNAP popup, in Settings and in the menu View › Drawing Aids › Snap Points.
 final class SnapSettingsPanel: NSViewController {
     /// Called after a change; true = something was turned on (SNAP is then turned on if it is off).
     var onChange: ((Bool) -> Void)?
@@ -567,7 +567,7 @@ final class SnapSettingsPanel: NSViewController {
     }
 
     override func loadView() {
-        let title = NSTextField(labelWithString: compact ? "Snap points" : "Object snap – which points SNAP finds:")
+        let title = NSTextField(labelWithString: compact ? "Snap points" : "Object snap – which points Snap finds:")
         title.font = NSFont.systemFont(ofSize: compact ? 12 : 13, weight: .semibold)
 
         var cells: [[NSView]] = []
@@ -609,8 +609,8 @@ final class SnapSettingsPanel: NSViewController {
         buttons.spacing = 6
 
         let hint = NSTextField(wrappingLabelWithString: compact
-            ? "SNAP (⌥3, F3) turns snapping on and off · hover for a description"
-            : "SNAP in the status bar (⌥3, F3) turns snapping on and off; right-click it (or click ▾ next to it) for this list. Extension: hover over the end of a line, then move along its direction. Perpendicular and Tangent work from the previous point.")
+            ? "Snap (⌥3, F3) turns snapping on and off · hover for a description"
+            : "Snap in the status bar (⌥3, F3) turns snapping on and off; right-click it (or click ▾ next to it) for this list. Extension: hover over the end of a line, then move along its direction. Perpendicular and Tangent work from the previous point.")
         hint.font = NSFont.systemFont(ofSize: compact ? 10 : 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = compact ? 300 : 520

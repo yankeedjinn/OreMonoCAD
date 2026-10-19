@@ -24,6 +24,7 @@ final class HatchEntity: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     /// Loops: the first is the outer boundary, the rest are islands (filled even-odd).
     var loops: [[CGPoint]]
     var pattern: HatchPattern

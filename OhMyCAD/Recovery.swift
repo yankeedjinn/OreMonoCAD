@@ -250,7 +250,7 @@ enum RecoveryText {
 
     static func line(for entry: AutoSaveEntry) -> String {
         let manifest = entry.manifest
-        var text = "\u{2022} \(manifest.title) \u{2013} \(manifest.objectCount) object(s), saved \(describe(manifest.savedAt))"
+        var text = "\u{2022} \(manifest.title) \u{2013} \(manifest.objectCount) object\(manifest.objectCount == 1 ? "" : "s"), saved \(describe(manifest.savedAt))"
         if let path = manifest.originalPath {
             text += "\n   from \(abbreviate(path))"
         } else {

@@ -68,9 +68,10 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             Row(key: "Esc", action: "Cancel the current step; again = back to Select"),
             Row(key: "0–9 . -", action: "Start typing a value (length, radius, angle…)"),
             Row(key: "Tab", action: "Jump into the value box at the cursor"),
-            Row(key: "⌫", action: "Remove the last point (Polyline, Spline, Leader, Area); in Select delete"),
-            Row(key: "C", action: "Close (Polyline, Spline, continuous lines)"),
+            Row(key: "⌫", action: "Remove the last point (Polyline, Spline, Wall, Leader, Revision Cloud, Wipeout, Area); in Select delete"),
+            Row(key: "C", action: "Close (Polyline, Spline, Wall, Revision Cloud, Wipeout, continuous lines)"),
             Row(key: DrawingTool.line.shortcut ?? "–", action: "In the Line tool: continuous lines (LNC) on / off"),
+            Row(key: "Letters", action: "Options of the current tool, shown in the bottom line (I / C / E, H / V / A / B, T, J…) – without Shift; ⇧ + letter switches the tool"),
             Row(key: "Y / N", action: "Answer a question (Mirror, Close?)"),
             Row(key: "Shift (hold)", action: "Ortho while moving the mouse")
         ]))

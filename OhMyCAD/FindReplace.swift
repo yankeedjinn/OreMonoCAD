@@ -242,7 +242,7 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
         replaceButton.toolTip = "Replaces in the rows selected in the list"
         content.addSubview(replaceButton)
 
-        let hint = NSTextField(labelWithString: "Click a row to show it in the drawing · ⌘-click or ⇧-click selects more rows")
+        let hint = NSTextField(labelWithString: "Click a row to show it in the drawing · ⌘-click or Shift-click selects more rows")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.frame = NSRect(x: margin, y: y - 30, width: replaceButton.frame.minX - margin - 8, height: 16)

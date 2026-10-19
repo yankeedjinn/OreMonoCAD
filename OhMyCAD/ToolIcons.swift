@@ -158,6 +158,11 @@ enum ToolIcons {
             p.line(3, 3, 8, 8)
             p.arrowhead(8.6, 8.6, 0.707, 0.707)
             p.dot(9, 9)
+        case .image:
+            // a picture frame with mountains and the sun
+            p.rect(3, 4.5, 18, 15)
+            p.polyline([(3, 8), (9, 14), (13, 10), (15.5, 12.5), (21, 7)])
+            p.circle(16, 15.5, 1.8)
         case .xref:
             // sheet with a folded corner and a paper clip (reference to another drawing)
             p.polyline([(5, 3), (5, 21), (15, 21), (19, 17), (19, 3)], closed: true)
@@ -183,6 +188,11 @@ enum ToolIcons {
             p.dot(4, 8)
             p.dot(12, 12)
             p.dot(20, 16)
+        case .wall:
+            // an L-shaped wall: both faces with the mitered corner, the clicked line dashed inside
+            p.polyline([(3, 21), (3, 3), (21, 3), (21, 8), (8, 8), (8, 21)], closed: true)
+            p.polyline([(5.5, 21), (5.5, 5.5), (21, 5.5)], dashed: true)
+            p.dot(5.5, 5.5)
         case .hatch:
             p.rect(4.5, 4.5, 15, 15)
             p.line(14.5, 4.5, 19.5, 9.5)
@@ -261,6 +271,9 @@ enum ToolIcons {
             p.polyline([(11.6, 13.2), (8.6, 10.6), (4, 4), (10.6, 8.6), (13.2, 11.6)], closed: true)
             p.line(3.5, 20.5, 10, 20.5)
             p.line(3.5, 16.5, 7, 16.5, dashed: true)
+        case .filter:
+            // a funnel – only some objects get through
+            p.polyline([(3.5, 19.5), (20.5, 19.5), (14, 11.5), (14, 5.5), (10, 3.5), (10, 11.5)], closed: true)
         case .join:
             // two pieces joining at one point
             p.line(3.5, 4.5, 10.4, 14.6)
@@ -347,6 +360,18 @@ enum ToolIcons {
             p.line(14.5, 12, 19, 12)
         case .text:
             drawText(.simple, p)
+        case .scaleBar:
+            // a bar of alternating black and white parts with ticks for the labels
+            p.rect(2.5, 9, 19, 4.5)
+            p.fill(2.5, 9, 4.75, 4.5)
+            p.fill(12, 9, 4.75, 4.5)
+            p.line(2.5, 16, 2.5, 18.5)
+            p.line(12, 16, 12, 18.5)
+            p.line(21.5, 16, 21.5, 18.5)
+        case .northArrow:
+            // an arrowhead pointing up, its right half filled
+            p.polyline([(12, 21.5), (17, 3.5), (12, 8), (7, 3.5)], closed: true)
+            p.fillTriangle((12, 21.5), (17, 3.5), (12, 8))
         case .roomLabel:
             // a room with its name and, below it, the area
             p.rect(3, 3, 18, 18)
@@ -354,6 +379,21 @@ enum ToolIcons {
             p.line(8.5, 9, 15.5, 9)
         case .revisionCloud:
             drawCloud([(4, 6), (20, 6), (20, 18), (4, 18)], step: 4, p)
+        case .wipeout:
+            // a hatched square with a clear (dashed) area in the middle holding a line of text
+            p.rect(3.5, 3.5, 17, 17)
+            p.line(3.5, 18.5, 5.5, 20.5)
+            p.line(3.5, 13.5, 10.5, 20.5)
+            p.line(3.5, 8.5, 6.5, 11.5)
+            p.line(10, 15, 15.5, 20.5)
+            p.line(3.5, 3.5, 9, 9)
+            p.line(15, 15, 20.5, 20.5)
+            p.line(8.5, 3.5, 14, 9)
+            p.line(17.5, 12.5, 20.5, 15.5)
+            p.line(13.5, 3.5, 20.5, 10.5)
+            p.line(18.5, 3.5, 20.5, 5.5)
+            p.rect(6.5, 9, 11, 6, dashed: true)
+            p.line(9, 12, 15, 12)
         case .hatchRebuild:
             // hatched “L” shape and a circular arrow (new boundary)
             p.polyline([(3, 3), (14, 3), (14, 8), (8, 8), (8, 14), (3, 14)], closed: true)

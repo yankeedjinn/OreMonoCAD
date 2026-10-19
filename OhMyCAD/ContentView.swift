@@ -189,7 +189,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func setupUI() {
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.darkGray.cgColor
+        view.layer?.backgroundColor = Theme.windowBackground.cgColor
         let b = view.bounds
         let middleHeight = b.height - toolbarHeight - statusBarHeight
 
@@ -1434,6 +1434,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case .zoomExtents: zoomExtents(); return
         case .zoomSelected: zoomSelected(nil); return
         case .zoomWindow: zoomWindow(nil); return
+        // Filter is a dialog – it ends in the Select tool with the found objects selected
+        case .filter: filterObjects(nil); return
         default: break
         }
         // External Reference: first the file, then the insertion point
@@ -1442,6 +1444,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         xrefReady = false
+        // Image or PDF: first the file, then the corner
+        if tool == .image && editorView.pendingImage == nil {
+            attachImage(nil)
+            return
+        }
+        if tool != .image { editorView.pendingImage = nil }
         if tool != currentTool { Log.info("Tool: \(tool.title)") }
         currentTool = tool
         editorView.currentTool = tool
@@ -1561,7 +1569,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 item.target = self
                 item.representedObject = definition.name
                 item.image = BlockPreview.image(of: definition, size: 18)
-                item.subtitle = definition.source.map { "External reference · \($0.fileName)" } ?? "\(definition.entities.count) object(s)"
+                item.subtitle = definition.source.map { "External reference · \($0.fileName)" } ?? "\(definition.entities.count) object\(definition.entities.count == 1 ? "" : "s")"
                 menu.addItem(item)
             }
             return
@@ -1628,7 +1636,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         let entity = editorView.makeText(result.text, at: point, boxWidth: result.boxWidth)
         apply(result, to: entity)
-        applyChange(removed: [], added: [entity], actionName: "Text")
+        applyChange(removed: [], added: [entity], actionName: "Add Text")
         view.window?.makeFirstResponder(editorView)
     }
 
@@ -1678,7 +1686,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     func toolbarDidSelectXLineKind(_ kind: XLineKind) {
         if kind == .angle {
-            guard let degrees = askAngle(title: "Construction Lines at an Angle",
+            guard let degrees = askAngle(title: "Construction Line – Angle",
                                          message: "Angle in degrees from the X axis of the drawing coordinates (counter-clockwise).",
                                          initial: editorView.xlineAngle) else { return }
             editorView.xlineAngle = degrees
@@ -1726,7 +1734,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let decimals = NSTextField(string: "\(AppSettings.dimDecimals)")
         for field in [height, size, decimals] { field.widthAnchor.constraint(equalToConstant: 70).isActive = true }
         let selected = selectionManager.getSelectedEntities(from: document.getAllEntities()).compactMap { $0 as? DimensionEntity }
-        let applyToSelection = NSButton(checkboxWithTitle: "Change also the \(selected.count) selected dimension(s)", target: nil, action: nil)
+        let applyToSelection = NSButton(checkboxWithTitle: "Change also the \(selected.count) selected dimension\(selected.count == 1 ? "" : "s")", target: nil, action: nil)
         applyToSelection.state = selected.isEmpty ? .off : .on
         applyToSelection.isEnabled = !selected.isEmpty
         func unit(_ text: String) -> NSTextField {
@@ -1841,7 +1849,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func showBlockManager(_ sender: Any?) {
         guard let window = view.window, window.attachedSheet == nil else { return }
         if let session = activeTab.blockEdit {
-            statusBar.showMessage("Finish editing the block \u{201C}\(session.definition.name)\u{201D} first (Save Block or Discard)")
+            statusBar.showMessage("Finish editing the block \u{201C}\(session.definition.name)\u{201D} first (Save Block Changes or Discard Block Changes)")
             NSSound.beep()
             return
         }
@@ -1885,7 +1893,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 return
             }
             if let current = self.currentFileURL, current.standardizedFileURL.path == url.standardizedFileURL.path {
-                self.statusBar.showMessage("A drawing can't be attached to itself.")
+                self.statusBar.showMessage("A drawing cannot be attached to itself.")
                 NSSound.beep()
                 return
             }
@@ -1912,7 +1920,96 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             library.add(definition)
             self.hasUnsavedChanges = true
             self.insertBlock(definition)
-            self.statusBar.showMessage("External reference “\(definition.name)” – \(definition.entities.count) object(s). Click where its origin (0,0) goes.")
+            self.statusBar.showMessage("External reference “\(definition.name)” – \(definition.entities.count) object\(definition.entities.count == 1 ? "" : "s"). Click where its origin (0,0) goes.")
+        }
+    }
+
+    // MARK: Image or PDF underlay (ImageUnderlay.swift)
+
+    /// Insert › Attach Image or PDF…: a scan, photo, map or PDF page to trace over (stored inside the drawing).
+    @objc func attachImage(_ sender: Any?) {
+        guard let window = view.window, window.attachedSheet == nil else { return }
+        editorView.cancelCurrentOperation()
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .pdf]
+        panel.message = "Choose a scan, photo, map or PDF to trace over – it is stored inside the drawing"
+        panel.prompt = "Attach"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            guard response == .OK, let url = panel.url else {
+                if self.currentTool == .image { self.selectTool(.select) }
+                return
+            }
+            self.prepareImage(from: url)
+        }
+    }
+
+    /// Reads the chosen file, asks for its scale (and the page of a PDF) and lets the user click where it goes.
+    private func prepareImage(from url: URL) {
+        let name = url.lastPathComponent
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+            showImageProblem("“\(name)” could not be read.")
+            return
+        }
+        guard data.count <= ImageSource.maximumFileMB * 1_000_000 else {
+            showImageProblem("“\(name)” is larger than \(ImageSource.maximumFileMB) MB. The file is stored inside the drawing – "
+                             + "make it smaller first (e.g. a lower resolution or only the page you need).")
+            return
+        }
+        let pages = ImageSource.pageCount(of: data)
+        guard let options = askImageOptions(fileName: name, pages: pages) else {
+            if currentTool == .image { selectTool(.select) }
+            return
+        }
+        guard let source = ImageSource.load(data: data, fileName: name, page: options.page, scale: options.scale) else {
+            showImageProblem("“\(name)” is not an image or a PDF that can be read.")
+            return
+        }
+        editorView.pendingImage = source
+        selectTool(.image)
+        view.window?.makeFirstResponder(editorView)
+        statusBar.setPrompt(editorView.prompt)
+    }
+
+    /// The scale the picture is drawn at and, for a PDF with more pages, which page. nil = Cancel.
+    private func askImageOptions(fileName: String, pages: Int) -> (scale: DrawingScale, page: Int)? {
+        let alert = NSAlert()
+        alert.messageText = "Attach “\(fileName)”"
+        alert.informativeText = "The scale it is drawn at – its size in the drawing is the paper size × this scale"
+            + " (a scan of a 1:1000 map → 1:1000; a photo or a picture without a scale – leave it and fit it with Scale)."
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        let scaleField = NSTextField(string: editorView.drawingScale.title)
+        scaleField.placeholderString = "1:100"
+        let pageField = NSTextField(string: "1")
+        var rows: [[NSView]] = [[NSTextField(labelWithString: "Scale:"), scaleField]]
+        if pages > 1 { rows.append([NSTextField(labelWithString: "Page (1–\(pages)):"), pageField]) }
+        for field in [scaleField, pageField] { field.widthAnchor.constraint(equalToConstant: 120).isActive = true }
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 6
+        grid.frame.size = grid.fittingSize
+        alert.accessoryView = grid
+        alert.window.initialFirstResponder = scaleField
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let page = Int(pageField.stringValue.trimmingCharacters(in: .whitespaces)) ?? 0
+        guard let scale = PlotDialog.parseScale(scaleField.stringValue), pages <= 1 || (1...pages).contains(page) else {
+            NSSound.beep()
+            statusBar.showMessage("Not attached – type the scale as 1:100 (or just 100)" + (pages > 1 ? " and a page from 1 to \(pages)" : ""))
+            return nil
+        }
+        return (scale, pages > 1 ? page : 1)
+    }
+
+    private func showImageProblem(_ text: String) {
+        if currentTool == .image { selectTool(.select) }
+        let alert = NSAlert()
+        alert.messageText = "The image or PDF cannot be attached"
+        alert.informativeText = text
+        alert.alertStyle = .warning
+        if let window = view.window, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
         }
     }
 
@@ -1982,6 +2079,55 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func bringForward(_ sender: Any?) { changeDrawOrder("Bring Forward") { order, _, _ in order + 1 } }
     @objc func sendBackward(_ sender: Any?) { changeDrawOrder("Send Backward") { order, _, _ in order - 1 } }
 
+    // MARK: Groups (Groups.swift)
+
+    /// Edit › Group: the selected objects become one group (objects already in a group move to the new one).
+    @objc func groupSelection(_ sender: Any?) {
+        let selected = selectionManager.getSelectedEntities(from: document.getAllEntities())
+            .filter { !layerManager.isLayerLocked($0.layer) }
+        guard selected.count >= 2 else {
+            statusBar.showMessage("Select at least two objects to group them.")
+            NSSound.beep()
+            return
+        }
+        let group = UUID()
+        editSelection(actionName: "Group") { entity in
+            let copy = entity.clone()
+            copy.groupID = group
+            return copy
+        }
+        statusBar.showMessage("Group of \(selected.count) objects – a click on one of them selects them all")
+    }
+
+    /// Edit › Ungroup: the selected objects leave their groups.
+    @objc func ungroupSelection(_ sender: Any?) {
+        let selected = selectionManager.getSelectedEntities(from: document.getAllEntities())
+        let grouped = selected.filter { $0.groupID != nil && !layerManager.isLayerLocked($0.layer) }
+        guard !grouped.isEmpty else {
+            statusBar.showMessage("The selected objects are not in a group.")
+            NSSound.beep()
+            return
+        }
+        let groupCount = Set(grouped.compactMap { $0.groupID }).count
+        let others = selected.filter { entity in !grouped.contains { $0 === entity } }
+        let freed = grouped.map { entity -> CADEntity in
+            let copy = entity.clone()
+            copy.groupID = nil
+            return copy
+        }
+        applyChange(removed: grouped, added: freed, actionName: "Ungroup", inheritsGroup: false)
+        selectionManager.select(others + freed)
+        statusBar.showMessage(groupCount == 1 ? "Group split into \(freed.count) objects" : "\(groupCount) groups split")
+        view.window?.makeFirstResponder(editorView)
+    }
+
+    /// Edit › Select Groups as a Whole – off, a click selects a single object of a group (to edit it alone).
+    @objc func toggleWholeGroups(_ sender: Any?) {
+        AppSettings.selectWholeGroups.toggle()
+        statusBar.showMessage(AppSettings.selectWholeGroups ? "A click on a grouped object selects the whole group"
+                                                            : "A click selects single objects, groups stay")
+    }
+
     func toolbarDidSelectArcMethod(_ method: ArcMethod) {
         editorView.arcMethod = method
         toolbarView.setArcMethod(method)
@@ -1992,10 +2138,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     // MARK: Document changes with Undo
 
-    func applyChange(removed: [CADEntity], added: [CADEntity], actionName: String) {
+    /// - Parameter inheritsGroup: false = new objects don't take over the group of the removed ones (Ungroup).
+    /// - Parameter inheritsDrawOrder: false = new objects keep their own draw order (edited copies, e.g. Draw Order set to 0).
+    func applyChange(removed: [CADEntity], added: [CADEntity], actionName: String, inheritsGroup: Bool = true,
+                     inheritsDrawOrder: Bool = true) {
         guard !removed.isEmpty || !added.isEmpty else { return }
+        // groups: new pieces stay in the group of their original, copies get a group of their own
+        Groups.adjust(added: added, removed: removed, documentEntities: document.getAllEntities(), inheritsGroup: inheritsGroup)
         // new pieces (Trim, Join…) inherit the draw order if all the original objects have the same one
-        if let order = removed.first?.drawOrder, order != 0, removed.allSatisfy({ $0.drawOrder == order }) {
+        if inheritsDrawOrder, let order = removed.first?.drawOrder, order != 0, removed.allSatisfy({ $0.drawOrder == order }) {
             for entity in added where entity.drawOrder == 0 { entity.drawOrder = order }
         }
         // associative dimensions move with the objects they are attached to
@@ -2042,7 +2193,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         let unchanged = selected.filter { entity in !removed.contains { $0 === entity } }
-        applyChange(removed: removed, added: added, actionName: actionName)
+        // the edited copies already carry their draw order – it must not be reset to the original one
+        applyChange(removed: removed, added: added, actionName: actionName, inheritsDrawOrder: false)
         selectionManager.select(unchanged + added)
         view.window?.makeFirstResponder(editorView)
     }
@@ -2066,13 +2218,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private func selectObjects(onLayer name: String) {
         guard let layer = layerManager.getAllLayers().first(where: { $0.name == name }) else { return }
         guard layer.isVisible, !layer.isLocked else {
-            statusBar.showMessage("Layer “\(name)” is \(layer.isVisible ? "locked" : "hidden") – its objects can't be selected.")
+            statusBar.showMessage("Layer “\(name)” is \(layer.isVisible ? "locked" : "hidden") – its objects cannot be selected.")
             return
         }
         if currentTool != .select { selectTool(.select) }
         let objects = document.getAllEntities().filter { $0.layer == name }
         selectionManager.select(objects)
-        statusBar.showMessage("Selected \(objects.count) object(s) on layer “\(name)”")
+        statusBar.showMessage("Selected \(objects.count) object\(objects.count == 1 ? "" : "s") on layer “\(name)”")
         view.window?.makeFirstResponder(editorView)
     }
 
@@ -2109,7 +2261,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         let count = activeTab.allDocuments.reduce(0) { $0 + $1.getAllEntities().filter { $0.layer == name }.count }
         if count > 0 {
-            statusBar.showMessage("Layer \(name) contains \(count) object(s) – move or delete them first.")
+            statusBar.showMessage("Layer \(name) contains \(count) object\(count == 1 ? "" : "s") – move or delete them first.")
             return
         }
         layerManager.removeLayer(name)
@@ -2257,10 +2409,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             editorView.needsDisplay = true
             refreshPanels()
 
-            var message = "Imported \(entities.count) object(s) from \(url.lastPathComponent)\(note)"
-            if newLayers > 0 { message += " · \(newLayers) new layer(s)" }
+            var message = "Imported \(entities.count) object\(entities.count == 1 ? "" : "s") from \(url.lastPathComponent)\(note)"
+            if newLayers > 0 { message += " · \(newLayers) new layer\(newLayers == 1 ? "" : "s")" }
             if !skipped.isEmpty {
-                message += " · not supported: " + skipped.keys.sorted().map { "\($0) ×\(skipped[$0]!)" }.joined(separator: ", ")
+                message += " · not supported yet: " + skipped.keys.sorted().map { "\($0) ×\(skipped[$0]!)" }.joined(separator: ", ")
             }
             statusBar.showMessage(message)
         } catch {
@@ -2474,7 +2626,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             }
             editorView.viewport.zoomToFit(entities: document.getAllEntities())
 
-            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object(s)"
+            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object\(result.entities.count == 1 ? "" : "s")"
             if !result.skippedEntityTypes.isEmpty {
                 let skipped = result.skippedEntityTypes.keys.sorted()
                     .map { "\($0) ×\(result.skippedEntityTypes[$0]!)" }
@@ -2500,7 +2652,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             // external references: objects from their files
             let missing = result.blocks.xrefs.filter { !result.blocks.reload($0) }
             if !missing.isEmpty {
-                statusBar.showMessage("External reference(s) not loaded: " + missing.map { $0.name }.joined(separator: ", ")
+                statusBar.showMessage("External reference\(missing.count == 1 ? "" : "s") not loaded: " + missing.map { $0.name }.joined(separator: ", ")
                                       + " – Block Manager › Browse… finds them")
             }
             applySettings(result.settings)
@@ -2521,7 +2673,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             editorView.needsDisplay = true
             if let active = result.activeLayout { activateSpace(active) }
 
-            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object(s)"
+            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object\(result.entities.count == 1 ? "" : "s")"
             if !result.skippedEntityTypes.isEmpty {
                 let skipped = result.skippedEntityTypes.keys.sorted()
                     .map { "\($0) ×\(result.skippedEntityTypes[$0]!)" }
@@ -2793,7 +2945,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         if let layout = layout { layout.plotSettings = settings } else { tab.modelPlotSettings = settings }
     }
 
-    /// File › Print… / Export PDF… / Export Image… – all through the Plot dialog.
+    /// File › Plot / Print… / Export PDF… / Export Image… – all through the Plot dialog.
     @objc func printDrawing(_ sender: Any?) {
         showPlotDialog(device: nil)
     }
@@ -2881,7 +3033,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
                 statusBar.showMessage("Sent to \(settings.printerName ?? "the printer")")
             } catch {
-                showError(title: "Plot Failed", error: error)
+                showError(title: "Error Plotting", error: error)
             }
             return
         }
@@ -2903,7 +3055,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                     self.statusBar.showMessage("Saved \(url.lastPathComponent)")
                 }
             } catch {
-                self.showError(title: "Plot Failed", error: error)
+                self.showError(title: "Error Plotting", error: error)
             }
         }
     }
@@ -3110,7 +3262,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let layout = tab.layouts[index]
         let alert = NSAlert()
         alert.messageText = "Delete the layout “\(layout.name)”?"
-        alert.informativeText = "Everything drawn on this sheet is deleted. The model stays as it is. This can't be undone."
+        alert.informativeText = "Everything drawn on this sheet is deleted. The model stays as it is. This cannot be undone."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
@@ -3174,7 +3326,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             .filter { !layerManager.isLayerLocked($0.layer) }
         guard !selected.isEmpty else { return }
         applyChange(removed: selected, added: [], actionName: "Delete")
-        statusBar.showMessage("\(selected.count) object(s) deleted")
+        statusBar.showMessage("\(selected.count) object\(selected.count == 1 ? "" : "s") deleted")
     }
 
     // MARK: Menu – clipboard (Cut / Copy / Paste between drawings, Clipboard.swift)
@@ -3261,8 +3413,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
         let count = content.entities.count
         var message = "Pasted \(count) object\(count == 1 ? "" : "s")"
-        if !content.newLayers.isEmpty { message += " · \(content.newLayers.count) new layer(s)" }
-        if !content.newBlocks.isEmpty { message += " · \(content.newBlocks.count) new block(s)" }
+        if !content.newLayers.isEmpty { message += " · \(content.newLayers.count) new layer\(content.newLayers.count == 1 ? "" : "s")" }
+        if !content.newBlocks.isEmpty { message += " · \(content.newBlocks.count) new block\(content.newBlocks.count == 1 ? "" : "s")" }
         if content.skipped > 0 { message += " · \(content.skipped) skipped (viewports only on a layout, no block inside itself)" }
         statusBar.showMessage(message)
     }
@@ -3295,6 +3447,33 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.showMessage("Select Similar: \(added) more object\(added == 1 ? "" : "s") with the same "
                               + SelectSimilar.describe(properties) + " · Edit › Select Similar Matches changes what must match")
         editorView.needsDisplay = true
+    }
+
+    /// Edit › Filter… (⇧S on the drawing area): selects the objects that match the ticked properties (Filter.swift) –
+    /// in the open space on visible and unlocked layers, or within the current selection.
+    @objc func filterObjects(_ sender: Any?) {
+        let all = document.getAllEntities()
+        let candidates = all.filter { layerManager.isLayerVisible($0.layer) && !layerManager.isLayerLocked($0.layer) }
+        let selected = selectionManager.getSelectedEntities(from: all)
+        guard !candidates.isEmpty || !selected.isEmpty else {
+            statusBar.showMessage("Filter: nothing to search – the drawing is empty or its layers are hidden or locked")
+            NSSound.beep()
+            return
+        }
+        guard let criteria = FilterDialog.run(candidates: candidates, selected: selected, layers: layerManager) else { return }
+        let searched = criteria.scope == .selection ? selected : candidates
+        let found = searched.filter { criteria.matches($0, layers: layerManager) }
+        guard !found.isEmpty else {
+            statusBar.showMessage("Filter: no object with " + criteria.summary + " – the selection stays as it was")
+            NSSound.beep()
+            return
+        }
+        editorView.cancelCurrentOperation()
+        if currentTool != .select { selectTool(.select) }
+        selectionManager.select(found)
+        editorView.needsDisplay = true
+        view.window?.makeFirstResponder(editorView)
+        statusBar.showMessage("Filter: selected \(found.count) object\(found.count == 1 ? "" : "s") with " + criteria.summary)
     }
 
     /// Edit › Find and Replace… (⌘F) – texts, labels and dimension texts in the open space.
@@ -3545,38 +3724,19 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return true
     }
 
+    /// Every toggle shows its ON / OFF message itself – the same from a key, the menu or the status line.
     private func toggleMode(_ key: ModeKey) {
-        let message: String
         switch key {
-        case .snap:
-            toggleSnap()
-            message = editorView.snapEnabled ? "Object snap ON" : "Object snap OFF"
-        case .askToClose:
-            toggleAskToClose()
-            message = editorView.askToClose ? "Ask to close ON" : "Ask to close OFF"
-        case .lineWeights:
-            toggleLineWeights()
-            message = editorView.showLineWeights ? "Lineweights ON" : "Lineweights OFF"
-        case .dynamicInput:
-            toggleDynamicInput()
-            message = editorView.valueBoxAlways ? "Value box: always at the cursor" : "Value box: only when you type a value"
-        case .lineContinue:
-            toggleLineContinue()
-            message = editorView.lineContinue ? "Continuous lines (LNC) ON" : "Continuous lines (LNC) OFF"
-        case .ortho:
-            toggleOrtho()
-            message = editorView.orthoEnabled ? "Ortho ON" : "Ortho OFF"
-        case .grid:
-            toggleGridSnap()
-            return
-        case .showGrid:
-            toggleGrid()
-            message = editorView.gridRenderer.showGrid ? "Grid ON" : "Grid OFF"
-        case .polar:
-            togglePolar()
-            return
+        case .snap: toggleSnap()
+        case .askToClose: toggleAskToClose()
+        case .lineWeights: toggleLineWeights()
+        case .dynamicInput: toggleDynamicInput()
+        case .lineContinue: toggleLineContinue()
+        case .ortho: toggleOrtho()
+        case .grid: toggleGridSnap()
+        case .showGrid: toggleGrid()
+        case .polar: togglePolar()
         }
-        statusBar.showMessage(message)
     }
 
     /// Does the top row send F1–F12? (a global macOS setting; nil = cannot be determined)
@@ -3593,7 +3753,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         alert.informativeText = """
         Whether the top row sends F1, F2… or controls brightness and volume is a macOS setting for the whole Mac – an app cannot switch it.
 
-        • Hold fn (🌐) and press the F-key, or
+        • Hold fn (Globe) and press the F-key, or
         • turn on “Use F1, F2, etc. keys as standard function keys” in System Settings › Keyboard › Keyboard Shortcuts… › Function Keys, or
         • use the shortcuts that always work in OhMyCAD: ⌥3 Snap · ⌥4 CLS · ⌥5 LWT · ⌥6 value box · ⌥7 LNC · ⌥8 Ortho · ⌥9 Grid snap · ⌥0 Polar.
 
@@ -3679,27 +3839,33 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func toggleGrid() {
         editorView.gridRenderer.showGrid.toggle()
         editorView.needsDisplay = true
+        statusBar.showMessage(editorView.gridRenderer.showGrid ? "Show grid ON" : "Show grid OFF")
     }
 
     @objc func toggleSnap() {
         editorView.snapEnabled.toggle()
+        statusBar.showMessage(editorView.snapEnabled ? "Object snap ON" : "Object snap OFF")
     }
 
     @objc func toggleOrtho() {
         editorView.orthoEnabled.toggle()
+        statusBar.showMessage(editorView.orthoEnabled ? "Ortho ON" : "Ortho OFF")
     }
 
     /// The value box at the cursor: always / only while typing (⌥6, F12, View menu, Settings).
     @objc func toggleDynamicInput() {
         editorView.valueBoxAlways.toggle()
+        statusBar.showMessage(editorView.valueBoxAlways ? "Value box: always at the cursor" : "Value box: only when you type a value")
     }
 
     @objc func toggleAskToClose() {
         editorView.askToClose.toggle()
+        statusBar.showMessage(editorView.askToClose ? "Ask to close ON" : "Ask to close OFF")
     }
 
     @objc func toggleLineWeights() {
         editorView.showLineWeights.toggle()
+        statusBar.showMessage(editorView.showLineWeights ? "Lineweights ON" : "Lineweights OFF")
     }
 
     // MARK: App settings
@@ -3748,6 +3914,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.lineWeightOnScreen.toggle()
         if !editorView.showLineWeights { editorView.showLineWeights = true }
         updateModes()
+        statusBar.showMessage(editorView.lineWeightOnScreen ? "Lineweights fixed on screen ON" : "Lineweights fixed on screen OFF")
     }
 
     private func selectScale(_ scale: DrawingScale) {
@@ -3795,6 +3962,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func toggleLineContinue() {
         editorView.lineContinue.toggle()
         statusBar.setPrompt(editorView.prompt)
+        statusBar.showMessage(editorView.lineContinue ? "Continuous lines (LNC) ON" : "Continuous lines (LNC) OFF")
     }
 
     private func updateModes() {
@@ -3965,6 +4133,14 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return true
         case #selector(bringToFront(_:)), #selector(sendToBack(_:)), #selector(bringForward(_:)), #selector(sendBackward(_:)):
             return !selectionManager.isEmpty
+        case #selector(groupSelection(_:)):
+            return selectionManager.count >= 2
+        case #selector(ungroupSelection(_:)):
+            return !selectionManager.isEmpty
+                && selectionManager.getSelectedEntities(from: document.getAllEntities()).contains { $0.groupID != nil }
+        case #selector(toggleWholeGroups(_:)):
+            menuItem.state = AppSettings.selectWholeGroups ? .on : .off
+            return true
         case #selector(toggleSnapType(_:)):
             let enabled = SnapType.allCases.contains {
                 $0.rawValue == menuItem.representedObject as? String && editorView.snapManager.enabledSnaps.contains($0)
@@ -4080,12 +4256,21 @@ extension MainViewController {
             menuItem.representedObject = property.rawValue
             menuItem.toolTip = property.detail
         }
+        item(editMenu, "Filter…", #selector(filterObjects(_:)), modifiers: [], target: self)
+            .toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text."
         editMenu.addItem(.separator())
         let orderMenu = submenu("Draw Order", in: editMenu)
         item(orderMenu, "Bring to Front", #selector(bringToFront(_:)), "f", modifiers: [.command, .shift], target: self)
         item(orderMenu, "Bring Forward", #selector(bringForward(_:)), "f", modifiers: [.command, .shift, .option], target: self)
         item(orderMenu, "Send Backward", #selector(sendBackward(_:)), "b", modifiers: [.command, .shift, .option], target: self)
         item(orderMenu, "Send to Back", #selector(sendToBack(_:)), "b", modifiers: [.command, .shift], target: self)
+        editMenu.addItem(.separator())
+        item(editMenu, "Group", #selector(groupSelection(_:)), "g", modifiers: [.command, .option], target: self)
+            .toolTip = "The selected objects become one group – a click on one of them selects them all."
+        item(editMenu, "Ungroup", #selector(ungroupSelection(_:)), "g", modifiers: [.command, .option, .shift], target: self)
+            .toolTip = "The selected groups fall apart into separate objects."
+        item(editMenu, "Select Groups as a Whole", #selector(toggleWholeGroups(_:)), modifiers: [], target: self)
+            .toolTip = "Off = a click selects a single object of a group, e.g. to edit it alone."
 
         // Tools – by group, the shortcuts work on the drawing area
         let toolsMenu = submenu("Tools")
@@ -4136,6 +4321,9 @@ extension MainViewController {
         let attach = item(insertMenu, "Attach External Reference…", #selector(attachXref(_:)), modifiers: [], target: self)
         attach.image = DrawingTool.xref.icon(pointSize: 13)
         item(insertMenu, "Reload External References", #selector(reloadXrefs(_:)), modifiers: [], target: self)
+        insertMenu.addItem(.separator())
+        let attachPicture = item(insertMenu, "Attach Image or PDF…", #selector(attachImage(_:)), modifiers: [], target: self)
+        attachPicture.image = DrawingTool.image.icon(pointSize: 13)
 
         // Format – drawing, style and tool settings (as in AutoCAD)
         let formatMenu = submenu("Format")
@@ -4227,7 +4415,7 @@ extension MainViewController {
         item(layoutMenu, "Page Setup…", #selector(pageSetupFromMenu(_:)), modifiers: [], target: self)
         item(layoutMenu, "Delete Layout…", #selector(deleteLayoutFromMenu(_:)), modifiers: [], target: self)
         layoutMenu.addItem(.separator())
-        item(layoutMenu, "Add Viewport…", #selector(addViewport(_:)), "v", modifiers: [.command, .control], target: self)
+        item(layoutMenu, "Add Viewport", #selector(addViewport(_:)), "v", modifiers: [.command, .control], target: self)
         layoutMenu.addItem(.separator())
         item(layoutMenu, "Plot / Print…", #selector(printDrawing(_:)), modifiers: [], target: self)
 
@@ -4711,7 +4899,7 @@ extension MainViewController {
             alert.alertStyle = .warning
             alert.messageText = "Discard the changes to the block \u{201C}\(session.definition.name)\u{201D}?"
             alert.informativeText = "The block stays as it was before you started editing it."
-            alert.addButton(withTitle: "Discard Changes")
+            alert.addButton(withTitle: "Discard Block Changes")
             alert.addButton(withTitle: "Keep Editing")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
@@ -4767,8 +4955,8 @@ extension MainViewController {
         editorView.needsDisplay = true
         view.window?.makeFirstResponder(editorView)
         let copies = blockUseCount(definition)
-        statusBar.showMessage("Editing the block \u{201C}\(definition.name)\u{201D} \u{2013} all tools work \u{00B7} Save Block "
-                              + "changes \(copies == 1 ? "its copy" : "all \(copies) copies") \u{00B7} Discard leaves it as it was")
+        statusBar.showMessage("Editing the block \u{201C}\(definition.name)\u{201D} \u{2013} all tools work \u{00B7} Save Block Changes "
+                              + "updates \(copies == 1 ? "its copy" : "all \(copies) copies") \u{00B7} Discard Block Changes leaves it as it was")
         Log.info("Edit block: \(definition.name) (\(reference == nil ? "on its own" : "in place"), \(definition.entities.count) objects)")
     }
 
@@ -4790,7 +4978,7 @@ extension MainViewController {
                 alert.informativeText = "A block needs at least one object. To remove the block, discard the changes, "
                     + "delete its copies and use Block Manager \u{203A} Purge Unused."
                 alert.addButton(withTitle: "Keep Editing")
-                alert.addButton(withTitle: "Discard Changes")
+                alert.addButton(withTitle: "Discard Block Changes")
                 guard alert.runModal() == .alertSecondButtonReturn else { return false }
                 store = false
             } else if entities.contains(where: { ($0 as? BlockReference)?.definition.contains(session.definition) ?? false }) {
@@ -4838,9 +5026,9 @@ extension MainViewController {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Save the changes to the block \u{201C}\(session.definition.name)\u{201D}?"
-        alert.informativeText = "The block is still being edited. Save Block writes the changes to every copy of it."
-        alert.addButton(withTitle: "Save Block")
-        alert.addButton(withTitle: "Discard Changes")
+        alert.informativeText = "The block is still being edited. Save Block Changes writes them to every copy of it."
+        alert.addButton(withTitle: "Save Block Changes")
+        alert.addButton(withTitle: "Discard Block Changes")
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn: return finishBlockEdit(save: true)

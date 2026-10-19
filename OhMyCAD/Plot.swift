@@ -249,6 +249,9 @@ enum PlotRenderer {
     /// Draws the page into a context whose coordinates are page points (origin bottom left).
     static func render(_ plan: PlotPlan, _ settings: PlotSettings, _ source: PlotSource,
                        in context: CGContext, background: Bool = true) {
+        // screen-only helpers (frames of underlays) are left out
+        RenderMode.plotting = true
+        defer { RenderMode.plotting = false }
         let pageRect = CGRect(origin: .zero, size: plan.pageSize)
         if background && !(settings.transparent && (settings.rasterFormat?.supportsTransparency ?? false)) {
             context.setFillColor(NSColor.white.cgColor)
@@ -589,7 +592,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         let setupRow = NSStackView(views: [setupPopup, saveSetup, deleteSetup])
         setupRow.spacing = 6
 
-        paperPopup.addItems(withTitles: papers.map { $0 == .extents ? "Size of the plotted area (no paper format)" : $0.title })
+        paperPopup.addItems(withTitles: papers.map { $0.title })
         paperPopup.target = self
         paperPopup.action = #selector(controlChanged)
         orientationControl.target = self

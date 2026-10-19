@@ -17,9 +17,11 @@ enum RoomLabels {
     /// The line with the area ends with this unit.
     static let unit = "m²"
 
-    /// Objects that bound rooms: walls, lines, polylines, blocks… – not texts, dimensions, hatches or construction lines.
+    /// Objects that bound rooms: walls, lines, polylines, blocks… – not texts, dimensions, hatches, construction lines,
+    /// wipeouts or images.
     static func isBoundary(_ entity: CADEntity) -> Bool {
         return !(entity is TextEntity) && !(entity is DimensionEntity) && !(entity is HatchEntity) && !(entity is ConstructionLine)
+            && !(entity is WipeoutEntity) && !(entity is ImageEntity)
     }
 
     /// The finder of closed outlines among the visible boundary objects.

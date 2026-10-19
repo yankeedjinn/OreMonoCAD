@@ -52,7 +52,7 @@ enum TextKind: Int, CaseIterable {
 
     var detail: String {
         switch self {
-        case .simple: return "Click and type · the ☰ menu next to the text adds font, size, rotation…"
+        case .simple: return "Click and type · the ☰ menu next to the text adds font, height, rotation…"
         case .multiline: return "Drag or click a box – the lines wrap to its width"
         case .formatted: return "Click a point – the format panel opens right away"
         }
@@ -206,6 +206,7 @@ final class TextEntity: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
 
     /// Insertion point: baseline of the first line (according to left / center / right alignment).
     var position: CGPoint { didSet { invalidate() } }
@@ -581,7 +582,7 @@ final class TextEditorDialog: NSObject, NSWindowDelegate {
         numberField(widthField, initial.boxWidth)
         numberField(spacingField, initial.lineSpacing, width: 60)
         widthField.placeholderString = "no wrap"
-        heightField.toolTip = "Font size in drawing units"
+        heightField.toolTip = "Height of capital letters in drawing units"
         widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping."
         heightField.target = self
         heightField.action = #selector(formatChanged)
@@ -762,6 +763,7 @@ final class TextStyleDialog: NSObject {
 
         let height = NSTextField(string: LineType.format(current.heightMM))
         height.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        height.toolTip = "Height of capital letters in mm on paper"
         let justify = NSSegmentedControl(labels: TextJustify.allCases.map { $0.title }, trackingMode: .selectOne, target: nil, action: nil)
         justify.selectedSegment = TextJustify.allCases.firstIndex(of: current.justify) ?? 0
         let underline = NSButton(checkboxWithTitle: "Underline", target: nil, action: nil)
@@ -898,8 +900,8 @@ final class TextFormatPanel: NSViewController {
         setupNumber(widthField, format.boxWidth)
         setupNumber(spacingField, format.lineSpacing, width: 48)
         widthField.placeholderString = "no wrap"
-        widthField.toolTip = "Paragraph width – longer lines wrap. Empty = one line per paragraph."
-        heightField.toolTip = "Font size in drawing units"
+        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping."
+        heightField.toolTip = "Height of capital letters in drawing units"
         rotationField.toolTip = "The preview at the cursor stays level; the placed text is rotated"
 
         justifyControl.controlSize = .small

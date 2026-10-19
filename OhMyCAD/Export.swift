@@ -15,7 +15,7 @@ enum PaperSize: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .extents: return "Fit to Drawing (drawing scale)"
+        case .extents: return "Size of the plotted area (no paper format)"
         case .a4: return "A4  (210 × 297 mm)"
         case .a3: return "A3  (297 × 420 mm)"
         case .a2: return "A2  (420 × 594 mm)"

@@ -8,8 +8,8 @@
 //    the surrounding drawing stays dimmed but visible and can be snapped to.
 //  • From the Block Manager (Edit…) the block is edited on its own, in its own coordinates.
 //  • All tools work while editing; the edit has its own Undo/Redo.
-//  • Save Block overwrites the definition – all insertions of the block change at once. The whole edit then
-//    appears in the main Undo as a single step (“Edit Block”). Discard throws everything away.
+//  • Save Block Changes overwrites the definition – all insertions of the block change at once. The whole edit then
+//    appears in the main Undo as a single step (“Edit Block”). Discard Block Changes throws everything away.
 //
 
 import Cocoa
@@ -70,8 +70,8 @@ final class BlockEditBar: NSView {
     var onDiscard: (() -> Void)?
 
     private let label = NSTextField(labelWithString: "")
-    private let saveButton = NSButton(title: "Save Block", target: nil, action: nil)
-    private let discardButton = NSButton(title: "Discard", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Save Block Changes", target: nil, action: nil)
+    private let discardButton = NSButton(title: "Discard Block Changes", target: nil, action: nil)
 
     static let height: CGFloat = 34
 
@@ -112,8 +112,8 @@ final class BlockEditBar: NSView {
 
     func configure(blockName: String, copies: Int, inPlace: Bool) {
         let place = inPlace ? "in place" : "on its own"
-        let copiesText = copies == 1 ? "1 copy in the drawing" : "\(copies) copies in the drawing"
-        label.stringValue = "Editing block \u{201C}\(blockName)\u{201D} \(place) \u{00B7} \(copiesText) change when you save"
+        let copiesText = copies == 1 ? "1 copy in the drawing changes" : "\(copies) copies in the drawing change"
+        label.stringValue = "Editing block \u{201C}\(blockName)\u{201D} \(place) \u{00B7} \(copiesText) when you save"
         layout()
     }
 

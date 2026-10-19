@@ -193,9 +193,9 @@ final class SplashController: NSObject {
 
         // name: “OhMy” light, “CAD” bold
         let name = NSMutableAttributedString(string: "OhMy", attributes: [
-            .font: NSFont.systemFont(ofSize: 46, weight: .light), .foregroundColor: NSColor.white])
+            .font: NSFont.systemFont(ofSize: 46, weight: .light), .foregroundColor: Theme.splashTitle])
         name.append(NSAttributedString(string: "CAD", attributes: [
-            .font: NSFont.systemFont(ofSize: 46, weight: .bold), .foregroundColor: NSColor.white]))
+            .font: NSFont.systemFont(ofSize: 46, weight: .bold), .foregroundColor: Theme.splashTitle]))
         let title = NSTextField(labelWithAttributedString: name)
         title.frame = NSRect(x: 330, y: 300, width: 350, height: 58)
         content.addSubview(title)

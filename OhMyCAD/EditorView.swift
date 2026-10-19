@@ -25,12 +25,12 @@ enum ToolGroup: Int, CaseIterable {
 }
 
 enum DrawingTool: Int, CaseIterable {
-    case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, hatch, hatchRebuild, hatchCut
-    case trim, extend, fillet, chamfer, powerTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties
+    case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, wall, hatch, hatchRebuild, hatchCut
+    case trim, extend, fillet, chamfer, powerTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties, filter
     case move, copy, rotate, scale, mirror, stretch, array
     case dimLinear, dimAligned, dimContinue, dimAngular, dimRadius, dimDiameter, leader
-    case text, roomLabel, measure, revisionCloud
-    case blockCreate, blockInsert, xref
+    case text, roomLabel, measure, revisionCloud, wipeout, scaleBar, northArrow
+    case blockCreate, blockInsert, xref, image
     case zoomIn, zoomOut, zoomExtents, zoomSelected, zoomWindow
 
     var title: String {
@@ -45,6 +45,7 @@ enum DrawingTool: Int, CaseIterable {
         case .rectangle: return "Rectangle"
         case .polyline: return "Polyline"
         case .spline: return "Spline"
+        case .wall: return "Wall"
         case .trim: return "Trim"
         case .extend: return "Extend"
         case .fillet: return "Fillet"
@@ -55,6 +56,7 @@ enum DrawingTool: Int, CaseIterable {
         case .hatchCut: return "Cut Out of Hatch"
         case .editPoints: return "Edit Points"
         case .matchProperties: return "Match Properties"
+        case .filter: return "Filter"
         case .join: return "Join"
         case .hatch: return "Hatch"
         case .powerTrim: return "PowerTrim"
@@ -77,10 +79,14 @@ enum DrawingTool: Int, CaseIterable {
         case .text: return "Text"
         case .measure: return "Measure"
         case .revisionCloud: return "Revision Cloud"
+        case .wipeout: return "Wipeout"
         case .roomLabel: return "Room Label"
+        case .scaleBar: return "Scale Bar"
+        case .northArrow: return "North Arrow"
         case .blockCreate: return "Create Block"
         case .blockInsert: return "Insert Block"
         case .xref: return "Attach External Reference"
+        case .image: return "Attach Image or PDF"
         case .zoomIn: return "Zoom In"
         case .zoomOut: return "Zoom Out"
         case .zoomExtents: return "Zoom Extents"
@@ -127,6 +133,9 @@ enum DrawingTool: Int, CaseIterable {
         .spline: (
             summary: "A smooth curve passing through the points you click.",
             usage: "Click the points · ↩, Esc, right-click or double-click finishes (with CLS on it asks whether to close) · C or clicking the first point closes · ⌫ removes the last point."),
+        .wall: (
+            summary: "A wall drawn with a double line – click its line, and both faces appear at the wall thickness with mitered corners.",
+            usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. Walls are not joined automatically – clean up where they meet with Trim or PowerTrim."),
         .hatch: (
             summary: "Fills or hatches a closed area – found automatically from whatever surrounds it.",
             usage: "Move over an area to see it highlighted, click to hatch it. Hold the button (or right-click it) for patterns, custom patterns and settings; type angle and scale at the cursor. Gaps up to 3 px are bridged. Exactly the clicked area is filled: shapes inside it are left out as islands, and nothing inside those islands is filled."),
@@ -148,6 +157,9 @@ enum DrawingTool: Int, CaseIterable {
         .matchProperties: (
             summary: "Copies the look of one object – layer, color, lineweight, and for texts, dimensions and hatches their style – onto other objects.",
             usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
+        .filter: (
+            summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name or a piece of text.",
+            usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Only visible objects on unlocked layers are found; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
         .fillet: (
             summary: "Rounds the corner between two lines or polyline segments with an arc.",
             usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; a polyline end + a line are joined into one polyline."),
@@ -186,7 +198,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select objects (↩), click the base point (it stays put), then click a grip point on the objects and pull it: at the dashed circle = 1×, closer = smaller (down to 0.01), farther = larger, past the base point = negative (turned 180°). Or type any factor – 0.01, 10, -1, 1/3 – and press ↩."),
         .mirror: (
             summary: "Creates a mirrored copy of the selected objects.",
-            usage: "Select objects (↩), then click two points of the mirror line. At the end the bottom line asks whether to delete the originals: Y = yes, N / ↩ / click = keep them, Esc = cancel."),
+            usage: "Select objects (↩), then click two points of the mirror line. At the end the bottom line asks whether to delete the originals: Y = yes, N / ↩ / click / right-click = keep them, Esc = cancel."),
         .stretch: (
             summary: "Stretches objects: points inside a window move, everything else stays – walls get longer, openings shift.",
             usage: "Drag a window (or click two corners) around the points to move – objects completely inside move as a whole, objects crossing the window are stretched. Then click the base point and the target, or type distance and angle. Circles, texts and blocks move only when their center / insertion point is inside."),
@@ -212,7 +224,7 @@ enum DrawingTool: Int, CaseIterable {
             summary: "The diameter of a circle or arc (Ø…).",
             usage: "Click the circle or arc, then where the text should go."),
         .text: (
-            summary: "Writes text – a quick single line, a wrapping paragraph, or text with chosen font, typeface, size and rotation.",
+            summary: "Writes text – a quick single line, a wrapping paragraph, or text with chosen font, typeface, height and rotation.",
             usage: "Click and type right on the drawing – ↩ places it, ⌥↩ = new line, Esc cancels. The ☰ menu next to the text opens font, typeface, height, rotation, alignment and width, which turns plain text into formatted text. Hold the button (or right-click it) for Paragraph (a box that wraps) or Formatted (panel opens at once). Double-click a text to edit it the same way."),
         .measure: (
             summary: "Measures without drawing anything – distance, angle, radius, area and perimeter, coordinates or length of objects.",
@@ -225,7 +237,10 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Hold the button (or right-click it) to choose the block, open the Block Manager or attach an external reference. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
         .xref: (
             summary: "Attaches another drawing (.ohmycad or .dxf) as an external reference – it updates by itself when that file is saved.",
-            usage: "Choose the file, then click where its origin (0,0) should go. The reference can't be edited here; Block Manager reloads it, finds a moved file or binds it into the drawing as an ordinary block."),
+            usage: "Choose the file, then click where its origin (0,0) should go. The reference cannot be edited here; Block Manager reloads it, finds a moved file or binds it into the drawing as an ordinary block."),
+        .image: (
+            summary: "Places a scan, photo, map or PDF page into the drawing to trace over – it is stored inside the drawing.",
+            usage: "Choose the file and the scale it is drawn at (a 1:1000 map → 1:1000, a page of drawings → its scale), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
         .zoomIn: (
             summary: "Shows the drawing larger (closer).",
             usage: "Click it – the view zooms in around its center. Also ⌘= , the mouse wheel or pinching on the trackpad (zooms to the cursor). The current tool keeps working."),
@@ -244,9 +259,18 @@ enum DrawingTool: Int, CaseIterable {
         .roomLabel: (
             summary: "A room label – the room name and its floor area in m², which updates itself when the walls change.",
             usage: "Move over a room to see its outline, click inside it and type the name (it can stay empty). The outline must be closed – close door openings with a line or a door. Free-standing objects inside (furniture, columns) don't reduce the area; texts, dimensions, hatches and construction lines don't count. Edit the name like any text – the last line (m²) is kept up to date. Moved into another room, the label measures that one."),
+        .scaleBar: (
+            summary: "A graphic scale bar – from 0 to a round length, true to the drawing scale (on a layout, to the nearest viewport).",
+            usage: "Click where its left end goes – it runs along the X axis of the drawing coordinates. It is about 5 cm long on paper, split into 4 or 5 parts. On a layout it takes the scale of the viewport nearest to the click. It is one block (“Scale Bar 1:100”); after changing the scale place a new one."),
+        .northArrow: (
+            summary: "A north arrow pointing north – up in the drawing, which is always drawn north-up.",
+            usage: "Click where to place it. Its size is set on paper, so it suits any drawing scale, and it keeps pointing north when the view or the drawing coordinates are rotated. It is one block (“North Arrow”) – edit that block to change its look, e.g. the letter."),
         .revisionCloud: (
             summary: "A revision cloud – scalloped arcs around a changed part of the drawing (one closed polyline).",
             usage: "Click the corners of the outline · ↩, right-click, double-click, C or a click on the first corner closes it · ⌫ removes the last corner · R = rectangle from two corners, P = back to corners · A = arc size in mm on paper (remembered)."),
+        .wipeout: (
+            summary: "A wipeout – an area that covers what lies below it with the background color, so a text or a dimension over a hatch or lines stays readable.",
+            usage: "Click two opposite corners of a rectangle (or type width and height) · P = outline by corners (↩, right-click, double-click, C or a click on the first corner closes it, ⌫ removes the last corner) · R = back to the rectangle. It covers lines and hatches but stays below texts and dimensions, so draw it around a text that is already there (Edit › Draw Order puts it above or below other objects). Its frame shows on screen only and is not printed; wipeouts are not exported to DXF."),
         .leader: (
             summary: "An arrow with a note.",
             usage: "Click the arrow point, then one or more bend points · ⌫ removes the last point · ↩ or right-click asks for the text."),
@@ -287,8 +311,11 @@ enum DrawingTool: Int, CaseIterable {
         case .blockCreate: return "Block"
         case .blockInsert: return "Insert"
         case .xref: return "Xref"
+        case .image: return "Image"
         case .revisionCloud: return "Cloud"
         case .roomLabel: return "Room"
+        case .scaleBar: return "Scale"
+        case .northArrow: return "North"
         case .zoomIn: return "In"
         case .zoomOut: return "Out"
         case .zoomExtents: return "Extents"
@@ -338,18 +365,24 @@ enum DrawingTool: Int, CaseIterable {
         case .breakObject: return "⇧T"
         case .breakAtPoint: return "⇧E"
         case .revisionCloud: return "⇧R"
+        case .wall: return "⇧L"
+        case .wipeout: return "⇧W"
+        case .filter: return "⇧S"
+        case .image: return "⇧I"
         case .roomLabel: return "⇧U"
+        case .scaleBar: return "⇧B"
+        case .northArrow: return "⇧N"
         default: return nil
         }
     }
 
     var group: ToolGroup {
         switch self {
-        case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .hatch, .hatchRebuild, .hatchCut: return .draw
-        case .trim, .extend, .fillet, .chamfer, .powerTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties: return .modify
+        case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .wall, .hatch, .hatchRebuild, .hatchCut: return .draw
+        case .trim, .extend, .fillet, .chamfer, .powerTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter: return .modify
         case .move, .copy, .rotate, .scale, .mirror, .stretch, .array: return .transform
-        case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud: return .dimension
-        case .blockCreate, .blockInsert, .xref: return .insert
+        case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud, .wipeout, .scaleBar, .northArrow: return .dimension
+        case .blockCreate, .blockInsert, .xref, .image: return .insert
         case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow: return .view
         }
     }
@@ -360,7 +393,8 @@ enum DrawingTool: Int, CaseIterable {
     /// Tools combined into one button on the panel – holding it (or right-clicking) picks the kind.
     /// The button shows the most recently used tool; shortcuts and the Tools menu work for each one separately.
     static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.trim, .extend, .powerTrim, .breakObject, .breakAtPoint],
-                                                    [.fillet, .chamfer], [.dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter]]
+                                                    [.fillet, .chamfer], [.dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter],
+                                                    [.revisionCloud, .wipeout], [.scaleBar, .northArrow]]
 
     var paletteFamily: [DrawingTool]? {
         return DrawingTool.paletteFamilies.first { $0.contains(self) }
@@ -394,8 +428,8 @@ enum DrawingTool: Int, CaseIterable {
         case .move, .copy, .rotate, .mirror, .stretch: return 2
         case .scale: return 3      // base point, grip, new grip position
         case .array: return 1      // center (for a polar array)
-        case .blockCreate, .blockInsert, .xref: return 1      // base / insertion point
-        case .polyline, .spline, .leader, .xline, .revisionCloud: return nil
+        case .blockCreate, .blockInsert, .xref, .scaleBar, .northArrow, .image: return 1      // base / insertion point
+        case .polyline, .spline, .wall, .leader, .xline, .revisionCloud, .wipeout: return nil
         default: return 0
         }
     }
@@ -975,7 +1009,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         } else if !empty {
             let entity = TextEntity(position: session.anchor, text: value, height: session.format.height, layer: currentLayerName)
             entity.apply(session.format)
-            onCommit?([], [entity], "Text")
+            onCommit?([], [entity], "Add Text")
         }
         stateChanged()
     }
@@ -1678,7 +1712,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             } else {
                 text = "Stretch: second point (or distance and angle + ↩)"
             }
-        case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow:
+        case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow, .filter:
             text = currentTool.title
         case .blockCreate:
             text = stage == .selectObjects
@@ -1687,7 +1721,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .blockInsert, .xref:
             if let definition = insertDefinition {
                 text = "\(currentTool == .xref ? "External reference" : "Insert block") “\(definition.name)”: insertion point · Esc = done"
-                    + (currentTool == .blockInsert ? " · hold the Insert button for other blocks" : "")
+                    + (currentTool == .blockInsert ? " · hold the Insert Block button for other blocks" : "")
             } else {
                 text = currentTool == .xref ? "Attach External Reference: choose the file to attach"
                     : "Insert Block: there are no blocks yet – select objects and use Create Block"
@@ -1711,7 +1745,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     : "Measure area: next corner · ↩, right-click or click the first corner = finish · ⌫ = undo corner"
             case .length:
                 text = measureObjects.isEmpty ? MeasureKind.length.prompt
-                    : "Measure length: \(measureObjects.count) object(s), total \(Measure.format(measureTotal)) \(drawingUnits.suffix) · click more · Esc = start over"
+                    : "Measure length: \(measureObjects.count) object\(measureObjects.count == 1 ? "" : "s"), total \(Measure.format(measureTotal)) \(drawingUnits.suffix) · click more · Esc = start over"
             default: text = measureKind.prompt
             }
             text += " · hold the Measure button for other measurements"
@@ -1723,17 +1757,21 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .spline:
             text = points.isEmpty ? "Spline: first point"
                 : "Spline: next point · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
+        case .wall:
+            let what = "Wall \(DynamicInputView.format(wallThicknessMM)) mm, \(wallJustification.title)"
+            text = points.isEmpty ? what + ": first point · T = thickness · J = side"
+                : what + ": next point (or length + ↩) · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
         case .hatch:
             text = "Hatch (\(hatchPattern.title), \(LineType.format(currentHatchAngle))°, scale \(LineType.format(currentHatchScale))"
-                + (hatchScale == nil ? " = drawing scale" : "") + "): click inside a closed area · hold the icon for patterns"
+                + (hatchScale == nil ? " = drawing scale" : "") + "): click inside a closed area · hold the Hatch button for patterns"
         case .trim:
             text = edges.isEmpty
                 ? "Trim: click the part to remove (all objects cut) · Shift-click = use only chosen cutting edges"
                 : "Trim: click the part to remove · cutting edges: \(edges.count) (Shift-click to change, Esc to clear)"
         case .extend:
             text = edges.isEmpty
-                ? "Extend: click near the end of a line or arc (extends to the nearest object) · Shift-click = choose boundaries"
-                : "Extend: click near the end of a line or arc · boundaries: \(edges.count) (Shift-click to change, Esc to clear)"
+                ? "Extend: click near the end of a line, arc or open polyline (extends to the nearest object) · Shift-click = choose boundaries"
+                : "Extend: click near the end of a line, arc or open polyline · boundaries: \(edges.count) (Shift-click to change, Esc to clear)"
         case .powerTrim:
             text = "PowerTrim: click a part to remove, or drag across several parts"
         case .breakObject:
@@ -1760,9 +1798,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .editPoints:
             text = selectedPoints.isEmpty
                 ? "Edit Points: click a point or drag a box around points · Shift adds or removes"
-                : "Edit Points: \(selectedPoints.count) point(s) selected · drag one of them (or click it, then the target) to move them all · Shift adds · Esc clears"
+                : "Edit Points: \(selectedPoints.count) point\(selectedPoints.count == 1 ? "" : "s") selected · drag one of them (or click it, then the target) to move them all · Shift adds · Esc clears"
         case .explode:
-            text = "Explode: select polylines, then ↩ or right-click"
+            text = "Explode: select polylines or blocks, then ↩ or right-click"
         case .hatchRebuild:
             text = "Rebuild Hatch: select the hatch, then ↩ or right-click"
         case .hatchCut:
@@ -1823,6 +1861,21 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             text = picked.isEmpty ? "\(currentTool.title): click a circle or an arc" : "\(currentTool.title): text position"
         case .leader:
             text = points.isEmpty ? "Leader: arrow point" : "Leader: next point · ↩/right-click = enter text"
+        case .scaleBar:
+            if let scale = scaleBarScale(near: currentWorldPoint ?? .zero) {
+                text = "Scale Bar (\(scale.title)\(paperSpace != nil ? ", nearest viewport" : "")): click where its left end goes · hold the button for the North Arrow"
+            } else {
+                text = "Scale Bar: add a viewport to the layout first – the bar takes its scale"
+            }
+        case .northArrow:
+            text = "North Arrow: click where to place it – it points north (up in the drawing)"
+        case .image:
+            if let source = pendingImage {
+                text = "Attach \(source.isPDF ? "PDF" : "Image") “\(source.fileName)” (\(source.scale.title)): click where its lower-left corner goes"
+                    + " · then fit it with Move, Rotate and Scale · Esc = cancel"
+            } else {
+                text = "Attach Image or PDF: choose the file first"
+            }
         case .roomLabel:
             if let outline = roomHover {
                 text = "Room Label: click to label this room – " + RoomLabels.areaLine(RoomLabels.squareMeters(of: outline, mmPerUnit: drawingUnits.mmPerUnit))
@@ -1838,6 +1891,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             case (.rectangle, true): text = what + ": first corner of the rectangle · P = by corners · A = arc size"
             case (.rectangle, false): text = what + ": opposite corner (or type width and height + ↩)"
             }
+        case .wipeout:
+            switch (wipeoutShape, points.isEmpty) {
+            case (.rectangle, true): text = "Wipeout: first corner of the rectangle · P = by corners"
+            case (.rectangle, false): text = "Wipeout: opposite corner (or type width and height + ↩)"
+            case (.polygon, true): text = "Wipeout: first corner of the outline · R = rectangle"
+            case (.polygon, false):
+                text = "Wipeout: next corner · ↩, right-click, double-click or the first corner = close · ⌫ = undo corner"
+            }
         case .text:
             if inlineText != nil {
                 text = "Text: type · ↩ = place · Esc = cancel · click elsewhere = place it and start another"
@@ -1850,7 +1911,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if awaitingCloseAnswer {
             return "Close the \(currentTool.title.lowercased())?  Y = yes · N, ↩, click or right-click = no (keep it open) · Esc = keep drawing"
         }
-        if [.polyline, .spline].contains(currentTool) && points.count >= 3 { text += " · C = close" }
+        if [.polyline, .spline, .wall].contains(currentTool) && points.count >= 3 { text += " · C = close" }
         if inputMode != .none { text += "   · type a value (e.g. 15*7 or 15x7, 100/10), Tab = next field, ↩ = apply" }
         return text
     }
@@ -2710,6 +2771,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             guard let definition = insertDefinition else { return [] }
             return [BlockReference(definition: definition, position: end, layer: layer)]
 
+        case .scaleBar, .northArrow:
+            return symbolReference(at: end).map { [$0] } ?? []
+
+        case .image:
+            return pendingImage.map { [placedImage($0, at: end)] } ?? []
+
         case .xline:
             if xlineKind == .twoPoints {
                 guard all.count >= 2, Geometry.distance(all[0], all[1]) > tiny else { return [] }
@@ -2776,11 +2843,22 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                               textHeight: dimensionTextHeight, layer: layer)]
 
         case .revisionCloud:
-            let outline = revisionCloudOutline(final ? points : all)
+            let outline = outlineCorners(final ? points : all)
             if let cloud = RevisionCloud.polyline(around: outline, arcSize: revisionCloudArcSize, layer: layer) { return [cloud] }
             // not an area yet – at least the side drawn so far in the preview
             return (!final && all.count >= 2 && Geometry.distance(all[0], all[all.count - 1]) > tiny)
                 ? [Polyline(vertices: all, layer: layer)] : []
+
+        case .wall:
+            return Walls.outlines(along: final ? points : all, closed: false, thickness: wallThickness,
+                                  justification: wallJustification, layer: layer)
+
+        case .wipeout:
+            // the preview is only the outline – a filled one would hide the texts it is meant to keep visible
+            let outline = outlineCorners(final ? points : all)
+            let box = HatchEntity.box(of: outline)
+            guard outline.count >= 2, max(box.width, box.height) > tiny else { return [] }
+            return [Polyline(vertices: outline, closed: outline.count >= 3, layer: layer)]
 
         case .move, .copy, .rotate, .scale, .mirror:
             // Scale: preview only after the reference point is chosen
@@ -2829,7 +2907,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     private func previewEntities(cursor: CGPoint) -> [CADEntity] {
         if awaitingCloseAnswer { return [] }
-        guard expectsPoint, !points.isEmpty || [.dimRadius, .dimDiameter, .blockInsert, .xref, .dimContinue, .xline].contains(currentTool) else { return [] }
+        guard expectsPoint, !points.isEmpty || [.dimRadius, .dimDiameter, .blockInsert, .xref, .dimContinue, .xline, .scaleBar, .northArrow, .image].contains(currentTool) else { return [] }
         return makeEntities(with: cursor, final: false)
     }
 
@@ -2938,7 +3016,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if gridSnapEnabled, gridSize > 0 {
                 worldPoint = snappedToGrid(worldPoint)
             }
-            let drawsRectangle = currentTool == .rectangle || (currentTool == .revisionCloud && revisionCloudShape == .rectangle)
+            let drawsRectangle = currentTool == .rectangle || (drawsOutline && outlineShape == .rectangle)
             if orthoEnabled != shiftHeld, !drawsRectangle, currentTool != .circle, let reference = reference {
                 // ORTHO: along the axes of the drawing coordinates
                 let d = toUCSVector(worldPoint - reference)
@@ -2969,8 +3047,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         for entity in entitiesNear(worldPoint, tolerance: tolerance) where filter(entity) {
             if locked?.isLayerLocked(entity.layer) ?? false { continue }
             var d = entity.distance(to: worldPoint)
-            // a click inside a hatch selects it, but the lines inside it take priority
-            if entity is HatchEntity && d == 0 { d = tolerance * 0.95 }
+            // a click inside a hatch (an image, a wipeout) selects it, but the lines inside it take priority
+            if (entity is HatchEntity || entity is ImageEntity || entity is WipeoutEntity) && d == 0 { d = tolerance * 0.95 }
             if d <= bestDistance {
                 bestDistance = d
                 best = entity
@@ -2990,8 +3068,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .xline:
             addConstructionLine(at: point)
 
-        case .revisionCloud:
-            addRevisionCloudPoint(point, clickCount: clickCount)
+        case .revisionCloud, .wipeout:
+            addOutlinePoint(point, clickCount: clickCount)
+
+        case .wall:
+            addWallPoint(point, clickCount: clickCount)
 
         case .polyline, .spline, .leader:
             // a double-click finishes
@@ -3038,6 +3119,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         case .blockInsert, .xref:
             finishBlockInsert(at: end)
+            return
+        case .scaleBar, .northArrow:
+            finishSymbol(at: end)
+            return
+        case .image:
+            finishImage(at: end)
             return
         default:
             break
@@ -3128,7 +3215,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .spline:
             onCommit?([], [Spline(controlPoints: points, closed: closed && points.count >= 3, layer: layer)], "Add Spline")
         case .leader:
-            guard let text = askForText(title: "Leader text", message: "Enter the text of the leader:") else { return }
+            guard let text = askForText(title: "Leader Text", message: "Enter the text of the leader:") else { return }
             let leader = styled(DimensionEntity(kind: .leader, points: points, text: text, textHeight: dimensionTextHeight, layer: layer))
             Associativity.attach(leader, to: snapEntities)
             onCommit?([], [leader], "Add Leader")
@@ -3235,7 +3322,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         guard expectsPoint else { return .none }
         if points.isEmpty { return .coordinates }
         switch currentTool {
-        case .line, .polyline, .spline, .leader, .xline: return .lengthAngle
+        case .line, .polyline, .spline, .wall, .leader, .xline: return .lengthAngle
         case .circle: return .radius
         case .polygon: return .polygon(polygonMethod)
         case .ellipse: return points.count == 1 ? .lengthAngle : .radius
@@ -3249,7 +3336,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             case .centerStartEnd, .centerStartAngle: return points.count == 1 ? .radius : .includedAngle
             }
         case .rectangle: return .widthHeight
-        case .revisionCloud: return revisionCloudShape == .rectangle ? .widthHeight : .lengthAngle
+        case .revisionCloud, .wipeout: return outlineShape == .rectangle ? .widthHeight : .lengthAngle
         case .move, .copy: return .distanceAngle
         case .rotate, .mirror: return .angle
         case .scale: return .factor
@@ -3434,6 +3521,17 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if currentTool == .line && lineContinue && lineChainCount >= 2 {
             return "C = close back to the start"
         }
+        if currentTool == .wall {
+            return "T = thickness · J = side" + (points.count >= 3 ? " · C = close" : "")
+        }
+        if currentTool == .xline {
+            return "H / V / A / B = direction"
+        }
+        if drawsOutline {
+            let arcSize = currentTool == .revisionCloud ? " · A = arc size" : ""
+            if outlineShape == .rectangle { return "P = by corners" + arcSize }
+            return "R = rectangle" + arcSize + (points.count >= 3 ? " · C = close" : "")
+        }
         return nil
     }
 
@@ -3441,7 +3539,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func handleInputLetter(_ letter: String) -> Bool {
         if currentTool == .xline { return switchXLineKind(letter: letter) }
         if currentTool == .polygon { return polygonLetter(letter) }
-        if currentTool == .revisionCloud { return revisionCloudLetter(letter) }
+        if drawsOutline { return outlineLetter(letter) }
+        if currentTool == .wall { return wallLetter(letter) }
         guard letter == "c" else { return false }
         if [.polyline, .spline].contains(currentTool), points.count >= 3 {
             finishOpenEnded(closed: true)
@@ -3613,11 +3712,17 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if !points.isEmpty { endLineChain() }
         case .polyline, .spline, .leader:
             requestFinishOpenEnded()
-        case .revisionCloud:
-            if revisionCloudShape == .polygon && points.count >= 3 {
-                finishRevisionCloud(points)
+        case .wall:
+            if points.count >= 2 {
+                finishWall(closed: false)
             } else if !points.isEmpty {
-                onMessage?(revisionCloudShape == .polygon ? "A revision cloud needs at least three corners." : "Click the opposite corner of the rectangle.")
+                onMessage?("A wall needs at least two points.")
+            }
+        case .revisionCloud, .wipeout:
+            if outlineShape == .polygon && points.count >= 3 {
+                finishOutline(points)
+            } else if !points.isEmpty {
+                onMessage?(outlineShape == .polygon ? "The outline needs at least three corners." : "Click the opposite corner of the rectangle.")
             }
         case .trim, .extend:
             onToolChangeRequested?(.select)
@@ -3693,14 +3798,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             message = removed.isEmpty
                 ? "Nothing to explode – only polylines, rectangles and blocks can be exploded."
-                : "Exploded \(removed.count) object(s) into \(added.count) object(s)"
+                : "Exploded \(removed.count) object\(removed.count == 1 ? "" : "s") into \(added.count) object\(added.count == 1 ? "" : "s")"
         } else {
             let result = EditOperations.join(selected)
             removed = result.removed
             added = result.added
             message = removed.isEmpty
                 ? "Nothing to join – select lines, arcs or open polylines whose ends touch."
-                : "Joined \(removed.count) object(s) into \(added.count) polyline(s)"
+                : "Joined \(removed.count) object\(removed.count == 1 ? "" : "s") into \(added.count) polyline\(added.count == 1 ? "" : "s")"
         }
         let name = currentTool.title
         if !removed.isEmpty {
@@ -3833,7 +3938,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let hatches = selected.compactMap { $0 as? HatchEntity }.filter { !layerManager.isLayerLocked($0.layer) }
         let cutters = selected.filter { ($0 as? CurveEntity)?.isClosedCurve ?? false }
         guard !hatches.isEmpty, !cutters.isEmpty else {
-            onMessage?("Select the hatch and one or more closed shapes (rectangle, closed polyline, circle), then choose Subtract from Hatch.")
+            onMessage?("Select the hatch and one or more closed shapes (rectangle, closed polyline, circle), then choose Cut Out of Hatch.")
             NSSound.beep()
             return
         }
@@ -3878,7 +3983,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             NSSound.beep()
             return
         }
-        onCommit?(removed, added, "Subtract from Hatch")
+        onCommit?(removed, added, "Cut Out of Hatch")
         selectionManager?.select(added)
         onMessage?(added.isEmpty ? "The whole hatch was cut away"
             : "Cut out – \(added.count) hatch piece\(added.count == 1 ? "" : "s") (the shapes stay, delete them if not needed)")
@@ -3931,7 +4036,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let hatch = HatchEntity(loops: loops, pattern: hatchPattern,
                                 angle: currentHatchAngle * .pi / 180, scale: currentHatchScale,
                                 layer: currentLayerName)
-        onCommit?([], [hatch], "Hatch")
+        onCommit?([], [hatch], "Add Hatch")
         let islands = loops.count - 1
         onMessage?(islands > 0 ? "Hatched (\(islands) island\(islands == 1 ? "" : "s") left out)" : "Hatched")
         hatchHoverLoops = nil
@@ -4140,6 +4245,97 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         onMessage?("Polygon: \(sides) sides")
     }
 
+    // MARK: Image or PDF underlay (ImageUnderlay.swift)
+
+    /// The chosen file waiting to be placed (set by the main window after the file dialog).
+    var pendingImage: ImageSource? {
+        didSet { if currentTool == .image { stateChanged() } }
+    }
+
+    /// The image at its size in the drawing: paper size × its scale, in drawing units.
+    private func placedImage(_ source: ImageSource, at point: CGPoint) -> ImageEntity {
+        let unitsPerPaperMM = source.scale.factor / max(drawingUnits.mmPerUnit, 1e-12)
+        return ImageEntity(source: source, at: point, unitsPerPaperMM: unitsPerPaperMM, layer: currentLayerName)
+    }
+
+    private func finishImage(at point: CGPoint) {
+        points.removeAll()
+        guard let source = pendingImage else {
+            onMessage?("Choose the image or PDF first (Insert › Attach Image or PDF…).")
+            NSSound.beep()
+            stateChanged()
+            return
+        }
+        let image = placedImage(source, at: point)
+        onCommit?([], [image], "Attach \(image.typeName)")
+        pendingImage = nil
+        onToolChangeRequested?(.select)
+        selectionManager?.select([image])
+        onMessage?("\(image.typeName) “\(source.fileName)” placed – fit it with Move, Rotate and Scale; Properties sets the opacity")
+    }
+
+    // MARK: Scale bar and north arrow (ScaleBar.swift)
+
+    /// Blocks made for the preview – they join the drawing's blocks only when placed.
+    private var symbolDrafts: [String: BlockDefinition] = [:]
+
+    /// The scale a scale bar shows: on a layout that of the viewport nearest to the point, otherwise the drawing scale.
+    private func scaleBarScale(near point: CGPoint) -> DrawingScale? {
+        guard paperSpace != nil else { return drawingScale }
+        func gap(_ rect: CGRect) -> CGFloat {
+            return hypot(max(rect.minX - point.x, 0, point.x - rect.maxX), max(rect.minY - point.y, 0, point.y - rect.maxY))
+        }
+        return allEntities.compactMap { $0 as? ViewportEntity }.min { gap($0.rect) < gap($1.rect) }?.scale
+    }
+
+    /// The scale bar or north arrow at a point (nil = a scale bar on a layout without viewports).
+    private func symbolReference(at point: CGPoint) -> BlockReference? {
+        let definition: BlockDefinition
+        var rotation: CGFloat = 0
+        if currentTool == .northArrow {
+            definition = symbolDefinition(named: AnnotationSymbols.northArrowName) { AnnotationSymbols.northArrow() }
+        } else {
+            guard let scale = scaleBarScale(near: point) else { return nil }
+            definition = symbolDefinition(named: "Scale Bar \(scale.title)") {
+                AnnotationSymbols.scaleBar(metersPerPaperMM: scale.factor / 1000, scaleTitle: scale.title)
+            }
+            // along the X axis of the drawing coordinates
+            rotation = ucsAngle
+        }
+        let reference = BlockReference(definition: definition, position: point, layer: currentLayerName)
+        reference.scale = unitsPerPaperMM
+        reference.rotation = rotation
+        return reference
+    }
+
+    /// The drawing's own block of that name (it may have been edited), otherwise a new one.
+    private func symbolDefinition(named name: String, make: () -> BlockDefinition) -> BlockDefinition {
+        if let existing = blockLibrary?.named(name), !existing.isExternal { return existing }
+        if let draft = symbolDrafts[name] { return draft }
+        let draft = make()
+        symbolDrafts[name] = draft
+        return draft
+    }
+
+    private func finishSymbol(at point: CGPoint) {
+        points.removeAll()
+        guard let reference = symbolReference(at: point) else {
+            onMessage?("Add a viewport to the layout first – the scale bar takes its scale.")
+            NSSound.beep()
+            stateChanged()
+            return
+        }
+        let definition = reference.definition
+        if let library = blockLibrary, library.named(definition.name) !== definition {
+            library.add(definition)
+            symbolDrafts[definition.name] = nil
+            onBlocksChanged?()
+        }
+        onCommit?([], [reference], "Add \(currentTool.title)")
+        onMessage?("\(currentTool.title) placed – block “\(definition.name)”")
+        onToolChangeRequested?(.select)
+    }
+
     // MARK: Room label (RoomLabel.swift)
 
     /// Room outlines among the visible objects – the same ones the drawing uses to update the labels.
@@ -4216,7 +4412,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: Revision cloud (RevisionCloud.swift)
+    // MARK: Revision cloud and wipeout (RevisionCloud.swift, Wipeout.swift)
 
     /// Outline by corners, or a rectangle from two corners.
     var revisionCloudShape: RevisionCloud.Shape = .polygon {
@@ -4224,6 +4420,25 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if currentTool == .revisionCloud { points.removeAll() }
             stateChanged()
         }
+    }
+
+    /// The same two ways for a wipeout – a rectangle by default (the usual case: a clear area under a text).
+    var wipeoutShape: RevisionCloud.Shape = .rectangle {
+        didSet {
+            if currentTool == .wipeout { points.removeAll() }
+            stateChanged()
+        }
+    }
+
+    /// Tools that draw a closed outline, by corners or as a rectangle.
+    private var drawsOutline: Bool {
+        return currentTool == .revisionCloud || currentTool == .wipeout
+    }
+
+    /// How the current tool draws its outline.
+    private var outlineShape: RevisionCloud.Shape {
+        get { return currentTool == .wipeout ? wipeoutShape : revisionCloudShape }
+        set { if currentTool == .wipeout { wipeoutShape = newValue } else { revisionCloudShape = newValue } }
     }
 
     /// Arc size of new clouds in mm on paper (remembered between launches).
@@ -4237,28 +4452,28 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     /// Corners of the outline: the clicked ones, or a rectangle (by the drawing coordinates) from the first two.
-    private func revisionCloudOutline(_ corners: [CGPoint]) -> [CGPoint] {
-        guard revisionCloudShape == .rectangle else { return corners }
+    private func outlineCorners(_ corners: [CGPoint]) -> [CGPoint] {
+        guard outlineShape == .rectangle else { return corners }
         guard corners.count >= 2 else { return [] }
         let a = corners[0], b = corners[1]
         let d = toUCSVector(b - a)
         return [a, a + fromUCSVector(CGPoint(x: d.x, y: 0)), b, a + fromUCSVector(CGPoint(x: 0, y: d.y))]
     }
 
-    private func addRevisionCloudPoint(_ point: CGPoint, clickCount: Int) {
-        if revisionCloudShape == .rectangle {
+    private func addOutlinePoint(_ point: CGPoint, clickCount: Int) {
+        if outlineShape == .rectangle {
             if points.isEmpty {
                 points.append(point)
                 stateChanged()
             } else {
-                finishRevisionCloud([points[0], point])
+                finishOutline([points[0], point])
             }
             return
         }
-        // a double-click or a click on the first corner closes the cloud
+        // a double-click or a click on the first corner closes the outline
         if points.count >= 3 && (clickCount >= 2
             || Geometry.distance(viewport.worldToScreen(point), viewport.worldToScreen(points[0])) < 8) {
-            finishRevisionCloud(points)
+            finishOutline(points)
             return
         }
         if let last = points.last, Geometry.distance(last, point) < 1e-9 { return }
@@ -4266,38 +4481,49 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         stateChanged()
     }
 
-    private func finishRevisionCloud(_ corners: [CGPoint]) {
+    /// Creates the cloud or the wipeout along the outline.
+    private func finishOutline(_ corners: [CGPoint]) {
         defer {
             points.removeAll()
             stateChanged()
         }
-        guard let cloud = RevisionCloud.polyline(around: revisionCloudOutline(corners), arcSize: revisionCloudArcSize,
-                                                 layer: currentLayerName) else {
+        let outline = outlineCorners(corners)
+        if currentTool == .wipeout {
+            guard let wipeout = WipeoutEntity.make(outline: outline, layer: currentLayerName) else {
+                onMessage?("The outline of the wipeout has no area.")
+                return
+            }
+            onCommit?([], [wipeout], "Add Wipeout")
+            return
+        }
+        guard let cloud = RevisionCloud.polyline(around: outline, arcSize: revisionCloudArcSize, layer: currentLayerName) else {
             onMessage?("The outline of the revision cloud has no area.")
             return
         }
         onCommit?([], [cloud], "Add Revision Cloud")
     }
 
-    /// Letters while drawing a cloud; true = the letter was used.
-    private func revisionCloudLetter(_ letter: String) -> Bool {
+    /// Letters while drawing a cloud or a wipeout; true = the letter was used.
+    private func outlineLetter(_ letter: String) -> Bool {
+        let name = currentTool == .wipeout ? "Wipeout" : "Revision Cloud"
         switch letter {
         case "r":
-            revisionCloudShape = .rectangle
-            onMessage?("Revision cloud: rectangle from two corners")
+            outlineShape = .rectangle
+            onMessage?(name + ": rectangle from two corners")
             return true
         case "p":
-            revisionCloudShape = .polygon
-            onMessage?("Revision cloud: outline by corners")
+            outlineShape = .polygon
+            onMessage?(name + ": outline by corners")
             return true
         case "a":
+            guard currentTool == .revisionCloud else { return false }
             DispatchQueue.main.async { [weak self] in self?.askRevisionCloudArcSize() }
             return true
         case "c":
-            // C closes the outline – and doesn't switch to Circle while a cloud is being drawn
-            guard !points.isEmpty, revisionCloudShape == .polygon else { return false }
+            // C closes the outline – and doesn't switch to Circle while an outline is being drawn
+            guard !points.isEmpty, outlineShape == .polygon else { return false }
             if points.count >= 3 {
-                finishRevisionCloud(points)
+                finishOutline(points)
             } else {
                 onMessage?("Closing (C) needs at least three corners.")
                 NSSound.beep()
@@ -4328,7 +4554,102 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
         revisionCloudArcMM = CGFloat(value)
-        onMessage?("Revision cloud: arcs \(DynamicInputView.format(revisionCloudArcMM)) mm on paper")
+        onMessage?("Revision Cloud: arcs \(DynamicInputView.format(revisionCloudArcMM)) mm on paper")
+        stateChanged()
+    }
+
+    // MARK: Walls (Walls.swift)
+
+    /// Thickness of new walls in mm (remembered between launches).
+    var wallThicknessMM: CGFloat = AppSettings.wallThicknessMM {
+        didSet { AppSettings.wallThicknessMM = wallThicknessMM }
+    }
+
+    /// Where the wall lies relative to the clicked line.
+    var wallJustification: Walls.Justification = .center {
+        didSet { stateChanged() }
+    }
+
+    /// Thickness in drawing units (by the units of the drawing – mm, cm, m…).
+    private var wallThickness: CGFloat {
+        return wallThicknessMM / max(drawingUnits.mmPerUnit, 1e-12)
+    }
+
+    private func addWallPoint(_ point: CGPoint, clickCount: Int) {
+        // a double-click finishes, a click on the first point closes the wall into a ring
+        if clickCount >= 2 && points.count >= 2 {
+            finishWall(closed: false)
+            return
+        }
+        if points.count >= 3, Geometry.distance(viewport.worldToScreen(point), viewport.worldToScreen(points[0])) < 8 {
+            finishWall(closed: true)
+            return
+        }
+        if let last = points.last, Geometry.distance(last, point) < 1e-9 { return }
+        points.append(point)
+        stateChanged()
+    }
+
+    private func finishWall(closed: Bool) {
+        defer {
+            points.removeAll()
+            stateChanged()
+        }
+        let outlines = Walls.outlines(along: points, closed: closed, thickness: wallThickness,
+                                      justification: wallJustification, layer: currentLayerName)
+        guard !outlines.isEmpty else {
+            onMessage?("A wall needs at least two different points.")
+            return
+        }
+        onCommit?([], outlines, "Add Wall")
+    }
+
+    /// Letters while drawing a wall; true = the letter was used.
+    private func wallLetter(_ letter: String) -> Bool {
+        switch letter {
+        case "t":
+            DispatchQueue.main.async { [weak self] in self?.askWallThickness() }
+            return true
+        case "j":
+            wallJustification = wallJustification.next
+            onMessage?("Wall: " + wallJustification.title)
+            return true
+        case "c":
+            // C closes the wall – and doesn't switch to Circle while a wall is being drawn
+            guard !points.isEmpty else { return false }
+            if points.count >= 3 {
+                finishWall(closed: true)
+            } else {
+                onMessage?("Closing (C) needs at least three points.")
+                NSSound.beep()
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Window with the wall thickness (T while drawing a wall).
+    func askWallThickness() {
+        let range = Walls.thicknessRangeMM
+        let alert = NSAlert()
+        alert.messageText = "Wall – Thickness"
+        alert.informativeText = "Thickness of new walls in mm (\(DynamicInputView.format(range.lowerBound))"
+            + " to \(DynamicInputView.format(range.upperBound)))."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
+        field.stringValue = DynamicInputView.format(wallThicknessMM)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        guard let value = Double(text), range.contains(CGFloat(value)) else {
+            onMessage?("The wall thickness is from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
+            return
+        }
+        wallThicknessMM = CGFloat(value)
+        onMessage?("Wall: thickness \(DynamicInputView.format(wallThicknessMM)) mm")
         stateChanged()
     }
 
@@ -4367,12 +4688,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             guard Geometry.distance(first, point) > 1e-9 else { return }
             onCommit?([], [ConstructionLine(point: first, angle: Geometry.angle(from: first, to: point), layer: currentLayerName)],
-                      "Construction Line")
+                      "Add Construction Line")
             // further lines pass through the same point
             stateChanged()
             return
         }
-        onCommit?([], [ConstructionLine(point: point, angle: xlineFixedAngle, layer: currentLayerName)], "Construction Line")
+        onCommit?([], [ConstructionLine(point: point, angle: xlineFixedAngle, layer: currentLayerName)], "Add Construction Line")
         stateChanged()
     }
 
@@ -4387,7 +4708,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         default: return false
         }
         xlineKind = kind
-        onMessage?(kind == .angle ? "Construction lines at \(LineType.format(xlineAngle))° – hold the button to change the angle" : kind.title)
+        onMessage?(kind == .angle ? "Construction Line: at \(LineType.format(xlineAngle))° – hold the button to change the angle"
+                   : "Construction Line: " + kind.title.lowercased())
         return true
     }
 
@@ -4426,7 +4748,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         } else {
             selectionManager?.deselect(removed)
             onCommit?(removed, added, "Match Properties")
-            onMessage?("Properties copied to \(added.count) object(s)" + (locked > 0 ? " · \(locked) on locked layers skipped" : ""))
+            onMessage?("Properties copied to \(added.count) object\(added.count == 1 ? "" : "s")" + (locked > 0 ? " · \(locked) on locked layers skipped" : ""))
         }
         stateChanged()
     }
@@ -4503,7 +4825,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         picked = stretchItems.map { (entity: $0.entity, click: CGPoint.zero) }
         stage = .points
         let whole = stretchItems.filter { $0.whole }.count
-        onMessage?("\(stretchItems.count - whole) object(s) will stretch, \(whole) move whole")
+        onMessage?("\(stretchItems.count - whole) object\(stretchItems.count - whole == 1 ? "" : "s") will stretch, \(whole) move whole")
         stateChanged()
     }
 
@@ -4568,7 +4890,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             onMessage?("Nothing stretched (zero distance, or the shapes would collapse).")
         } else {
             onCommit?(results.map { $0.original }, results.map { $0.edited }, "Stretch")
-            onMessage?("Stretched \(results.count) object(s) – drag a new window for the next stretch")
+            onMessage?("Stretched \(results.count) object\(results.count == 1 ? "" : "s") – drag a new window for the next stretch")
         }
         stretchItems.removeAll()
         picked.removeAll()
@@ -4601,14 +4923,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 return
             }
             guard !originals.contains(where: { ($0 as? BlockReference)?.definition.contains(existing) ?? false }) else {
-                onMessage?("A block can't contain itself – the selection includes “\(existing.name)”.")
+                onMessage?("A block cannot contain itself – the selection includes “\(existing.name)”.")
                 NSSound.beep()
                 stateChanged()
                 return
             }
             let alert = NSAlert()
             alert.messageText = "Redefine the block “\(existing.name)”?"
-            alert.informativeText = "Every reference to it in the drawing changes to the new objects. This can't be undone."
+            alert.informativeText = "Every reference to it in the drawing changes to the new objects. This cannot be undone."
             alert.addButton(withTitle: "Redefine")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
@@ -4630,7 +4952,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             selectionManager?.select([reference])
         }
         onBlocksChanged?()
-        onMessage?("Block “\(definition.name)” – \(clones.count) object(s). Insert Block places more copies.")
+        onMessage?("Block “\(definition.name)” – \(clones.count) object\(clones.count == 1 ? "" : "s"). Insert Block places more copies.")
         needsDisplay = true
         onToolChangeRequested?(.select)
     }
@@ -4716,8 +5038,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let alert = NSAlert()
         alert.messageText = kind.title
         alert.informativeText = kind == .rectangular
-            ? "\(originals.count) object(s) · the original stays in the lower-left cell. Negative spacing goes left / down."
-            : "\(originals.count) object(s) around the center · a positive angle goes counter-clockwise."
+            ? "\(originals.count) object\(originals.count == 1 ? "" : "s") · the original stays in the lower-left cell. Negative spacing goes left / down."
+            : "\(originals.count) object\(originals.count == 1 ? "" : "s") around the center · a positive angle goes counter-clockwise."
         alert.addButton(withTitle: "Create")
         alert.addButton(withTitle: "Cancel")
         alert.accessoryView = form.view
@@ -4744,7 +5066,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 NSSound.beep()
             } else {
                 self.onCommit?([], copies, kind.title)
-                self.onMessage?("\(kind.title): \(copies.count) object(s) added")
+                self.onMessage?("\(kind.title): \(copies.count) object\(copies.count == 1 ? "" : "s") added")
             }
             self.onToolChangeRequested?(.select)
             self.window?.makeFirstResponder(self)
@@ -4843,7 +5165,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             let area = Measure.area(ofLoops: loops)
             let perimeter = loops.reduce(0) { $0 + Measure.perimeter($1, closed: true) }
             var lines = ["Area \(f(area)) \(unit)²", "Perimeter \(f(perimeter)) \(unit)"]
-            if loops.count > 1 { lines.append("\(loops.count - 1) island(s) left out") }
+            if loops.count > 1 { lines.append("\(loops.count - 1) island\(loops.count - 1 == 1 ? "" : "s") left out") }
             showMeasure(MeasureResult(fill: loops, lines: lines, anchor: raw))
 
         case .areaObject:
@@ -5400,7 +5722,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         // dragging with the mouse (instead of a second click) finishes a line, circle, rectangle and transforms
         if [.line, .circle, .polygon, .rectangle].contains(currentTool) || (currentTool.isTransform && stage == .points)
-            || (currentTool == .revisionCloud && revisionCloudShape == .rectangle),
+            || (drawsOutline && outlineShape == .rectangle),
            points.count == 1,
            let down = mouseDownScreenPoint, Geometry.distance(screenPoint, down) > 4 {
             addPoint(resolvedWorldPoint(for: event))
@@ -5473,10 +5795,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         switch currentTool {
         case .polyline, .spline, .leader:
             if points.isEmpty { endCurrentTool() } else { confirm() }
-        case .revisionCloud:
+        case .wall:
+            if points.isEmpty { endCurrentTool() } else if points.count >= 2 { confirm() } else { cancelCurrentOperation() }
+        case .revisionCloud, .wipeout:
             if points.isEmpty {
                 endCurrentTool()
-            } else if revisionCloudShape == .polygon && points.count >= 3 {
+            } else if outlineShape == .polygon && points.count >= 3 {
                 confirm()
             } else {
                 cancelCurrentOperation()
@@ -5581,10 +5905,19 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let worldPoint = viewport.screenToWorld(screenPoint)
 
         if let hit = entity(at: worldPoint) {
+            // a grouped object brings the rest of its group
+            let picked = withGroups([hit])
             if extend || stage == .selectObjects {
-                selectionManager.toggleSelection(hit)
+                if selectionManager.isSelected(hit) {
+                    selectionManager.deselect(picked)
+                } else {
+                    selectionManager.select(picked, additive: true)
+                }
             } else {
-                selectionManager.select([hit])
+                selectionManager.select(picked)
+            }
+            if picked.count > 1 {
+                onMessage?("Group of \(picked.count) objects · Edit › Ungroup splits it")
             }
         } else {
             if !extend && stage != .selectObjects { selectionManager.clearSelection() }
@@ -5606,6 +5939,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case let hatch as HatchEntity:
             // hatch: only its outline (not when the selection is entirely inside the hatched area)
             return hatch.loops.flatMap { polygon($0) }
+        case let wipeout as WipeoutEntity:
+            return polygon(wipeout.vertices)
         case let text as TextEntity:
             return polygon(text.corners)
         case let dimension as DimensionEntity:
@@ -5641,7 +5976,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func finishSelectionBox(from start: CGPoint, to end: CGPoint) {
         guard let selectionManager = selectionManager,
               abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 else { return }
-        selectionManager.select(entitiesInBox(from: start, to: end), additive: selectionBoxAdditive)
+        selectionManager.select(withGroups(entitiesInBox(from: start, to: end)), additive: selectionBoxAdditive)
+    }
+
+    /// The objects and the other members of their groups (only editable ones) – unless
+    /// Edit › Select Groups as a Whole is off.
+    private func withGroups(_ entities: [CADEntity]) -> [CADEntity] {
+        guard AppSettings.selectWholeGroups, entities.contains(where: { $0.groupID != nil }) else { return entities }
+        return Groups.expanded(entities, from: editableEntities)
     }
 
     /// Objects in the window (screen points): left to right fully inside, right to left also crossed.
@@ -5741,8 +6083,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // the letters inside a tool work without Shift – Shift + a letter stays a tool shortcut (⇧T, ⇧C…)
+        let shifted = event.modifierFlags.contains(.shift)
+
         // C with continuous lines = the last line back to the start of the chain
-        if modifiers.isEmpty, currentTool == .line, lineContinue, lineChainCount >= 2,
+        if modifiers.isEmpty, !shifted, currentTool == .line, lineContinue, lineChainCount >= 2,
            let start = lineChainStart, let last = points.last,
            event.charactersIgnoringModifiers?.lowercased() == "c", !dynamicInput.hasLockedValue {
             onCommit?([], [Line(start: last, end: start, layer: currentLayerName)], "Close Lines")
@@ -5751,14 +6096,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         // C while drawing a polyline / spline = close right away
-        if modifiers.isEmpty, [.polyline, .spline].contains(currentTool), points.count >= 3,
+        if modifiers.isEmpty, !shifted, [.polyline, .spline].contains(currentTool), points.count >= 3,
            event.charactersIgnoringModifiers?.lowercased() == "c", !dynamicInput.hasLockedValue {
             finishOpenEnded(closed: true)
             return
         }
 
         // C on a line in progress that cannot be closed yet: don't switch to Circle (the drawing would be lost)
-        if modifiers.isEmpty, !points.isEmpty, !dynamicInput.hasLockedValue,
+        if modifiers.isEmpty, !shifted, !points.isEmpty, !dynamicInput.hasLockedValue,
            [.polyline, .spline].contains(currentTool) || (currentTool == .line && lineContinue),
            event.charactersIgnoringModifiers?.lowercased() == "c" {
             onMessage?(currentTool == .line ? "Draw at least two lines before closing (C)." : "Closing (C) needs at least three points.")
@@ -5772,6 +6117,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 cancelDynamicInput()
             } else if [.polyline, .spline].contains(currentTool) && points.count >= 2 {
                 requestFinishOpenEnded()
+            } else if currentTool == .wall && points.count >= 2 {
+                finishWall(closed: false)
             } else if isBusy {
                 cancelCurrentOperation()
             } else if !selectedPoints.isEmpty {
@@ -5809,7 +6156,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
 
         case 51: // Backspace
-            if ([.polyline, .spline, .leader, .revisionCloud].contains(currentTool) || (currentTool == .measure && measureKind == .areaPoints))
+            if ([.polyline, .spline, .wall, .leader, .revisionCloud, .wipeout].contains(currentTool) || (currentTool == .measure && measureKind == .areaPoints))
                 && !points.isEmpty {
                 points.removeLast()
                 stateChanged()
@@ -5845,21 +6192,26 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         // polygon: I / C / E switches the method, S = number of sides (like POLYGON in AutoCAD)
-        if currentTool == .polygon, characters.count == 1, polygonLetter(characters.lowercased()) {
+        if currentTool == .polygon, !shifted, characters.count == 1, polygonLetter(characters.lowercased()) {
             return
         }
 
-        // revision cloud: R / P = rectangle or corners, A = arc size, C = close
-        if currentTool == .revisionCloud, characters.count == 1, revisionCloudLetter(characters.lowercased()) {
+        // revision cloud and wipeout: R / P = rectangle or corners, A = arc size (cloud), C = close
+        if drawsOutline, !shifted, characters.count == 1, outlineLetter(characters.lowercased()) {
+            return
+        }
+
+        // wall: T = thickness, J = side, C = close
+        if currentTool == .wall, !shifted, characters.count == 1, wallLetter(characters.lowercased()) {
             return
         }
 
         // construction line: H / V / A / B switches the method (like XLINE in AutoCAD)
-        if currentTool == .xline, characters.count == 1, switchXLineKind(letter: characters.lowercased()) {
+        if currentTool == .xline, !shifted, characters.count == 1, switchXLineKind(letter: characters.lowercased()) {
             return
         }
 
-        let typedKey = (event.modifierFlags.contains(.shift) ? "⇧" : "") + characters.uppercased()
+        let typedKey = (shifted ? "⇧" : "") + characters.uppercased()
         if characters.count == 1, let command = Shortcuts.command(forKey: typedKey) {
             // the Line key again while in the Line tool = continuous lines (LNC) on / off
             if command == .tool(.line), currentTool == .line, !dynamicInput.hasLockedValue {

@@ -78,6 +78,7 @@ final class ViewportEntity: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
 
     /// Viewport rectangle on paper (mm).
     var rect: CGRect
@@ -106,7 +107,7 @@ final class ViewportEntity: CADEntity {
         return String(format: "Viewport\n%@\n\nSize:   %.1f × %.1f mm\nScale:  %@\nCenter: %.3f, %.3f%@%@",
                       commonInfo, rect.width, rect.height, scale.title, modelCenter.x, modelCenter.y,
                       frozenLayers.isEmpty ? "" : "\nHidden layers: \(frozenLayers.sorted().joined(separator: ", "))",
-                      isLocked ? "\nLocked (the view can't be panned or rescaled)" : "")
+                      isLocked ? "\nLocked (the view cannot be panned or rescaled)" : "")
     }
 
     /// How many mm of paper correspond to one model unit.
@@ -569,6 +570,7 @@ final class BlockReference: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var definition: BlockDefinition { didSet { cache = nil } }
     var position: CGPoint { didSet { cache = nil } }
     var rotation: CGFloat = 0 { didSet { cache = nil } }
@@ -878,7 +880,7 @@ final class BlockManagerController: NSObject, NSTableViewDataSource, NSTableView
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled, .resizable],
                         backing: .buffered, defer: false)
         super.init()
-        panel.title = "Blocks and External References"
+        panel.title = "Block Manager"
         build()
     }
 
@@ -1112,7 +1114,7 @@ final class BlockManagerController: NSObject, NSTableViewDataSource, NSTableView
         }
         if removed > 0 { onChanged?() }
         reload()
-        detail.stringValue = removed == 0 ? "Everything is in use." : "Removed \(removed) unused block(s) and reference(s)."
+        detail.stringValue = removed == 0 ? "Everything is in use." : "Removed \(removed) unused \(removed == 1 ? "block or reference" : "blocks and references")."
     }
 
     @objc private func reloadClicked() {

@@ -55,17 +55,26 @@ struct SnapPoint {
 
 // MARK: - Draw order (pseudo Z)
 
-/// Higher `drawOrder` = drawn above the others. At the same order, hatches are below lines
-/// and otherwise the order in the drawing applies.
+/// Higher `drawOrder` = drawn above the others. At the same order the kind of object decides (hatches below lines,
+/// texts on top – see `rank`), and otherwise the order in the drawing applies.
 enum DrawOrder {
     static func sorted(_ entities: [CADEntity]) -> [CADEntity] {
-        let indexed = entities.enumerated().map { (offset: $0.offset, entity: $0.element) }
+        let indexed = entities.enumerated().map { (offset: $0.offset, entity: $0.element, rank: rank($0.element)) }
         return indexed.sorted { a, b in
             if a.entity.drawOrder != b.entity.drawOrder { return a.entity.drawOrder < b.entity.drawOrder }
-            let hatchA = a.entity is HatchEntity, hatchB = b.entity is HatchEntity
-            if hatchA != hatchB { return hatchA }
+            if a.rank != b.rank { return a.rank < b.rank }
             return a.offset < b.offset
         }.map { $0.entity }
+    }
+
+    /// At the same draw order: images and PDF underlays at the bottom, hatches above them, then lines and the rest,
+    /// wipeouts above those, and texts and dimensions on top (so a wipeout covers the hatch under a text, not the text).
+    private static func rank(_ entity: CADEntity) -> Int {
+        if entity is ImageEntity { return 0 }
+        if entity is HatchEntity { return 1 }
+        if entity is WipeoutEntity { return 3 }
+        if entity is TextEntity || entity is DimensionEntity { return 4 }
+        return 2
     }
 }
 
@@ -88,6 +97,8 @@ protocol CADEntity: AnyObject {
     var lineWeight: CGFloat? { get set }
     /// Draw order (pseudo Z): a higher number is above a lower one.
     var drawOrder: Int { get set }
+    /// The group the object belongs to (nil = none) – a click on one object selects the whole group (Groups.swift).
+    var groupID: UUID? { get set }
     var typeName: String { get }
     var infoText: String { get }
 
@@ -132,19 +143,21 @@ extension CADEntity {
         context.restoreGState()
     }
 
-    /// Carries the appearance properties (lineweight and draw order) over to a copy / new piece.
+    /// Carries the appearance properties (lineweight and draw order) and the group over to a copy / new piece.
     @discardableResult
     func copyStyle<T: CADEntity>(to copy: T) -> T {
         copy.lineWeight = lineWeight
         copy.drawOrder = drawOrder
+        copy.groupID = groupID
         return copy
     }
 
-    /// Takes over the lineweight and draw order of another object (for newly assembled pieces).
+    /// Takes over the lineweight, draw order and group of another object (for newly assembled pieces).
     @discardableResult
     func withStyle(of other: CADEntity) -> Self {
         lineWeight = other.lineWeight
         drawOrder = other.drawOrder
+        groupID = other.groupID
         return self
     }
 
@@ -196,6 +209,7 @@ final class Line: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var startPoint: CGPoint
     var endPoint: CGPoint
 
@@ -272,6 +286,7 @@ final class SurveyPoint: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var position: CGPoint
     /// Elevation (m) – does not change when moving or scaling.
     var z: Double?
@@ -353,6 +368,7 @@ final class ConstructionLine: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     /// The point the line passes through.
     var point: CGPoint
     /// Direction (radians).
@@ -484,6 +500,7 @@ final class Circle: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var center: CGPoint
     var radius: CGFloat
 
@@ -554,6 +571,7 @@ final class Arc: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var center: CGPoint
     var radius: CGFloat
     var startAngle: CGFloat
@@ -656,6 +674,7 @@ final class Polyline: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var vertices: [CGPoint]
     var closed: Bool
     /// Segment bulges (bulge as in DXF): bulges[i] belongs to the segment from vertex i to i+1
@@ -920,6 +939,7 @@ final class Spline: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     private(set) var controlPoints: [CGPoint]
     private(set) var segments: [CubicBezierSegment] = []
     private(set) var flattened: [CGPoint] = []
@@ -1057,6 +1077,7 @@ final class Ellipse: CurveEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     var center: CGPoint { didSet { invalidate() } }
     /// From the center to the end of the major semi-axis.
     var majorAxis: CGPoint { didSet { invalidate() } }
@@ -1349,6 +1370,7 @@ final class DimensionEntity: CADEntity {
     var color: NSColor?
     var lineWeight: CGFloat?
     var drawOrder = 0
+    var groupID: UUID?
     let kind: DimensionKind
     var points: [CGPoint]
     var radius: CGFloat

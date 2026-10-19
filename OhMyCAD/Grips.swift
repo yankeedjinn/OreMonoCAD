@@ -93,6 +93,17 @@ enum Grips {
             return viewport.corners.map { Grip(point: $0, kind: .point) }
                 + [Grip(point: CGPoint(x: viewport.rect.midX, y: viewport.rect.midY), kind: .center)]
 
+        case let image as ImageEntity:
+            // corners resize the picture (the opposite corner stays, the proportions too), the center moves it
+            return image.corners.map { Grip(point: $0, kind: .point) }
+                + [Grip(point: Geometry.midpoint(image.origin, image.oppositeCorner), kind: .center)]
+
+        case let wipeout as WipeoutEntity:
+            // the corners, then the edge midpoints (an edge moves as a whole)
+            let corners = wipeout.vertices
+            return corners.map { Grip(point: $0, kind: .point) }
+                + corners.indices.map { Grip(point: Geometry.midpoint(corners[$0], corners[($0 + 1) % corners.count]), kind: .midpoint) }
+
         default:
             return []
         }
@@ -277,6 +288,40 @@ enum Grips {
             } else {
                 copy.rect = viewport.rect.offsetBy(dx: delta.x, dy: delta.y)
             }
+            return copy
+
+        case let image as ImageEntity:
+            let copy = image.clone() as! ImageEntity
+            if index < 4 {
+                let corners = image.corners
+                let opposite = corners[(index + 2) % 4]
+                let diagonal = corners[index] - opposite
+                let length2 = diagonal.dot(diagonal)
+                guard length2 > 1e-18 else { return nil }
+                let factor = (target - opposite).dot(diagonal) / length2
+                guard factor > 1e-6, factor.isFinite else { return nil }
+                copy.applyTransform(CGAffineTransform(translationX: opposite.x, y: opposite.y)
+                    .scaledBy(x: factor, y: factor).translatedBy(x: -opposite.x, y: -opposite.y))
+            } else {
+                copy.applyTransform(CGAffineTransform(translationX: delta.x, y: delta.y))
+            }
+            return copy
+
+        case let wipeout as WipeoutEntity:
+            var corners = wipeout.vertices
+            let n = corners.count
+            guard n >= 3 else { return nil }
+            if index < n {
+                corners[index] = target
+            } else {
+                let edge = index - n
+                corners[edge] = corners[edge] + delta
+                corners[(edge + 1) % n] = corners[(edge + 1) % n] + delta
+            }
+            // the area must not collapse into a line
+            guard abs(HatchEntity.signedArea(corners)) > Geometry.epsilon else { return nil }
+            let copy = wipeout.clone() as! WipeoutEntity
+            copy.vertices = corners
             return copy
 
         default:

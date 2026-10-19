@@ -1248,9 +1248,16 @@ extension EditOperations {
         }
         var copies: [CADEntity] = []
         for transform in transforms {
+            // each copy of a group becomes a group of its own
+            var groups: [UUID: UUID] = [:]
             for entity in originals {
                 let copy = entity.clone()
                 copy.applyTransform(transform)
+                if let group = entity.groupID {
+                    let fresh = groups[group] ?? UUID()
+                    groups[group] = fresh
+                    copy.groupID = fresh
+                }
                 copies.append(copy)
             }
         }
@@ -1565,7 +1572,7 @@ enum SelectSimilar {
     }
 
     /// Color as text (sRGB in whole steps) – the same colors from different color spaces match.
-    private static func colorKey(_ color: NSColor?) -> String {
+    static func colorKey(_ color: NSColor?) -> String {
         guard let color = color else { return "bylayer" }
         guard let rgb = color.usingColorSpace(.sRGB) else { return color.description }
         let parts = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
