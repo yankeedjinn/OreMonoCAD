@@ -2411,7 +2411,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
             if currentTool != .select { selectTool(.select) }
             applyChange(removed: [], added: entities, actionName: "Import")
-            selectionManager.select(entities)
+            // nothing stays selected after an import (a large DXF would otherwise show all highlighted)
+            selectionManager.clearSelection()
             // show the drawing including the import
             editorView.viewport.zoomToFit(entities: document.getAllEntities())
             editorView.needsDisplay = true
