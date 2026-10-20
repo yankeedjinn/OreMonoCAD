@@ -1111,6 +1111,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: Cursor – CAD crosshair
 
     private let crosshair = CrosshairView(frame: .zero)
+    /// Floating tool palettes lie on top of the drawing; over them the crosshair hides.
+    let paletteLayer = FloatingPaletteLayer(frame: .zero)
     private static let invisibleCursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
 
     /// Cursor over the area (the system crosshair, or invisible – the crosshair is drawn by CrosshairView).
@@ -1448,6 +1450,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         crosshair.autoresizingMask = [.width, .height]
         crosshair.isHidden = !AppSettings.cadCrosshair
         addSubview(crosshair)
+        paletteLayer.frame = bounds
+        paletteLayer.autoresizingMask = [.width, .height]
+        addSubview(paletteLayer)
         dynamicInput.isHidden = true
         addSubview(dynamicInput)
         dynamicInput.onChange = { [weak self] in self?.dynamicInputChanged() }
@@ -5865,6 +5870,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // over a floating palette the drawing does not follow the mouse
+        if paletteLayer.isOverPalette(event.locationInWindow) {
+            if crosshair.point != nil { crosshair.point = nil }
+            return
+        }
         // mouse movement changes only the overlay elements (snap, preview, grips) – the scene is not redrawn
         overlayOnlyRedraw = true
         defer { overlayOnlyRedraw = false }

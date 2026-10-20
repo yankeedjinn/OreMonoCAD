@@ -40,14 +40,139 @@ protocol ToolbarViewDelegate: AnyObject {
     func toolbarDidRequestPolygonSides()
 }
 
-/// Vertical tool panel on the left – icons in two columns, by group.
+/// A part of the tool panel: the user's favorite tools or one tool group.
+enum ToolPanelSection: Hashable {
+    case favorites
+    case group(ToolGroup)
+
+    /// Also the name under which the layout is saved (a title survives adding a new group).
+    var title: String {
+        switch self {
+        case .favorites: return "Favorites"
+        case .group(let group): return group.title
+        }
+    }
+
+    init?(title: String) {
+        if title == "Favorites" { self = .favorites; return }
+        guard let group = ToolGroup.allCases.first(where: { $0.title == title }) else { return nil }
+        self = .group(group)
+    }
+
+    static var all: [ToolPanelSection] {
+        return [.favorites] + ToolGroup.allCases.map { .group($0) }
+    }
+}
+
+/// How the user arranged the tool panel: order of the sections, hidden sections and favorite tools.
+/// Kept in the app's settings on this Mac (not in the drawing).
+enum ToolPanelLayout {
+    private static let orderKey = "ToolPanelOrder"
+    private static let hiddenKey = "ToolPanelHidden"
+    private static let favoritesKey = "ToolPanelFavorites"
+
+    /// All sections in the user's order; a section the saved order doesn't know yet keeps its default place.
+    static var order: [ToolPanelSection] {
+        get {
+            var result: [ToolPanelSection] = []
+            for title in UserDefaults.standard.stringArray(forKey: orderKey) ?? [] {
+                if let section = ToolPanelSection(title: title), !result.contains(section) { result.append(section) }
+            }
+            for (index, section) in ToolPanelSection.all.enumerated() where !result.contains(section) {
+                result.insert(section, at: min(index, result.count))
+            }
+            return result
+        }
+        set { UserDefaults.standard.set(newValue.map { $0.title }, forKey: orderKey) }
+    }
+
+    static var hidden: Set<ToolPanelSection> {
+        get { return Set((UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []).compactMap { ToolPanelSection(title: $0) }) }
+        set { UserDefaults.standard.set(newValue.map { $0.title }.sorted(), forKey: hiddenKey) }
+    }
+
+    /// Favorite tools in the user's order (a combined button is saved as its first tool).
+    static var favorites: [DrawingTool] {
+        get {
+            var result: [DrawingTool] = []
+            for title in UserDefaults.standard.stringArray(forKey: favoritesKey) ?? [] {
+                if let tool = DrawingTool.availableTools.first(where: { $0.title == title && $0.paletteLeader == $0 }),
+                   !result.contains(tool) {
+                    result.append(tool)
+                }
+            }
+            return result
+        }
+        set { UserDefaults.standard.set(newValue.map { $0.title }, forKey: favoritesKey) }
+    }
+
+    /// Back to the default order with all sections shown; the favorites stay.
+    static func resetLayout() {
+        UserDefaults.standard.removeObject(forKey: orderKey)
+        UserDefaults.standard.removeObject(forKey: hiddenKey)
+    }
+}
+
+/// Dragging a section heading, a tool button or a floating palette.
+enum ToolDragPhase {
+    case moved, ended
+}
+
+/// The picture of a dragged tool that follows the mouse across the whole window.
+final class ToolDragGhost {
+    static let shared = ToolDragGhost()
+    private let view = NSView()
+    private let imageView = NSImageView()
+    private let size = NSSize(width: 34, height: 32)
+
+    private init() {
+        view.frame.size = size
+        view.wantsLayer = true
+        view.layer?.backgroundColor = Theme.toolbarBackground.cgColor
+        view.layer?.cornerRadius = 6
+        view.layer?.borderWidth = 1
+        view.alphaValue = 0.9
+        imageView.frame = NSRect(origin: .zero, size: size).insetBy(dx: 6, dy: 5)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        view.addSubview(imageView)
+    }
+
+    /// Shows the icon centered on the mouse of the event.
+    func show(_ icon: NSImage?, for event: NSEvent) {
+        guard let content = event.window?.contentView else { return }
+        if view.superview !== content {
+            view.layer?.borderColor = Theme.accent.cgColor
+            imageView.image = icon.flatMap { ToolIcons.colored($0, selected: false) } ?? icon
+            content.addSubview(view, positioned: .above, relativeTo: nil)
+        }
+        let point = content.convert(event.locationInWindow, from: nil)
+        view.setFrameOrigin(NSPoint(x: point.x - size.width / 2, y: point.y - size.height / 2))
+    }
+
+    func hide() {
+        view.removeFromSuperview()
+    }
+}
+
+/// Vertical tool panel on the left – icons in two columns, by section (Favorites and the tool groups).
 /// Holding (or right-clicking) the Arc tool opens a menu of arc construction methods.
-final class ToolbarView: NSView {
+/// A section is moved by dragging its heading and hidden from the heading's menu;
+/// a tool is added to Favorites from its right-click menu.
+final class ToolbarView: NSView, NSMenuDelegate {
     weak var delegate: ToolbarViewDelegate?
-    private var buttons: [DrawingTool: ToolButtonView] = [:]
+    /// Buttons of each tool – a favorite tool has two (in Favorites and in its group).
+    private var buttons: [DrawingTool: [ToolButtonView]] = [:]
     /// Combined buttons: which tool of the family the button currently stands for (key = the family's first tool).
     private var familyChoice: [DrawingTool: DrawingTool] = [:]
+    /// Icons set from outside (arc method, text kind, …) – they survive rebuilding the panel.
+    private var customIcons: [DrawingTool: NSImage] = [:]
+    /// Buttons on the floating palettes – a palette owns them, the panel only keeps them up to date.
+    private var paletteButtons: [DrawingTool: NSHashTable<ToolButtonView>] = [:]
+    private var selectedTool: DrawingTool = .select
     private(set) var arcMethod: ArcMethod = .threePoint
+    /// Tools (one button or a whole group) dragged out of the panel and released elsewhere in the window
+    /// (point in window coordinates).
+    var onToolsDroppedOutside: (([DrawingTool], NSPoint) -> Void)?
 
     static let preferredWidth: CGFloat = 80
     private let buttonSize = NSSize(width: 34, height: 32)
@@ -68,7 +193,10 @@ final class ToolbarView: NSView {
     private let content = FlippedToolbarContent()
 
     private final class FlippedToolbarContent: NSView {
+        var menuProvider: (() -> NSMenu?)?
         override var isFlipped: Bool { return true }
+        // right-click on an empty place of the panel: which sections to show
+        override func menu(for event: NSEvent) -> NSMenu? { return menuProvider?() }
     }
 
     private func setupUI() {
@@ -82,107 +210,377 @@ final class ToolbarView: NSView {
         scroll.scrollerStyle = .overlay
         scroll.horizontalScrollElasticity = .none
         content.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
+        content.menuProvider = { [weak self] in self?.makeLayoutMenu() }
         scroll.documentView = content
         addSubview(scroll)
+        rebuild()
+    }
 
-        let left = (bounds.width - 2 * buttonSize.width - 4) / 2
+    /// Where each shown section lies (heading top to the end of its buttons) – for dragging a heading.
+    private var sectionSpans: [(section: ToolPanelSection, top: CGFloat, bottom: CGFloat)] = []
+    /// Top of the Favorites buttons (nil = Favorites not shown) – for dragging a favorite.
+    private var favoritesTop: CGFloat?
+    /// Line showing where a dragged section will land.
+    private let dropMarker = NSBox()
+
+    private var buttonsLeft: CGFloat {
+        return (bounds.width - 2 * buttonSize.width - 4) / 2
+    }
+
+    /// Sections shown on the panel, in the user's order (an empty Favorites is not shown).
+    private var visibleSections: [ToolPanelSection] {
+        let hidden = ToolPanelLayout.hidden
+        return ToolPanelLayout.order.filter { !hidden.contains($0) && !tools(in: $0).isEmpty }
+    }
+
+    private func tools(in section: ToolPanelSection) -> [DrawingTool] {
+        switch section {
+        case .favorites: return ToolPanelLayout.favorites
+        // only one button for combined tools
+        case .group(let group): return DrawingTool.tools(in: group).filter { $0.paletteLeader == $0 }
+        }
+    }
+
+    /// Lays the panel out again from the saved layout (order, hidden sections, favorites).
+    private func rebuild() {
+        hideTip()
+        content.subviews.forEach { $0.removeFromSuperview() }
+        buttons = [:]
+        sectionSpans = []
+        favoritesTop = nil
         var y: CGFloat = 8
-        for group in ToolGroup.allCases {
-            let caption = NSTextField(labelWithString: group.title.uppercased())
-            caption.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
-            caption.textColor = Theme.textHeading
-            caption.alignment = .center
-            // a long name (ARCHITECTURE) gets a slightly smaller font so it fits the narrow panel
-            var fontSize: CGFloat = 9.5
-            while caption.intrinsicContentSize.width > bounds.width - 4 && fontSize > 7 {
-                fontSize -= 0.5
-                caption.font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
-            }
-            caption.frame = NSRect(x: 0, y: y, width: bounds.width, height: 13)
+        let sections = visibleSections
+        for section in sections {
+            let top = y
+            let caption = ToolSectionCaptionView(frame: NSRect(x: 0, y: y, width: bounds.width, height: 13), title: section.title)
+            caption.toolTip = "Drag to move this group, right-click to hide it"
+            caption.onDrag = { [weak self] phase, event in self?.sectionDragged(section, phase: phase, event: event) }
+            caption.menuProvider = { [weak self] in self?.makeSectionMenu(section) }
             content.addSubview(caption)
             y += 14
 
-            // only one button for combined tools
-            let tools = DrawingTool.tools(in: group).filter { $0.paletteLeader == $0 }
-            for (index, tool) in tools.enumerated() {
+            let sectionTools = tools(in: section)
+            if section == .favorites { favoritesTop = y }
+            for (index, tool) in sectionTools.enumerated() {
                 let column = CGFloat(index % 2)
                 let row = CGFloat(index / 2)
-                let button = ToolButtonView(frame: NSRect(x: left + column * (buttonSize.width + 4),
-                                                          y: y + row * (buttonSize.height + 2),
-                                                          width: buttonSize.width, height: buttonSize.height))
-                button.image = tool.icon()
-                // hover help: summary immediately, usage after 3 s (instead of a plain tooltip)
-                button.onHover = { [weak self, weak button] hovering in
-                    guard let self = self, let button = button else { return }
-                    self.hoverChanged(tool: self.familyChoice[tool] ?? tool, button: button, hovering: hovering)
-                }
-                button.onClick = { [weak self] in
-                    guard let self = self else { return }
-                    self.hideTip()
-                    self.delegate?.toolbarDidSelectTool(self.familyChoice[tool] ?? tool)
-                }
-                if tool.paletteFamily != nil {
-                    familyChoice[tool] = tool
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeFamilyMenu(tool) }
-                }
-                if tool == .arc {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeArcMenu() }
-                }
-                if tool == .hatch {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeHatchMenu() }
-                }
-                if tool == .text {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeTextMenu() }
-                }
-                if tool == .xline {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeXLineMenu() }
-                }
-                if tool == .matchProperties {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeMatchMenu() }
-                }
-                if tool == .measure {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeMeasureMenu() }
-                }
-                if tool == .array {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeArrayMenu() }
-                }
-                if tool == .blockInsert {
-                    button.hasMenu = true
-                    button.menuProvider = { [weak self] in self?.makeBlockMenu() }
+                let button = makeButton(tool, frame: NSRect(x: buttonsLeft + column * (buttonSize.width + 4),
+                                                            y: y + row * (buttonSize.height + 2),
+                                                            width: buttonSize.width, height: buttonSize.height))
+                let inFavorites = section == .favorites
+                button.onDrag = { [weak self] phase, event in
+                    self?.buttonDragged(tool, fromFavorites: inFavorites, phase: phase, event: event)
                 }
                 content.addSubview(button)
-                buttons[tool] = button
+                buttons[tool, default: []].append(button)
             }
-            y += CGFloat((tools.count + 1) / 2) * (buttonSize.height + 2) + 8
+            y += CGFloat((sectionTools.count + 1) / 2) * (buttonSize.height + 2) + 8
+            sectionSpans.append((section, top, y))
 
-            // group separator
-            if group != ToolGroup.allCases.last {
+            // section separator
+            if section != sections.last {
                 let separator = NSBox(frame: NSRect(x: 10, y: y - 4, width: bounds.width - 20, height: 1))
                 separator.boxType = .separator
                 content.addSubview(separator)
                 y += 4
             }
         }
+        if sections.isEmpty {
+            // everything hidden – say how to get the groups back
+            let hint = NSTextField(wrappingLabelWithString: "All tool groups are hidden. Right-click here to show them.")
+            hint.font = NSFont.systemFont(ofSize: 10)
+            hint.textColor = Theme.textHint
+            hint.alignment = .center
+            hint.frame = NSRect(x: 4, y: y, width: bounds.width - 8, height: 80)
+            content.addSubview(hint)
+            y += 84
+        }
+        dropMarker.boxType = .custom
+        dropMarker.borderWidth = 0
+        dropMarker.fillColor = Theme.accent
+        dropMarker.isHidden = true
+        content.addSubview(dropMarker)
         content.frame.size.height = y + 4
-        setSelectedTool(.select)
+        let leader = selectedTool.paletteLeader
+        for (key, list) in buttons { list.forEach { $0.isSelected = key == leader } }
+    }
+
+    /// Rebuilds after the current event (a menu or a drag) has finished with the old buttons.
+    private func scheduleRebuild() {
+        DispatchQueue.main.async { [weak self] in self?.rebuild() }
+    }
+
+    /// fixed = a palette button that always stands for this one tool, also a tool of a combined button
+    /// (so Circle and Ellipse can lie side by side).
+    private func makeButton(_ tool: DrawingTool, frame: NSRect, fixed: Bool = false) -> ToolButtonView {
+        let combined = !fixed && tool.paletteFamily != nil
+        if combined, familyChoice[tool] == nil { familyChoice[tool] = tool }
+        let button = ToolButtonView(frame: frame)
+        button.image = fixed ? fixedIcon(for: tool) : icon(for: tool)
+        // the tool the button stands for now (a combined button: the last chosen one of its family)
+        let current: () -> DrawingTool = { [weak self] in combined ? (self?.familyChoice[tool] ?? tool) : tool }
+        // hover help: summary immediately, usage after 3 s (instead of a plain tooltip)
+        button.onHover = { [weak self, weak button] hovering in
+            guard let self = self, let button = button else { return }
+            self.hoverChanged(tool: current(), button: button, combined: combined, hovering: hovering)
+        }
+        button.onClick = { [weak self] in
+            guard let self = self else { return }
+            self.hideTip()
+            self.delegate?.toolbarDidSelectTool(current())
+        }
+        // holding opens the tool's own menu; right-click opens it too, with Add to / Remove from Favorites
+        button.hasMenu = combined || Self.toolsWithMenu.contains(tool)
+        button.menuProvider = { [weak self] in self?.makeButtonMenu(tool, combined: combined) }
+        return button
+    }
+
+    /// The icon a tool's button shows now (the chosen tool of a combined button, the arc method, …).
+    private func icon(for tool: DrawingTool) -> NSImage? {
+        return customIcons[tool] ?? (familyChoice[tool] ?? tool).icon()
+    }
+
+    /// The icon of a palette button that always stands for this one tool.
+    private func fixedIcon(for tool: DrawingTool) -> NSImage? {
+        return customIcons[tool] ?? tool.icon()
+    }
+
+    /// A button for a floating palette – the same as in the panel, kept up to date by the panel.
+    func makePaletteButton(_ tool: DrawingTool) -> ToolButtonView {
+        let button = makeButton(tool, frame: NSRect(origin: .zero, size: buttonSize), fixed: true)
+        button.isSelected = tool == selectedTool
+        let table = paletteButtons[tool] ?? .weakObjects()
+        table.add(button)
+        paletteButtons[tool] = table
+        return button
+    }
+
+    /// Sets the icon on all buttons of a tool (in the panel and on the floating palettes).
+    private func setIcon(_ image: NSImage?, for tool: DrawingTool) {
+        customIcons[tool] = image
+        buttons[tool]?.forEach { $0.image = icon(for: tool) }
+        paletteButtons[tool]?.allObjects.forEach { $0.image = fixedIcon(for: tool) }
     }
 
     func setSelectedTool(_ tool: DrawingTool) {
+        selectedTool = tool
         let leader = tool.paletteLeader
         // a combined button takes over the icon of the chosen tool
         if tool.paletteFamily != nil, familyChoice[leader] != tool {
             familyChoice[leader] = tool
-            buttons[leader]?.image = tool.icon()
+            buttons[leader]?.forEach { $0.image = icon(for: leader) }
         }
-        for (key, button) in buttons { button.isSelected = key == leader }
+        for (key, list) in buttons { list.forEach { $0.isSelected = key == leader } }
+        // a palette button stands for exactly one tool
+        for (key, table) in paletteButtons { table.allObjects.forEach { $0.isSelected = key == tool } }
+    }
+
+    // MARK: Favorites and the panel layout
+
+    /// Tools (besides combined buttons) that have their own menu.
+    private static let toolsWithMenu: Set<DrawingTool> = [.arc, .hatch, .text, .xline, .matchProperties, .measure, .array, .blockInsert]
+
+    private func toolMenu(_ tool: DrawingTool) -> NSMenu? {
+        if tool.paletteFamily != nil { return makeFamilyMenu(tool) }
+        switch tool {
+        case .arc: return makeArcMenu()
+        case .hatch: return makeHatchMenu()
+        case .text: return makeTextMenu()
+        case .xline: return makeXLineMenu()
+        case .matchProperties: return makeMatchMenu()
+        case .measure: return makeMeasureMenu()
+        case .array: return makeArrayMenu()
+        case .blockInsert: return makeBlockMenu()
+        default: return nil
+        }
+    }
+
+    /// The tool's own menu (if it has one) followed by Add to / Remove from Favorites.
+    /// A palette button of one tool of a combined button has no family menu and no favorites item.
+    private func makeButtonMenu(_ tool: DrawingTool, combined: Bool) -> NSMenu {
+        let own = combined || tool.paletteFamily == nil ? toolMenu(tool) : nil
+        let menu = own ?? NSMenu(title: tool.title)
+        guard tool.paletteLeader == tool else { return menu }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let isFavorite = ToolPanelLayout.favorites.contains(tool)
+        let item = NSMenuItem(title: isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                              action: #selector(favoriteToggled(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = tool.rawValue
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func favoriteToggled(_ sender: NSMenuItem) {
+        guard let tool = DrawingTool(rawValue: sender.tag) else { return }
+        var favorites = ToolPanelLayout.favorites
+        if let index = favorites.firstIndex(of: tool) { favorites.remove(at: index) } else { favorites.append(tool) }
+        ToolPanelLayout.favorites = favorites
+        scheduleRebuild()
+    }
+
+    /// A dragged tool button: released on the drawing it goes to a floating palette (the tool the button
+    /// shows now), a favorite released inside Favorites takes the place under the mouse.
+    private func buttonDragged(_ tool: DrawingTool, fromFavorites: Bool, phase: ToolDragPhase, event: NSEvent) {
+        let shown = familyChoice[tool] ?? tool
+        switch phase {
+        case .moved:
+            ToolDragGhost.shared.show(icon(for: tool), for: event)
+        case .ended:
+            ToolDragGhost.shared.hide()
+            if !bounds.contains(convert(event.locationInWindow, from: nil)) {
+                onToolsDroppedOutside?([shown], event.locationInWindow)
+            } else if fromFavorites {
+                moveFavorite(tool, to: content.convert(event.locationInWindow, from: nil))
+            }
+        }
+    }
+
+    /// A favorite released inside the panel takes the place under the mouse.
+    private func moveFavorite(_ tool: DrawingTool, to point: NSPoint) {
+        guard let top = favoritesTop else { return }
+        let column = point.x < buttonsLeft + buttonSize.width + 2 ? 0 : 1
+        let row = max(0, Int(((point.y - top) / (buttonSize.height + 2)).rounded(.down)))
+        var favorites = ToolPanelLayout.favorites
+        guard let from = favorites.firstIndex(of: tool) else { return }
+        favorites.remove(at: from)
+        favorites.insert(tool, at: min(row * 2 + column, favorites.count))
+        ToolPanelLayout.favorites = favorites
+        scheduleRebuild()
+    }
+
+    /// A dragged heading: inside the panel a line shows where the section will land and on release it moves there;
+    /// released on the drawing the whole section becomes a floating palette.
+    private func sectionDragged(_ section: ToolPanelSection, phase: ToolDragPhase, event: NSEvent) {
+        let outside = !bounds.contains(convert(event.locationInWindow, from: nil))
+        let shownTools = tools(in: section).map { familyChoice[$0] ?? $0 }
+        let y = content.convert(event.locationInWindow, from: nil).y
+        // the place in front of the first section whose middle lies below the mouse
+        let index = sectionSpans.firstIndex { ($0.top + $0.bottom) / 2 > y } ?? sectionSpans.count
+        switch phase {
+        case .moved where outside:
+            dropMarker.isHidden = true
+            ToolDragGhost.shared.show(shownTools.first.flatMap { icon(for: $0.paletteLeader) }, for: event)
+        case .moved:
+            ToolDragGhost.shared.hide()
+            let markerY = index < sectionSpans.count ? sectionSpans[index].top - 5 : (sectionSpans.last?.bottom ?? 0) - 2
+            dropMarker.frame = NSRect(x: 6, y: markerY, width: bounds.width - 12, height: 2)
+            dropMarker.isHidden = false
+        case .ended:
+            dropMarker.isHidden = true
+            ToolDragGhost.shared.hide()
+            if outside {
+                onToolsDroppedOutside?(shownTools, event.locationInWindow)
+            } else {
+                move(section, toVisibleIndex: index)
+            }
+        }
+    }
+
+    /// Moves a section in front of the shown section at the index (index = count: to the end).
+    private func move(_ section: ToolPanelSection, toVisibleIndex index: Int) {
+        var visible = visibleSections
+        guard let from = visible.firstIndex(of: section) else { return }
+        visible.remove(at: from)
+        let target = index > from ? index - 1 : index
+        var order = ToolPanelLayout.order
+        order.removeAll { $0 == section }
+        // hidden sections keep their place among the shown ones
+        if target < visible.count, let anchor = order.firstIndex(of: visible[target]) {
+            order.insert(section, at: anchor)
+        } else if let last = visible.last, let anchor = order.firstIndex(of: last) {
+            order.insert(section, at: anchor + 1)
+        } else {
+            order.append(section)
+        }
+        ToolPanelLayout.order = order
+        scheduleRebuild()
+    }
+
+    /// Menu of a section heading: hide or move the section, which sections to show.
+    private func makeSectionMenu(_ section: ToolPanelSection) -> NSMenu {
+        let menu = NSMenu(title: section.title)
+        let hide = NSMenuItem(title: "Hide \(section.title)", action: #selector(sectionVisibilityToggled(_:)), keyEquivalent: "")
+        hide.target = self
+        hide.representedObject = section.title
+        menu.addItem(hide)
+        let index = visibleSections.firstIndex(of: section) ?? 0
+        let up = NSMenuItem(title: "Move Up", action: index > 0 ? #selector(sectionMovedUp(_:)) : nil, keyEquivalent: "")
+        let down = NSMenuItem(title: "Move Down", action: index < visibleSections.count - 1 ? #selector(sectionMovedDown(_:)) : nil,
+                              keyEquivalent: "")
+        for item in [up, down] {
+            item.target = self
+            item.representedObject = section.title
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        addLayoutItems(to: menu)
+        return menu
+    }
+
+    /// Right-click on an empty place of the panel.
+    private func makeLayoutMenu() -> NSMenu {
+        let menu = NSMenu(title: "Tool Panel")
+        addLayoutItems(to: menu)
+        return menu
+    }
+
+    /// View › Tool Panel: the same choices, filled in each time the menu opens.
+    func makeToolPanelMenu() -> NSMenu {
+        let menu = NSMenu(title: "Tool Panel")
+        menu.delegate = self
+        return menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        addLayoutItems(to: menu)
+    }
+
+    /// One checked item per section (shown / hidden) and the reset.
+    private func addLayoutItems(to menu: NSMenu) {
+        let hidden = ToolPanelLayout.hidden
+        let noFavorites = ToolPanelLayout.favorites.isEmpty
+        for section in ToolPanelLayout.order {
+            let item = NSMenuItem(title: section.title, action: #selector(sectionVisibilityToggled(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = section.title
+            item.state = hidden.contains(section) ? .off : .on
+            if section == .favorites && noFavorites { item.subtitle = "Right-click a tool to add it" }
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let reset = NSMenuItem(title: "Reset Tool Panel Layout", action: #selector(layoutReset(_:)), keyEquivalent: "")
+        reset.target = self
+        menu.addItem(reset)
+    }
+
+    private func section(of sender: NSMenuItem) -> ToolPanelSection? {
+        return (sender.representedObject as? String).flatMap { ToolPanelSection(title: $0) }
+    }
+
+    @objc private func sectionVisibilityToggled(_ sender: NSMenuItem) {
+        guard let section = section(of: sender) else { return }
+        var hidden = ToolPanelLayout.hidden
+        if hidden.contains(section) { hidden.remove(section) } else { hidden.insert(section) }
+        ToolPanelLayout.hidden = hidden
+        scheduleRebuild()
+    }
+
+    @objc private func sectionMovedUp(_ sender: NSMenuItem) {
+        guard let section = section(of: sender), let index = visibleSections.firstIndex(of: section) else { return }
+        move(section, toVisibleIndex: index - 1)
+    }
+
+    @objc private func sectionMovedDown(_ sender: NSMenuItem) {
+        guard let section = section(of: sender), let index = visibleSections.firstIndex(of: section) else { return }
+        // in front of the section two places further = one place down
+        move(section, toVisibleIndex: index + 2)
+    }
+
+    @objc private func layoutReset(_ sender: NSMenuItem) {
+        ToolPanelLayout.resetLayout()
+        scheduleRebuild()
     }
 
     // MARK: Combined buttons (Circle / Ellipse / Polygon, Fillet / Chamfer)
@@ -250,21 +648,24 @@ final class ToolbarView: NSView {
 
     func setArcMethod(_ method: ArcMethod) {
         arcMethod = method
-        buttons[.arc]?.image = ToolIcons.image(for: method, size: 19)
+        setIcon(ToolIcons.image(for: method, size: 19), for: .arc)
     }
 
     // MARK: Tool help
 
     private let tipView = HoverTipView(frame: .zero)
     private var tipTool: DrawingTool?
+    /// The hovered button is a combined one – the help then says what else is under it.
+    private var tipCombined = true
     private weak var tipButton: NSView?
     private let tipDelay: TimeInterval = 0.5
     private let usageDelay: TimeInterval = 3.0
 
-    private func hoverChanged(tool: DrawingTool, button: NSView, hovering: Bool) {
+    private func hoverChanged(tool: DrawingTool, button: NSView, combined: Bool, hovering: Bool) {
         NSObject.cancelPreviousPerformRequests(withTarget: self)
         if hovering {
             tipTool = tool
+            tipCombined = combined
             tipButton = button
             perform(#selector(showTip), with: nil, afterDelay: tipView.superview == nil || tipView.isHidden ? tipDelay : 0)
             perform(#selector(expandTip), with: nil, afterDelay: usageDelay)
@@ -280,7 +681,7 @@ final class ToolbarView: NSView {
             content.addSubview(tipView, positioned: .above, relativeTo: nil)
         }
         let shortcut = tool.shortcut.map { "  \($0)" } ?? ""
-        tipView.configure(title: tool.title + shortcut, summary: tool.summary + familyNote(tool), usage: tool.usage, expanded: false)
+        tipView.configure(title: tool.title + shortcut, summary: tool.summary + (tipCombined ? familyNote(tool) : ""), usage: tool.usage, expanded: false)
         positionTip(next: button, in: content)
         tipView.isHidden = false
     }
@@ -288,7 +689,7 @@ final class ToolbarView: NSView {
     @objc private func expandTip() {
         guard !tipView.isHidden, let tool = tipTool, let button = tipButton, let content = window?.contentView else { return }
         let shortcut = tool.shortcut.map { "  \($0)" } ?? ""
-        tipView.configure(title: tool.title + shortcut, summary: tool.summary + familyNote(tool), usage: tool.usage, expanded: true)
+        tipView.configure(title: tool.title + shortcut, summary: tool.summary + (tipCombined ? familyNote(tool) : ""), usage: tool.usage, expanded: true)
         positionTip(next: button, in: content)
     }
 
@@ -383,7 +784,7 @@ final class ToolbarView: NSView {
 
     func setTextKind(_ kind: TextKind) {
         textKind = kind
-        buttons[.text]?.image = ToolIcons.image(for: kind, size: 19)
+        setIcon(ToolIcons.image(for: kind, size: 19), for: .text)
     }
 
     private func makeTextMenu() -> NSMenu {
@@ -515,7 +916,7 @@ final class ToolbarView: NSView {
 
     func setArrayKind(_ kind: ArrayKind) {
         arrayKind = kind
-        buttons[.array]?.image = ToolIcons.image(for: kind, size: 19)
+        setIcon(ToolIcons.image(for: kind, size: 19), for: .array)
     }
 
     private func makeArrayMenu() -> NSMenu {
@@ -546,7 +947,7 @@ final class ToolbarView: NSView {
 
     func setXLineKind(_ kind: XLineKind) {
         xlineKind = kind
-        buttons[.xline]?.image = ToolIcons.image(for: kind, size: 19)
+        setIcon(ToolIcons.image(for: kind, size: 19), for: .xline)
     }
 
     private func makeXLineMenu() -> NSMenu {
@@ -607,7 +1008,7 @@ final class ToolbarView: NSView {
 
     func setMeasureKind(_ kind: MeasureKind) {
         measureKind = kind
-        buttons[.measure]?.image = ToolIcons.image(for: kind, size: 19)
+        setIcon(ToolIcons.image(for: kind, size: 19), for: .measure)
     }
 
     private func makeMeasureMenu() -> NSMenu {
@@ -640,6 +1041,8 @@ final class ToolButtonView: NSView {
     var onClick: (() -> Void)?
     var onHover: ((Bool) -> Void)?
     var menuProvider: (() -> NSMenu?)?
+    /// Dragging the button: the panel shows where it goes and places it on release.
+    var onDrag: ((ToolDragPhase, NSEvent) -> Void)?
     var hasMenu = false { didSet { needsDisplay = true } }
     var isSelected = false { didSet { updateAppearance() } }
     var image: NSImage? {
@@ -652,6 +1055,8 @@ final class ToolButtonView: NSView {
     private var menuShown = false
     private var trackingArea: NSTrackingArea?
     private let longPressDelay: TimeInterval = 0.4
+    private var mouseDownPoint: NSPoint?
+    private var isDragging = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -724,14 +1129,35 @@ final class ToolButtonView: NSView {
         onHover?(false)
         isPressed = true
         menuShown = false
+        mouseDownPoint = event.locationInWindow
+        isDragging = false
         updateAppearance()
         if hasMenu {
             perform(#selector(showMenu), with: nil, afterDelay: longPressDelay)
         }
     }
 
+    override func mouseDragged(with event: NSEvent) {
+        guard let onDrag = onDrag, !menuShown, let start = mouseDownPoint else { return }
+        if !isDragging {
+            guard hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) > 4 else { return }
+            // a drag, not a click or a hold: no menu
+            NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(showMenu), object: nil)
+            isDragging = true
+        }
+        onDrag(.moved, event)
+    }
+
     override func mouseUp(with event: NSEvent) {
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(showMenu), object: nil)
+        mouseDownPoint = nil
+        if isDragging {
+            isDragging = false
+            isPressed = false
+            updateAppearance()
+            onDrag?(.ended, event)
+            return
+        }
         let wasMenu = menuShown
         isPressed = false
         updateAppearance()
@@ -740,7 +1166,7 @@ final class ToolButtonView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        if hasMenu { showMenu() } else { super.rightMouseDown(with: event) }
+        if menuProvider != nil { showMenu() } else { super.rightMouseDown(with: event) }
     }
 
     @objc private func showMenu() {
@@ -750,6 +1176,72 @@ final class ToolButtonView: NSView {
         // the menu “swallows” the mouse-up – restore the state manually
         isPressed = false
         updateAppearance()
+    }
+}
+
+/// The heading of a tool panel section: drag it to move the section, right-click it for its menu.
+final class ToolSectionCaptionView: NSView {
+    var onDrag: ((ToolDragPhase, NSEvent) -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+    private let label: NSTextField
+    private var mouseDownPoint: NSPoint?
+    private var isDragging = false
+
+    init(frame frameRect: NSRect, title: String) {
+        label = NSTextField(labelWithString: title.uppercased())
+        super.init(frame: frameRect)
+        label.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+        label.textColor = Theme.textHeading
+        label.alignment = .center
+        // a long name (ARCHITECTURE) gets a slightly smaller font so it fits the narrow panel
+        var fontSize: CGFloat = 9.5
+        while label.intrinsicContentSize.width > frameRect.width - 4 && fontSize > 7 {
+            fontSize -= 0.5
+            label.font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        }
+        label.frame = bounds
+        label.autoresizingMask = [.width]
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // the whole heading takes the mouse, not the label inside
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return frame.contains(point) ? self : nil
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = event.locationInWindow
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = mouseDownPoint else { return }
+        if !isDragging {
+            guard hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) > 3 else { return }
+            isDragging = true
+            NSCursor.closedHand.push()
+        }
+        onDrag?(.moved, event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownPoint = nil
+        guard isDragging else { return }
+        isDragging = false
+        NSCursor.pop()
+        onDrag?(.ended, event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        return menuProvider?()
     }
 }
 

@@ -213,6 +213,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         toolbarView.delegate = self
         view.addSubview(toolbarView)
 
+        // floating tool palettes on top of the drawing: their buttons come from the tool panel
+        editorView.paletteLayer.makeButton = { [weak self] tool in self?.toolbarView.makePaletteButton(tool) }
+        toolbarView.onToolsDroppedOutside = { [weak self] tools, windowPoint in
+            self?.editorView.paletteLayer.dropTools(tools, atWindowPoint: windowPoint)
+        }
+        editorView.paletteLayer.reload()
+
         // right panel (as in newer SketchUp): Properties and Layers stacked, both collapsible
         trayBackground = NSView(frame: .zero)
         trayBackground.wantsLayer = true
@@ -4383,6 +4390,12 @@ extension MainViewController {
         item(viewMenu, "Layers Panel", #selector(toggleLayerPanel), "1", target: self)
         item(viewMenu, "Properties Panel", #selector(togglePropertiesPanel), "2", target: self)
         item(viewMenu, "Info Panel", #selector(toggleInfoPanel(_:)), "3", target: self)
+        // which tool panel sections to show (the panel fills the submenu each time it opens)
+        if let toolbarView = toolbarView {
+            let toolPanelItem = NSMenuItem(title: "Tool Panel", action: nil, keyEquivalent: "")
+            toolPanelItem.submenu = toolbarView.makeToolPanelMenu()
+            viewMenu.addItem(toolPanelItem)
+        }
         item(viewMenu, "Reset Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self)
         item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self)
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self)
