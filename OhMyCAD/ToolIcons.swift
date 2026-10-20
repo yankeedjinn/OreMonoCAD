@@ -593,6 +593,53 @@ enum ToolIcons {
         return image
     }
 
+    // MARK: Menu icons – Match Properties and the items that open a dialog
+
+    static func image(for property: MatchProperty, size: CGFloat) -> NSImage {
+        let key = "match\(property.rawValue)-\(size)"
+        if let cached = cache[key] { return cached }
+        let image = render(size: size, description: property.title) { drawMatch(property, $0) }
+        cache[key] = image
+        return image
+    }
+
+    /// Sliders – the one icon of all menu items that open a dialog (the “…” items).
+    static func settingsImage(size: CGFloat) -> NSImage {
+        let key = "settings-\(size)"
+        if let cached = cache[key] { return cached }
+        let image = render(size: size, description: "Settings") { p in
+            for (y, knob) in [(CGFloat(18), CGFloat(8)), (12, 16), (6, 11)] {
+                p.line(3, y, knob - 2.6, y)
+                p.ring(knob, y)
+                p.line(knob + 2.6, y, 21, y)
+            }
+        }
+        cache[key] = image
+        return image
+    }
+
+    private static func drawMatch(_ property: MatchProperty, _ p: IconPainter) {
+        switch property {
+        case .layer:
+            // a stack of layers
+            p.polyline([(12, 21), (21, 16.5), (12, 12), (3, 16.5)], closed: true)
+            p.polyline([(3, 12), (12, 7.5), (21, 12)])
+            p.polyline([(3, 7.5), (12, 3), (21, 7.5)])
+        case .color:
+            // a color swatch
+            p.fill(4.5, 4.5, 15, 15)
+        case .lineWeight:
+            // lines from thin to thick
+            p.line(3, 19, 21, 19)
+            p.fill(3, 11, 18, 3.5)
+            p.fill(3, 3, 18, 5.5)
+        case .style:
+            // a letter A – text, dimension and hatch style
+            p.polyline([(4, 3), (12, 21), (20, 3)])
+            p.line(7.6, 11, 16.4, 11)
+        }
+    }
+
     /// Measuring creates nothing: the measured quantity is in the accent color.
     private static func drawMeasure(_ kind: MeasureKind, _ p: IconPainter) {
         switch kind {

@@ -563,16 +563,19 @@ enum HatchMenuBuilder {
         let newItem = NSMenuItem(title: "Custom Pattern…", action: actions.newCustom, keyEquivalent: "")
         newItem.target = actions.target
         newItem.subtitle = "Define your own pattern as text, with a live preview"
+        newItem.image = ToolIcons.settingsImage(size: imageSize)
         menu.addItem(newItem)
 
         let importItem = NSMenuItem(title: "Import .pat File…", action: #selector(HatchPatternImporter.importFile(_:)), keyEquivalent: "")
         importItem.target = HatchPatternImporter.shared
         importItem.subtitle = "Add patterns from an AutoCAD pattern file"
+        importItem.image = ToolIcons.settingsImage(size: imageSize)
         menu.addItem(importItem)
 
         let settingsItem = NSMenuItem(title: "Angle & Scale…", action: actions.settings, keyEquivalent: "")
         settingsItem.target = actions.target
         settingsItem.subtitle = "Now \(LineType.format(angle))°, scale \(scaleText)"
+        settingsItem.image = ToolIcons.settingsImage(size: imageSize)
         menu.addItem(settingsItem)
 
         if !custom.isEmpty {

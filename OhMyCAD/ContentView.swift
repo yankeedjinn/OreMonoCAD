@@ -107,7 +107,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         set { activeTab.fileURL = newValue }
     }
 
-    private let toolbarHeight: CGFloat = 0          // top bar removed (layers are in the right panel)
+    /// Height of the palette bar at the top of the window (0 when no palette is held to the top).
+    private var toolbarHeight: CGFloat = 0
+    /// The bar above the drawing tabs for the palettes held to the top.
+    private var paletteDockBar: PaletteDockBar!
     private let paletteWidth: CGFloat = ToolbarView.preferredWidth
     /// Status line – a free margin at the bottom so the Dock doesn't open when clicking the toggles.
     private let statusBarHeight: CGFloat = 70
@@ -218,6 +221,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         toolbarView.onToolsDroppedOutside = { [weak self] tools, windowPoint in
             self?.editorView.paletteLayer.dropTools(tools, atWindowPoint: windowPoint)
         }
+        // a whole group moves to a palette (it leaves the panel) and comes back when the palette closes
+        toolbarView.onSectionDroppedOutside = { [weak self] section, tools, windowPoint in
+            self?.editorView.paletteLayer.dropTools(tools, atWindowPoint: windowPoint, section: section.title)
+        }
+        editorView.paletteLayer.onPanelLayoutChanged = { [weak self] in self?.toolbarView.reloadLayout() }
+        toolbarView.onLayoutReset = { [weak self] in self?.editorView.paletteLayer.closeGroupPalettes() }
+        paletteDockBar = PaletteDockBar(frame: NSRect(x: 0, y: b.height, width: b.width, height: 0))
+        paletteDockBar.autoresizingMask = [.width, .minYMargin]
+        paletteDockBar.onHeightChanged = { [weak self] height in self?.paletteDockBarChanged(height) }
+        view.addSubview(paletteDockBar)
+        editorView.paletteLayer.dockBar = paletteDockBar
         editorView.paletteLayer.reload()
 
         // right panel (as in newer SketchUp): Properties and Layers stacked, both collapsible
@@ -939,6 +953,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
+    /// The palette bar at the top got taller or lower: the tool panel, the tabs and the drawing move below it.
+    private func paletteDockBarChanged(_ height: CGFloat) {
+        toolbarHeight = height
+        let b = view.bounds
+        paletteDockBar.frame = NSRect(x: 0, y: b.height - height, width: b.width, height: height)
+        toolbarView.frame = NSRect(x: 0, y: statusBarHeight, width: paletteWidth, height: b.height - height - statusBarHeight)
+        if propertiesContainer != nil { layoutTray() }
+    }
+
     private func updateEditorViewFrame() {
         var frame = view.bounds
         frame.origin.y = statusBarHeight
@@ -1021,6 +1044,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.onToggleSnap = { [weak self] in self?.toggleSnap() }
         statusBar.onShowSnapSettings = { [weak self] anchor in self?.showSnapSettings(relativeTo: anchor) }
         statusBar.onToggleOrtho = { [weak self] in self?.toggleOrtho() }
+        statusBar.onToggleSnapTracking = { [weak self] in self?.toggleSnapTracking() }
         statusBar.onToggleAskToClose = { [weak self] in self?.toggleAskToClose() }
         statusBar.onToggleLineContinue = { [weak self] in self?.toggleLineContinue() }
         statusBar.onToggleLineWeights = { [weak self] in self?.toggleLineWeights() }
@@ -3700,16 +3724,16 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private var modeKeyMonitor: Any?
 
-    private enum ModeKey { case snap, askToClose, lineWeights, dynamicInput, lineContinue, ortho, grid, polar, showGrid }
+    private enum ModeKey { case snap, snapTracking, askToClose, lineWeights, dynamicInput, lineContinue, ortho, grid, polar, showGrid }
 
     /// ⌥ + digit by the physical key (works on every layout, including Czech).
     private static let optionKeys: [UInt16: ModeKey] = [
-        20: .snap, 21: .askToClose, 23: .lineWeights, 22: .dynamicInput,
+        18: .snapTracking, 20: .snap, 21: .askToClose, 23: .lineWeights, 22: .dynamicInput,
         26: .lineContinue, 28: .ortho, 25: .grid, 29: .polar
     ]
     /// F-keys (as in AutoCAD: F7 = grid display; LNC only ⌥7).
     private static let functionKeys: [UInt16: ModeKey] = [
-        99: .snap, 98: .showGrid, 100: .ortho, 101: .grid, 109: .polar, 111: .dynamicInput
+        99: .snap, 98: .showGrid, 100: .ortho, 101: .grid, 109: .polar, 103: .snapTracking, 111: .dynamicInput
     ]
 
     private func installModeKeys() {
@@ -3748,6 +3772,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private func toggleMode(_ key: ModeKey) {
         switch key {
         case .snap: toggleSnap()
+        case .snapTracking: toggleSnapTracking()
         case .askToClose: toggleAskToClose()
         case .lineWeights: toggleLineWeights()
         case .dynamicInput: toggleDynamicInput()
@@ -3865,6 +3890,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func toggleSnap() {
         editorView.snapEnabled.toggle()
         statusBar.showMessage(editorView.snapEnabled ? "Object snap ON" : "Object snap OFF")
+    }
+
+    @objc func toggleSnapTracking() {
+        editorView.snapTrackingEnabled.toggle()
+        statusBar.showMessage(editorView.snapTrackingEnabled ? "Snap Tracking ON" : "Snap Tracking OFF")
     }
 
     @objc func toggleOrtho() {
@@ -3993,6 +4023,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                            gridSnap: editorView.gridSnapEnabled, gridSize: editorView.gridSize,
                            polar: editorView.polarEnabled, polarIncrement: editorView.polarIncrement,
                            unit: editorView.drawingUnits.suffix)
+        statusBar.setSnapTracking(editorView.snapTrackingEnabled)
     }
 
     @objc func selectArcMethod(_ sender: NSMenuItem) {
@@ -4114,6 +4145,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return true
         case #selector(toggleOrtho):
             menuItem.state = editorView.orthoEnabled ? .on : .off
+            return true
+        case #selector(toggleSnapTracking):
+            menuItem.state = editorView.snapTrackingEnabled ? .on : .off
             return true
         case #selector(toggleGridSnap):
             menuItem.state = editorView.gridSnapEnabled ? .on : .off
@@ -4404,6 +4438,7 @@ extension MainViewController {
         // drawing modes (status line); ⌥ + digit and F-keys are caught by the window (handleModeKey)
         let aidsMenu = submenu("Drawing Aids", in: viewMenu)
         item(aidsMenu, "Snap  (⌥3, F3)", #selector(toggleSnap), modifiers: [], target: self)
+        item(aidsMenu, "Snap Tracking  (⌥1, F11)", #selector(toggleSnapTracking), modifiers: [], target: self)
         item(aidsMenu, "Ortho  (⌥8, F8, or hold Shift)", #selector(toggleOrtho), modifiers: [], target: self)
         item(aidsMenu, "Snap to Grid  (⌥9, F9)", #selector(toggleGridSnap), modifiers: [], target: self)
         item(aidsMenu, "Polar Angles  (⌥0, F10)", #selector(togglePolar), modifiers: [], target: self)

@@ -806,7 +806,7 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
 
         let reset = NSButton(title: "Reset All to Defaults", target: self, action: #selector(resetAll))
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a key cell and type one letter (A–Z), or ⇧ and a letter for Shift (+F works too); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥3–⌥0 and F3, F7–F10, F12 switch modes, digits start typed values, ↩, Space or right-click repeats the last tool. Help › Keyboard Shortcuts… lists them all.")
+            "Click a key cell and type one letter (A–Z), or ⇧ and a letter for Shift (+F works too); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥1, ⌥3–⌥0 and F3, F7–F12 switch modes, digits start typed values, ↩, Space or right-click repeats the last tool. Help › Keyboard Shortcuts… lists them all.")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 540

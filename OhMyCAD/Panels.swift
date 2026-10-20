@@ -173,6 +173,10 @@ final class ToolbarView: NSView, NSMenuDelegate {
     /// Tools (one button or a whole group) dragged out of the panel and released elsewhere in the window
     /// (point in window coordinates).
     var onToolsDroppedOutside: (([DrawingTool], NSPoint) -> Void)?
+    /// A whole section dragged out of the panel by its heading and released elsewhere in the window.
+    var onSectionDroppedOutside: ((ToolPanelSection, [DrawingTool], NSPoint) -> Void)?
+    /// The panel layout was reset (the sections moved to palettes come back).
+    var onLayoutReset: (() -> Void)?
 
     static let preferredWidth: CGFloat = 80
     private let buttonSize = NSSize(width: 34, height: 32)
@@ -308,6 +312,11 @@ final class ToolbarView: NSView, NSMenuDelegate {
     /// Rebuilds after the current event (a menu or a drag) has finished with the old buttons.
     private func scheduleRebuild() {
         DispatchQueue.main.async { [weak self] in self?.rebuild() }
+    }
+
+    /// Lays the panel out again after the saved layout changed elsewhere (a section moved to or from a palette).
+    func reloadLayout() {
+        scheduleRebuild()
     }
 
     /// fixed = a palette button that always stands for this one tool, also a tool of a combined button
@@ -470,7 +479,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
             dropMarker.isHidden = true
             ToolDragGhost.shared.hide()
             if outside {
-                onToolsDroppedOutside?(shownTools, event.locationInWindow)
+                onSectionDroppedOutside?(section, shownTools, event.locationInWindow)
             } else {
                 move(section, toVisibleIndex: index)
             }
@@ -580,6 +589,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
 
     @objc private func layoutReset(_ sender: NSMenuItem) {
         ToolPanelLayout.resetLayout()
+        onLayoutReset?()
         scheduleRebuild()
     }
 
@@ -621,6 +631,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
                                    keyEquivalent: "")
             sides.target = self
             sides.subtitle = "Also S while drawing, or the Sides field at the cursor"
+            sides.image = ToolIcons.settingsImage(size: 22)
             menu.addItem(sides)
         }
         if family.contains(.dimLinear) {
@@ -805,7 +816,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let style = NSMenuItem(title: "Text Style…", action: #selector(textStyleChosen(_:)), keyEquivalent: "")
         style.target = self
         style.subtitle = "Font, typeface and height for new text"
-        style.image = NSImage(systemSymbolName: "textformat", accessibilityDescription: "Text style")
+        style.image = ToolIcons.settingsImage(size: 22)
         menu.addItem(style)
         return menu
     }
@@ -839,6 +850,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let styleItem = NSMenuItem(title: "Dimension Style…", action: #selector(dimStyleChosen(_:)), keyEquivalent: "")
         styleItem.target = self
         styleItem.subtitle = "Text height, size of the ends and decimals of new dimensions"
+        styleItem.image = ToolIcons.settingsImage(size: 22)
         menu.addItem(styleItem)
     }
 
@@ -885,6 +897,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let manager = NSMenuItem(title: "Block Manager…", action: #selector(blockManagerChosen(_:)), keyEquivalent: "")
         manager.target = self
         manager.subtitle = "Rename, delete, reload or bind external references"
+        manager.image = ToolIcons.settingsImage(size: 18)
         menu.addItem(manager)
         let xref = NSMenuItem(title: "Attach External Reference…", action: #selector(attachXrefChosen(_:)), keyEquivalent: "")
         xref.target = self
@@ -986,6 +999,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
             item.target = self
             item.tag = index
             item.subtitle = property.detail
+            item.image = ToolIcons.image(for: property, size: 22)
             item.state = chosen.contains(property) ? .on : .off
             menu.addItem(item)
         }
@@ -3440,6 +3454,7 @@ final class StatusBarView: NSView {
     /// Toggles at the bottom (like in the AutoCAD status bar).
     var onToggleSnap: (() -> Void)?
     var onToggleOrtho: (() -> Void)?
+    var onToggleSnapTracking: (() -> Void)?
     var onToggleAskToClose: (() -> Void)?
     var onToggleLineContinue: (() -> Void)?
     var onToggleLineWeights: (() -> Void)?
@@ -3457,6 +3472,7 @@ final class StatusBarView: NSView {
     /// Popup with the choice of snap points (right click on SNAP or ▾).
     var onShowSnapSettings: ((NSView) -> Void)?
     private var orthoButton: NSButton!
+    private var trackButton: NSButton!
     private var gridButton: NSButton!
     private var polarButton: NSButton!
     private var fkeysButton: NSButton!
@@ -3566,6 +3582,7 @@ final class StatusBarView: NSView {
         addSubview(snapMore)
         rightItems.append(snapMore)
         snapMoreButton = snapMore
+        trackButton = toggle("Track", "Snap tracking – hold the cursor on a snap point for a moment to track it (a small cross); the cursor then lines up with it horizontally, vertically and at polar angles. Hold it there again to release it\nShortcut: ⌥1 · F11", #selector(trackClicked))
         orthoButton = toggle("Ortho", "Ortho – only horizontal and vertical directions (of the drawing coordinates)\nShortcut: ⌥8 · F8 · or hold Shift", #selector(orthoClicked))
         polarButton = toggle("Polar 15° ", "Polar angles – the direction snaps in steps (the number is the step)\nShortcut: ⌥0 · F10 · right-click = step or Custom…", #selector(polarClicked), valued: true)
         gridButton = toggle("Grid 10 ", "Snap to grid – points jump to the grid (the number is the grid step)\nShortcut: ⌥9 · F9 · right-click = grid size or Custom…", #selector(gridClicked), valued: true)
@@ -3756,13 +3773,13 @@ final class StatusBarView: NSView {
         fkeysButton.state = fkeysOn ? .on : .off
         let state: String
         switch standard {
-        case true?: state = "ON – the top row sends F1, F2… (F3, F7–F10 and F12 work directly)."
+        case true?: state = "ON – the top row sends F1, F2… (F3 and F7–F12 work directly)."
         case false?: state = "OFF – the top row controls brightness, volume…; hold fn (Globe) for F1, F2…"
         case nil: state = "unknown"
         }
         fkeysButton.toolTip = """
         Function keys as F1–F12 (macOS keyboard setting): \(state)
-        Every mode also has a shortcut that always works: ⌥ + number (⌥3 Snap, ⌥4 CLS, ⌥5 LWT, ⌥6 value box, ⌥7 LNC, ⌥8 Ortho, ⌥9 Grid snap, ⌥0 Polar).
+        Every mode also has a shortcut that always works: ⌥ + number (⌥1 Snap tracking, ⌥3 Snap, ⌥4 CLS, ⌥5 LWT, ⌥6 value box, ⌥7 LNC, ⌥8 Ortho, ⌥9 Grid snap, ⌥0 Polar).
         Click for how to change the setting.
         """
     }
@@ -3808,6 +3825,11 @@ final class StatusBarView: NSView {
     /// The SNAP button (the snap point popup is anchored to it).
     var snapAnchor: NSView { return snapButton }
     @objc private func orthoClicked() { onToggleOrtho?() }
+    @objc private func trackClicked() { onToggleSnapTracking?() }
+
+    func setSnapTracking(_ on: Bool) {
+        trackButton.state = on ? .on : .off
+    }
     @objc private func askToCloseClicked() { onToggleAskToClose?() }
     @objc private func lineContinueClicked() { onToggleLineContinue?() }
     @objc private func lineWeightClicked() { onToggleLineWeights?() }

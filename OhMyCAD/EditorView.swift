@@ -526,6 +526,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     let viewport = Viewport()
     let gridRenderer = GridRenderer()
     let snapManager = SnapManager()
+    /// SNAP TRACKING: snap points tracked by hovering – the cursor lines up with them.
+    let snapTracker = SnapTracker()
+    var snapTrackingEnabled: Bool {
+        get { return snapTracker.enabled }
+        set { snapTracker.enabled = newValue; needsDisplay = true; onModesChanged?() }
+    }
 
     var currentTool: DrawingTool = .select {
         didSet {
@@ -1456,6 +1462,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         dynamicInput.isHidden = true
         addSubview(dynamicInput)
         dynamicInput.onChange = { [weak self] in self?.dynamicInputChanged() }
+        snapTracker.onChange = { [weak self] in self?.overlayRedraw() }
         dynamicInput.onCommit = { [weak self] in self?.commitDynamicInput() }
         dynamicInput.onCancel = { [weak self] in self?.cancelDynamicInput() }
         dynamicInput.onLetterCommand = { [weak self] letter in self?.handleInputLetter(letter) ?? false }
@@ -1558,6 +1565,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         pendingMirror = nil
         pasteRequest = nil
         snapManager.clearAcquired()
+        snapTracker.clear()
         commitInlineText()
         textBoxStart = nil
         points.removeAll()
@@ -2259,6 +2267,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         drawScaleReference(in: context, transform: transform)
         drawTextBoxPreview(in: context, transform: transform)
         drawGrips(in: context, transform: transform)
+        snapTracker.draw(in: context, bounds: bounds, ucsAngle: ucsAngle) { viewport.worldToScreen($0) }
         drawSnapMarker(in: context)
         drawAxisPick(in: context, transform: transform)
         drawUCSIcon(in: context, transform: transform)
@@ -3031,17 +3040,26 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         var worldPoint = viewport.screenToWorld(screenPoint)
         activeSnap = nil
         shiftHeld = event.modifierFlags.contains(.shift)
-        guard expectsPoint else { return worldPoint }
+        snapTracker.clearHit()
+        guard expectsPoint else {
+            snapTracker.hover(over: nil)
+            return worldPoint
+        }
 
         let tolerance = snapTolerance / viewport.getCurrentZoom()
         let reference = points.last ?? dragMoveBase ?? activeGrip?.base
+        let cursorPoint = worldPoint
         if snapEnabled, let snap = snapManager.findSnapPoint(near: worldPoint,
                                                              in: entitiesNear(worldPoint, tolerance: tolerance)
                                                                 + blockBackgroundNear(worldPoint, tolerance: tolerance),
                                                              tolerance: tolerance, from: reference) {
             activeSnap = snap
             worldPoint = snap.point
+            snapTracker.hover(over: snap)
         } else {
+            snapTracker.hover(over: nil)
+            // the direction ortho / polar keeps from the previous point (snap tracking then stays on it).
+            var constraint: CGPoint?
             // GRID: point on the nearest grid node
             if gridSnapEnabled, gridSize > 0 {
                 worldPoint = snappedToGrid(worldPoint)
@@ -3051,6 +3069,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 // ORTHO: along the axes of the drawing coordinates
                 let d = toUCSVector(worldPoint - reference)
                 worldPoint = reference + fromUCSVector(abs(d.x) >= abs(d.y) ? CGPoint(x: d.x, y: 0) : CGPoint(x: 0, y: d.y))
+                constraint = worldPoint - reference
             } else if polarEnabled, polarIncrement > 0, !drawsRectangle, let reference = reference {
                 // POLAR: angle in steps (from the X axis of the drawing coordinates), distance (with the grid) in grid steps
                 let d = worldPoint - reference
@@ -3060,7 +3079,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     let angle = ((atan2(d.y, d.x) - ucsAngle) / step).rounded() * step + ucsAngle
                     if gridSnapEnabled, gridSize > 0 { length = max(gridSize, (length / gridSize).rounded() * gridSize) }
                     worldPoint = Geometry.pointOnCircle(reference, length, angle)
+                    constraint = worldPoint - reference
                 }
+            }
+            // SNAP TRACKING: line up with the tracked points (horizontally, vertically, at polar angles)
+            let directions = SnapTracker.directions(ucsAngle: ucsAngle, polarIncrement: polarEnabled ? polarIncrement : nil)
+            if let aligned = snapTracker.align(cursor: cursorPoint, point: worldPoint, reference: reference,
+                                               constraint: constraint, directions: directions, tolerance: tolerance) {
+                worldPoint = aligned
             }
         }
         lastRawPoint = worldPoint
@@ -5914,6 +5940,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     override func mouseExited(with event: NSEvent) {
         crosshair.point = nil
+        snapTracker.hover(over: nil)
         if activeSnap != nil {
             activeSnap = nil
             needsDisplay = true

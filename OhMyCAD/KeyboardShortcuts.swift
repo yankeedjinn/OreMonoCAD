@@ -78,6 +78,7 @@ final class KeyboardShortcutsWindowController: NSWindowController {
 
         sections.append(("Drawing aids (always work)", [
             Row(key: "⌥3  F3", action: "Object snap"),
+            Row(key: "⌥1  F11", action: "Snap tracking – hold the cursor on a snap point to line up with it"),
             Row(key: "⌥4", action: "Ask to close polylines and splines (CLS)"),
             Row(key: "⌥5", action: "Show lineweights (LWT)"),
             Row(key: "⌥6  F12", action: "Value box always at the cursor"),
