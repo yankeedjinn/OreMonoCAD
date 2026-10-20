@@ -183,16 +183,19 @@ enum ToolIcons {
             drawMagnifier(p)
             p.rect(7, 11, 6, 6, accent: true)
         case .blockCreate:
-            // shapes enclosed in a dashed block frame
-            p.rect(2.5, 2.5, 19, 19, dashed: true, accent: true)
-            p.circle(9.5, 14.5, 3.5)
-            p.polyline([(12.5, 6), (18.5, 6), (15.5, 11.5)], closed: true)
+            // shapes enclosed in a dashed block frame, a plus at the base point
+            p.rect(5, 5, 16.5, 16.5, dashed: true, accent: true)
+            p.circle(11.5, 15.5, 3)
+            p.polyline([(13.5, 8.5), (18.5, 8.5), (16, 13)], closed: true)
+            p.line(1.5, 4.5, 7.5, 4.5)
+            p.line(4.5, 1.5, 4.5, 7.5)
         case .blockInsert:
-            // block and an arrow to the insertion point
-            p.rect(10, 10, 11, 11, accent: true)
-            p.circle(15.5, 15.5, 2.5, accent: true)
-            p.line(3, 3, 7.4, 7.4)
-            p.arrowhead(8.2, 8.2, 0.707, 0.707)
+            // the same block and an arrow to its base point
+            p.rect(8, 8, 13.5, 13.5, accent: true)
+            p.circle(12.9, 16.6, 2.4)
+            p.polyline([(14.8, 10.9), (19, 10.9), (16.9, 14.5)], closed: true)
+            p.line(2.5, 2.5, 5.2, 5.2)
+            p.arrowhead(6, 6, 0.707, 0.707)
         case .image:
             // a picture frame with mountains and the sun
             p.rect(3, 4.5, 18, 15)
@@ -260,23 +263,27 @@ enum ToolIcons {
             p.line(4, 12, 12, 4, accent: true)
             p.line(12, 4, 21, 4)
         case .offset:
+            // a line, its parallel copy and the offset distance between them
             p.line(3, 13, 11, 21)
             p.line(11, 3, 21, 13, accent: true)
+            p.line(8.4, 15.6, 13.1, 10.9)
+            p.arrowhead(13.8, 10.2, 0.707, -0.707)
         case .editPoints:
             // polyline with two marked vertices
             p.polyline([(3, 16), (8.5, 6), (14, 14), (20.5, 4)])
             p.fill(6.5, 4, 4, 4, accent: true)
             p.fill(12, 12, 4, 4, accent: true)
         case .explode:
-            // rectangle broken into separate sides
-            p.line(7.5, 3.5, 16.5, 3.5, accent: true)
-            p.line(20.5, 7.5, 20.5, 16.5, accent: true)
-            p.line(16.5, 20.5, 7.5, 20.5, accent: true)
-            p.line(3.5, 16.5, 3.5, 7.5, accent: true)
-            p.line(5, 5, 3, 3)
-            p.line(19, 5, 21, 3)
-            p.line(19, 19, 21, 21)
-            p.line(5, 19, 3, 21)
+            // the sides of a rectangle flying apart from a burst in the middle
+            p.line(5.5, 3.6, 14.8, 2.2, accent: true)
+            p.line(20.2, 5.2, 21.8, 14.2, accent: true)
+            p.line(18.4, 19.2, 9.6, 21.8, accent: true)
+            p.line(3.6, 18.8, 2.2, 10.2, accent: true)
+            p.dot(12, 12)
+            p.line(14.3, 14.3, 15.8, 15.8)
+            p.line(9.7, 14.3, 8.2, 15.8)
+            p.line(14.3, 9.7, 15.8, 8.2)
+            p.line(9.7, 9.7, 8.2, 8.2)
         case .matchProperties:
             // a brush that transfers “paint” to a line
             p.polyline([(13.2, 11.6), (20.6, 19), (19, 20.6), (11.6, 13.2)], closed: true)
@@ -286,12 +293,9 @@ enum ToolIcons {
             // a funnel – only some objects get through
             p.polyline([(3, 20), (21, 20), (14, 11.5), (14, 4.5), (10, 2.5), (10, 11.5)], closed: true)
         case .join:
-            // two pieces joining at one point
-            p.line(3.5, 4.5, 10, 14)
-            p.arrowhead(10.6, 15, 0.56, 0.83)
-            p.line(20.5, 4.5, 14, 14)
-            p.arrowhead(13.4, 15, -0.56, 0.83)
-            p.dot(12, 19.5, accent: true)
+            // two chain links: the original piece and the joined one
+            p.roundedRect(8.7, 8.7, 12, 6.4, radius: 3.2, angle: 45)
+            p.roundedRect(15.3, 15.3, 12, 6.4, radius: 3.2, angle: 45, accent: true)
         case .powerTrim:
             // a fence drawn across two lines cuts both at the boundary
             p.line(11, 2.5, 11, 21.5)
@@ -313,8 +317,12 @@ enum ToolIcons {
             p.arc(7, 3.5, 13, from: 0, to: 25)
             p.arrowhead(18.8, 9, -0.42, 0.91)
         case .scale:
-            p.rect(3.5, 3.5, 8, 8, dashed: true)
+            // the original, the enlarged copy, the direction of growth and the base point
             p.rect(3.5, 3.5, 17, 17, accent: true)
+            p.rect(3.5, 3.5, 8.5, 8.5)
+            p.line(13.5, 13.5, 16.6, 16.6)
+            p.arrowhead(17.4, 17.4, 0.707, 0.707)
+            p.dot(3.5, 3.5)
         case .mirror:
             p.line(12, 2.5, 12, 21.5, dashed: true)
             p.polyline([(2.5, 5), (9, 5), (9, 19)], closed: true)
@@ -823,6 +831,16 @@ struct IconPainter {
     /// Ellipse with semi-axes rx, ry rotated by an angle (degrees).
     func ellipse(_ cx: CGFloat, _ cy: CGFloat, _ rx: CGFloat, _ ry: CGFloat, angle: CGFloat, accent: Bool = false) {
         let path = NSBezierPath(ovalIn: NSRect(x: -rx * scale, y: -ry * scale, width: 2 * rx * scale, height: 2 * ry * scale))
+        var t = AffineTransform(translationByX: cx * scale, byY: cy * scale)
+        t.rotate(byDegrees: angle)
+        path.transform(using: t)
+        stroke(path, accent: accent)
+    }
+
+    /// Rounded rectangle centered at (cx, cy), rotated by an angle (degrees).
+    func roundedRect(_ cx: CGFloat, _ cy: CGFloat, _ w: CGFloat, _ h: CGFloat, radius: CGFloat, angle: CGFloat, accent: Bool = false) {
+        let path = NSBezierPath(roundedRect: NSRect(x: -w / 2 * scale, y: -h / 2 * scale, width: w * scale, height: h * scale),
+                                xRadius: radius * scale, yRadius: radius * scale)
         var t = AffineTransform(translationByX: cx * scale, byY: cy * scale)
         t.rotate(byDegrees: angle)
         path.transform(using: t)

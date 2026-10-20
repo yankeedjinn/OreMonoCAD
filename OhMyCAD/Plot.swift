@@ -267,12 +267,9 @@ enum PlotRenderer {
             let color = PlotStyleResolver.plotColor(objectColor, style: plotStyle)
             let mm = plotStyle.lineweight ?? layerManager.lineWeight(for: entity)
             let width = settings.plotLineweights ? max(0.25, mm * pointsPerMM) : 0.3
-            var dash: [CGFloat] = []
             let type = layerManager.lineType(for: entity)
-            if !type.isContinuous, type.patternLength * patternPointsPerMM >= 1 {
-                dash = type.dashPattern(pointsPerMM: patternPointsPerMM)
-            }
-            return StrokeStyle(color: color, lineWidth: width, dash: dash)
+            let parts = type.strokeParts(pointsPerMM: patternPointsPerMM * (entity.lineTypeScale ?? 1), minimumPeriod: 1)
+            return StrokeStyle(color: color, lineWidth: width, dash: parts.dash, marks: parts.marks)
         }
 
         context.saveGState()

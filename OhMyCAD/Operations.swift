@@ -50,8 +50,9 @@ enum EditOperations {
                            edges: [CADEntity]) -> (kept: [CADEntity], removed: CADEntity?)? {
         guard let result = trimDetailRaw(curve, at: click, edges: edges) else { return nil }
         // the pieces keep the lineweight of the original object
-        for piece in result.kept { piece.lineWeight = curve.lineWeight }
+        for piece in result.kept { piece.lineWeight = curve.lineWeight; piece.lineTypeScale = curve.lineTypeScale }
         result.removed?.lineWeight = curve.lineWeight
+        result.removed?.lineTypeScale = curve.lineTypeScale
         return result
     }
 
@@ -169,6 +170,7 @@ enum EditOperations {
             let piece = ConstructionLine(point: xline.location(at: parameter), angle: forward ? xline.angle : xline.angle + .pi,
                                          isRay: true, layer: xline.layer, color: xline.color)
             piece.lineWeight = xline.lineWeight
+            piece.lineTypeScale = xline.lineTypeScale
             piece.drawOrder = xline.drawOrder
             return piece
         }
@@ -176,6 +178,7 @@ enum EditOperations {
             guard to - from > tolerance else { return nil }
             let line = Line(start: xline.location(at: from), end: xline.location(at: to), layer: xline.layer, color: xline.color)
             line.lineWeight = xline.lineWeight
+            line.lineTypeScale = xline.lineTypeScale
             line.drawOrder = xline.drawOrder
             return line
         }
@@ -257,8 +260,9 @@ enum EditOperations {
             }
         }
         // the pieces keep the lineweight of the original object
-        for piece in kept { piece.lineWeight = curve.lineWeight }
+        for piece in kept { piece.lineWeight = curve.lineWeight; piece.lineTypeScale = curve.lineTypeScale }
         removed?.lineWeight = curve.lineWeight
+        removed?.lineTypeScale = curve.lineTypeScale
         return (kept, removed)
     }
 
@@ -269,6 +273,7 @@ enum EditOperations {
     static func extend(_ entity: CADEntity, near click: CGPoint, boundaries: [CADEntity]) -> CADEntity? {
         let result = extendRaw(entity, near: click, boundaries: boundaries)
         result?.lineWeight = entity.lineWeight
+        result?.lineTypeScale = entity.lineTypeScale
         return result
     }
 
@@ -460,11 +465,13 @@ enum EditOperations {
             let arc = Arc(center: a.center, radius: a.radius, startAngle: a.start, endAngle: a.end,
                           layer: source.layer, color: source.color)
             arc.lineWeight = source.lineWeight
+            arc.lineTypeScale = source.lineTypeScale
             return arc
         }
         if let b = parts.bevel {
             let line = Line(start: b.start, end: b.end, layer: source.layer, color: source.color)
             line.lineWeight = source.lineWeight
+            line.lineTypeScale = source.lineTypeScale
             return line
         }
         return nil
@@ -487,12 +494,14 @@ enum EditOperations {
         if let kept = parts.kept1 {
             let piece = Line(start: kept.start, end: kept.end, layer: line1.layer, color: line1.color)
             piece.lineWeight = line1.lineWeight
+            piece.lineTypeScale = line1.lineTypeScale
             result.append(piece)
         }
         if let piece = connector(parts, like: line1) { result.append(piece) }
         if let kept = parts.kept2 {
             let piece = Line(start: kept.start, end: kept.end, layer: line2.layer, color: line2.color)
             piece.lineWeight = line2.lineWeight
+            piece.lineTypeScale = line2.lineTypeScale
             result.append(piece)
         }
         return result
@@ -570,6 +579,7 @@ enum EditOperations {
                 guard let kept = kept else { return nil }
                 let piece = Line(start: kept.start, end: kept.end, layer: line.layer, color: line.color)
                 piece.lineWeight = line.lineWeight
+                piece.lineTypeScale = line.lineTypeScale
                 return piece
             }
             guard let polyline = entity as? Polyline else { return nil }
@@ -591,6 +601,7 @@ enum EditOperations {
             }
             let piece = Polyline(vertices: vertices, closed: false, bulges: bulges, layer: polyline.layer, color: polyline.color)
             piece.lineWeight = polyline.lineWeight
+            piece.lineTypeScale = polyline.lineTypeScale
             return piece
         }
 
@@ -607,6 +618,7 @@ enum EditOperations {
             first.layer = entity1.layer
             first.color = entity1.color
             first.lineWeight = entity1.lineWeight
+            first.lineTypeScale = entity1.lineTypeScale
         }
         return ([entity1, entity2], added)
     }
@@ -678,6 +690,7 @@ enum EditOperations {
         let result = Polyline(vertices: cleaned.vertices, closed: polyline.closed, bulges: cleaned.bulges,
                               layer: polyline.layer, color: polyline.color)
         result.lineWeight = polyline.lineWeight
+        result.lineTypeScale = polyline.lineTypeScale
         return result
     }
 
@@ -722,7 +735,7 @@ enum EditOperations {
                                   layer: polyline.layer, color: polyline.color))
             }
         }
-        for piece in result { piece.lineWeight = polyline.lineWeight }
+        for piece in result { piece.lineWeight = polyline.lineWeight; piece.lineTypeScale = polyline.lineTypeScale }
         return result.isEmpty ? nil : result
     }
 
@@ -897,6 +910,7 @@ enum EditOperations {
             return nil
         }
         result?.lineWeight = entity.lineWeight
+        result?.lineTypeScale = entity.lineTypeScale
         return result
     }
 

@@ -84,6 +84,8 @@ struct StrokeStyle {
     var color: NSColor
     var lineWidth: CGFloat = 1.0
     var dash: [CGFloat] = []
+    /// Texts and shapes of a complex line type (nil = none).
+    var marks: LineMarks? = nil
 }
 
 // MARK: - CAD Entity Protocol
@@ -95,6 +97,8 @@ protocol CADEntity: AnyObject {
     var color: NSColor? { get set }
     /// Lineweight in mm (nil = by layer).
     var lineWeight: CGFloat? { get set }
+    /// Linetype scale of the object (nil = 1): multiplies the dashes, texts and shapes of the layer's line type.
+    var lineTypeScale: CGFloat? { get set }
     /// Draw order (pseudo Z): a higher number is above a lower one.
     var drawOrder: Int { get set }
     /// The group the object belongs to (nil = none) – a click on one object selects the whole group (Groups.swift).
@@ -138,15 +142,23 @@ extension CADEntity {
         if !style.dash.isEmpty && DrawingSafety.canDash(box) {
             context.setLineDash(phase: 0, lengths: style.dash)
         }
-        context.addPath(screenPath)
-        context.strokePath()
+        if style.marks?.hidesLine != true {
+            context.addPath(screenPath)
+            context.strokePath()
+        }
         context.restoreGState()
+        // texts and shapes of a complex line type (only for shapes of reasonable size, like dashing)
+        if let marks = style.marks, DrawingSafety.canDash(box) {
+            let mirrored = transform.a * transform.d - transform.b * transform.c < 0
+            marks.draw(along: screenPath, in: context, mirrored: mirrored, color: style.color.cgColor, lineWidth: style.lineWidth)
+        }
     }
 
     /// Carries the appearance properties (lineweight and draw order) and the group over to a copy / new piece.
     @discardableResult
     func copyStyle<T: CADEntity>(to copy: T) -> T {
         copy.lineWeight = lineWeight
+        copy.lineTypeScale = lineTypeScale
         copy.drawOrder = drawOrder
         copy.groupID = groupID
         return copy
@@ -156,6 +168,7 @@ extension CADEntity {
     @discardableResult
     func withStyle(of other: CADEntity) -> Self {
         lineWeight = other.lineWeight
+        lineTypeScale = other.lineTypeScale
         drawOrder = other.drawOrder
         groupID = other.groupID
         return self
@@ -208,6 +221,7 @@ final class Line: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var startPoint: CGPoint
@@ -285,6 +299,7 @@ final class SurveyPoint: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var position: CGPoint
@@ -367,6 +382,7 @@ final class ConstructionLine: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     /// The point the line passes through.
@@ -499,6 +515,7 @@ final class Circle: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var center: CGPoint
@@ -570,6 +587,7 @@ final class Arc: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var center: CGPoint
@@ -673,6 +691,7 @@ final class Polyline: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var vertices: [CGPoint]
@@ -938,6 +957,7 @@ final class Spline: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     private(set) var controlPoints: [CGPoint]
@@ -1076,6 +1096,7 @@ final class Ellipse: CurveEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var center: CGPoint { didSet { invalidate() } }
@@ -1369,6 +1390,7 @@ final class DimensionEntity: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     let kind: DimensionKind

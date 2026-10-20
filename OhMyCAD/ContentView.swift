@@ -1053,6 +1053,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         propertiesPanel.onEdit = { [weak self] name, edit in self?.editSelection(actionName: name, edit) }
         propertiesPanel.modelExtents = { [weak self] in self?.modelExtents() }
         propertiesPanel.modelLayerNames = { [weak self] in self?.layerManager.getAllLayers().map { $0.name } ?? [] }
+        propertiesPanel.unitsPerPaperMM = { [weak self] in self?.editorView.unitsPerPaperMM ?? 1 }
+        propertiesPanel.lineTypeOf = { [weak self] entity in self?.layerManager.lineType(for: entity) ?? .continuous }
         editorView.onViewportDoubleClick = { [weak self] viewport in self?.openModel(at: viewport) }
         editorView.onTextRequested = { [weak self] point, width in self?.insertText(at: point, boxWidth: width) }
         editorView.onHatchShortcut = { [weak self] name in

@@ -13,6 +13,7 @@
 //
 
 import Cocoa
+import UniformTypeIdentifiers
 
 // MARK: - Line Family
 
@@ -98,7 +99,7 @@ struct HatchPattern: Equatable {
                                             shift: values[3], spacing: values[4], dashes: dashes))
         }
         guard !families.isEmpty else { throw ParseError(message: "Enter at least one line.") }
-        guard families.count <= 16 else { throw ParseError(message: "Use at most 16 lines.") }
+        guard families.count <= 100 else { throw ParseError(message: "Use at most 100 lines.") }
         return families
     }
 
@@ -134,7 +135,43 @@ struct HatchPattern: Equatable {
         builtIn("Brick", "Brick courses, joints offset by half a brick", "0, 0,0, 0,3\n90, 0,0, 3,3, 3,-3"),
         builtIn("Dashed", "Dashed lines at 45°", "45, 0,0, 2,3, 3,-1.5"),
         builtIn("Earth", "Earth / soil (crossed groups of short lines)",
-                "0, 0,0, 4,4, 4,-4\n0, 0,1, 4,4, 4,-4\n0, 0,2, 4,4, 4,-4\n90, 0,0, 4,4, 4,-4\n90, 1,0, 4,4, 4,-4\n90, 2,0, 4,4, 4,-4")
+                "0, 0,0, 4,4, 4,-4\n0, 0,1, 4,4, 4,-4\n0, 0,2, 4,4, 4,-4\n90, 0,0, 4,4, 4,-4\n90, 1,0, 4,4, 4,-4\n90, 2,0, 4,4, 4,-4"),
+        // architectural section patterns (generated on lattices so the pieces repeat seamlessly)
+        builtIn("Concrete", "Concrete in section (small triangles and dots)",
+                """
+                0, 0.6, 0.5, 4, 6.9282, 1.2, -6.8
+                60, 0.6, 0.5, -4, 6.9282, 1.2, -6.8
+                120, 1.8, 0.5, 4, 6.9282, 1.2, -6.8
+                30, 4.6, 1.4, 6.9282, 4, 0.8, -13.0564
+                90, 4.6, 1.4, 6.9282, 4, 0.8, -13.0564
+                150, 5.2928, 1.8, -6.9282, 4, 0.8, -13.0564
+                30, 2.2, 4.3, 6.9282, 4, 1, -12.8564
+                90, 2.2, 4.3, 6.9282, 4, 1, -12.8564
+                150, 3.066, 4.8, -6.9282, 4, 1, -12.8564
+                0, 6.3, 4.9, 4, 6.9282, 0.7, -7.3
+                60, 6.3, 4.9, -4, 6.9282, 0.7, -7.3
+                120, 7, 4.9, 4, 6.9282, 0.7, -7.3
+                0, 3.1, 0.4, 4, 6.9282, 0, -8
+                0, 1, 2.4, 4, 6.9282, 0, -8
+                0, 5.6, 3.2, 4, 6.9282, 0, -8
+                0, 4, 5.9, 4, 6.9282, 0, -8
+                0, 7.2, 1.2, 4, 6.9282, 0, -8
+                0, 0.4, 5.5, 4, 6.9282, 0, -8
+                0, 3.6, 2.8, 4, 6.9282, 0, -8
+                0, 6, 6.4, 4, 6.9282, 0, -8
+                """),
+        builtIn("Sand", "Sand, plaster or screed (scattered dots)",
+                """
+                0, 0, 0, 0.83, 1.37, 0, -1.9
+                23, 0.4, 0.2, 1.1, 1.61, 0, -2.3
+                71, 0.9, 0.6, 0.57, 1.49, 0, -2.1
+                137, 0.2, 0.9, 1.3, 1.73, 0, -2.6
+                """),
+        builtIn("Insulation", "Thermal insulation in section (zigzag rows)",
+                "56.3099, 0, 0, -1.1094, 1.6641, 1.8028, -1.8028\n-56.3099, 1, 1.5, 1.1094, 1.6641, 1.8028, -1.8028"),
+        builtIn("Herringbone", "Herringbone parquet or paving",
+                "45, 0,0, 2,2, 6,-2\n135, 1.4142,1.4142, 2,-2, 6,-2"),
+        builtIn("Steel", "Steel / metal in section (pairs of lines at 45°)", "45, 0,0, 0,3\n45, 0,0.8, 0,3")
     ]
 }
 
@@ -528,6 +565,11 @@ enum HatchMenuBuilder {
         newItem.subtitle = "Define your own pattern as text, with a live preview"
         menu.addItem(newItem)
 
+        let importItem = NSMenuItem(title: "Import .pat File…", action: #selector(HatchPatternImporter.importFile(_:)), keyEquivalent: "")
+        importItem.target = HatchPatternImporter.shared
+        importItem.subtitle = "Add patterns from an AutoCAD pattern file"
+        menu.addItem(importItem)
+
         let settingsItem = NSMenuItem(title: "Angle & Scale…", action: actions.settings, keyEquivalent: "")
         settingsItem.target = actions.target
         settingsItem.subtitle = "Now \(LineType.format(angle))°, scale \(scaleText)"
@@ -545,5 +587,159 @@ enum HatchMenuBuilder {
             removeItem.submenu = removeMenu
             menu.addItem(removeItem)
         }
+    }
+}
+
+// MARK: - .pat Import
+
+/// Imports patterns from an AutoCAD .pat file: the user picks which ones become custom patterns.
+final class HatchPatternImporter: NSObject {
+    static let shared = HatchPatternImporter()
+
+    /// One pattern section of a .pat file (“*NAME, description” and its lines).
+    struct Entry {
+        var name: String
+        var description: String
+        var definition: String
+    }
+
+    /// Splits the file into pattern sections (a section starts with “*NAME”).
+    static func entries(in text: String) -> [Entry] {
+        var result: [Entry] = []
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("*") {
+                let header = HatchPattern.header(in: line)
+                result.append(Entry(name: header?.name ?? "", description: header?.description ?? "", definition: ""))
+            } else if !result.isEmpty {
+                result[result.count - 1].definition += line + "\n"
+            }
+        }
+        return result.filter { !$0.name.isEmpty }
+    }
+
+    /// Multiplies all lengths in a definition (everything except the angle), e.g. inches → mm.
+    static func scaled(_ families: [HatchLineFamily], by factor: CGFloat) -> [HatchLineFamily] {
+        return families.map {
+            HatchLineFamily(angle: $0.angle, origin: CGPoint(x: $0.origin.x * factor, y: $0.origin.y * factor),
+                            shift: $0.shift * factor, spacing: $0.spacing * factor, dashes: $0.dashes.map { $0 * factor })
+        }
+    }
+
+    @objc func importFile(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "pat") ?? .plainText, .plainText]
+        panel.message = "Choose an AutoCAD hatch pattern file (.pat)"
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+            showError("The file “\(url.lastPathComponent)” cannot be read.")
+            return
+        }
+        // keep only the sections that are valid patterns and don't clash with a built-in name
+        var usable: [(entry: Entry, families: [HatchLineFamily])] = []
+        var skipped: [String] = []
+        for entry in Self.entries(in: text) {
+            if HatchPatternLibrary.isBuiltInName(entry.name) {
+                skipped.append(entry.name)
+            } else if let families = try? HatchPattern.parseFamilies(entry.definition) {
+                usable.append((entry, families))
+            } else {
+                skipped.append(entry.name)
+            }
+        }
+        guard !usable.isEmpty else {
+            showError("“\(url.lastPathComponent)” contains no pattern that can be imported.")
+            return
+        }
+        guard let choice = choose(from: usable.map { $0.entry }, fileName: url.lastPathComponent, skipped: skipped) else { return }
+        let factor: CGFloat = choice.inches ? 25.4 : 1
+        for index in choice.indices {
+            let item = usable[index]
+            HatchPatternLibrary.addCustom(HatchPattern(name: item.entry.name, description: item.entry.description,
+                                                       families: Self.scaled(item.families, by: factor)))
+        }
+        let count = choice.indices.count
+        let done = NSAlert()
+        done.messageText = "Imported \(count) pattern\(count == 1 ? "" : "s")"
+        done.informativeText = "They are at the end of the hatch pattern menu."
+        done.runModal()
+    }
+
+    /// The list of patterns with checkboxes. Returns the chosen indices and whether the sizes are in inches.
+    private func choose(from entries: [Entry], fileName: String, skipped: [String]) -> (indices: [Int], inches: Bool)? {
+        let alert = NSAlert()
+        alert.messageText = "Import Hatch Patterns"
+        var info = "Choose the patterns to add from “\(fileName)”. acadiso.pat uses mm, acad.pat uses inches."
+        if !skipped.isEmpty {
+            info += "\nSkipped (invalid or a built-in name): \(skipped.prefix(8).joined(separator: ", "))\(skipped.count > 8 ? " …" : "")"
+        }
+        alert.informativeText = info
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+
+        let width: CGFloat = 340
+        let rowHeight: CGFloat = 20
+        let listHeight = min(CGFloat(entries.count) * rowHeight + 4, 260)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: listHeight + 52))
+
+        let allBox = NSButton(checkboxWithTitle: "Select All", target: self, action: #selector(toggleAll(_:)))
+        allBox.frame = NSRect(x: 0, y: listHeight + 30, width: width, height: 18)
+        container.addSubview(allBox)
+
+        let document = FlippedView(frame: NSRect(x: 0, y: 0, width: width - 20, height: CGFloat(entries.count) * rowHeight + 4))
+        var boxes: [NSButton] = []
+        for (index, entry) in entries.enumerated() {
+            let title = entry.description.isEmpty ? entry.name : "\(entry.name) – \(entry.description)"
+            let box = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            box.frame = NSRect(x: 4, y: 2 + CGFloat(index) * rowHeight, width: width - 28, height: 18)
+            box.lineBreakMode = .byTruncatingTail
+            document.addSubview(box)
+            boxes.append(box)
+        }
+        checkboxes = boxes
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 26, width: width, height: listHeight))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = document
+        container.addSubview(scroll)
+
+        let inchBox = NSButton(checkboxWithTitle: "Sizes are in inches (convert to mm)", target: nil, action: nil)
+        inchBox.frame = NSRect(x: 0, y: 2, width: width, height: 18)
+        inchBox.state = fileName.lowercased() == "acad.pat" ? .on : .off
+        container.addSubview(inchBox)
+
+        alert.accessoryView = container
+        defer { checkboxes = [] }
+        while alert.runModal() == .alertFirstButtonReturn {
+            let indices = boxes.indices.filter { boxes[$0].state == .on }
+            if indices.isEmpty {
+                NSSound.beep()
+                continue
+            }
+            return (indices, inchBox.state == .on)
+        }
+        return nil
+    }
+
+    private var checkboxes: [NSButton] = []
+
+    @objc private func toggleAll(_ sender: NSButton) {
+        for box in checkboxes { box.state = sender.state }
+    }
+
+    private func showError(_ message: String) {
+        Log.error("Error Importing Patterns: \(message)")
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Error Importing Patterns"
+        alert.informativeText = message
+        alert.runModal()
+    }
+
+    /// Top-to-bottom layout for the checkbox list.
+    private final class FlippedView: NSView {
+        override var isFlipped: Bool { return true }
     }
 }

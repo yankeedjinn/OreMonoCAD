@@ -4,6 +4,7 @@
 //
 //  Revision cloud (like REVCLOUD in AutoCAD): a closed polyline of outward arcs that marks a changed part of a drawing.
 //  The result is an ordinary polyline with arc segments – it can be edited, offset, exported to DXF, etc.
+//  Properties recognizes a cloud by its arcs (all the same 120° bulge) and changes their size (Scale).
 //
 
 import Cocoa
@@ -57,6 +58,72 @@ enum RevisionCloud {
         // a positive bulge bulges to the right of the direction of travel: outward for a counterclockwise outline
         let bulge = Polyline.bulge(forSweep: area > 0 ? arcSweep : -arcSweep)
         return Polyline(vertices: vertices, closed: true, bulges: Array(repeating: bulge, count: vertices.count), layer: layer)
+    }
+
+    // MARK: Changing the arc size of a drawn cloud (Properties › Scale)
+
+    /// Is the polyline a revision cloud – closed, with every segment the same 120° arc, as this tool draws it?
+    /// Works for clouds from older drawings and from DXF too (nothing extra is stored).
+    static func isCloud(_ polyline: Polyline) -> Bool {
+        let n = polyline.vertices.count
+        let bulge = Polyline.bulge(forSweep: arcSweep)
+        guard polyline.closed, n >= 3, polyline.bulges.count >= n, let first = polyline.bulges.first,
+              abs(abs(first) - bulge) < 1e-6 else { return false }
+        return polyline.bulges.prefix(n).allSatisfy { abs($0 - first) < 1e-6 }
+    }
+
+    /// The sides of the outline the cloud was drawn around and how many arcs each has
+    /// (a vertex in the middle of a straight run is not a corner).
+    private static func sides(of polyline: Polyline) -> [(start: CGPoint, end: CGPoint, arcs: Int)] {
+        let points = polyline.vertices
+        let n = points.count
+        let corners = (0..<n).filter { i in
+            let incoming = points[i] - points[(i + n - 1) % n], outgoing = points[(i + 1) % n] - points[i]
+            let cross = incoming.x * outgoing.y - incoming.y * outgoing.x
+            return abs(cross) > 1e-6 * incoming.length * outgoing.length || incoming.dot(outgoing) <= 0
+        }
+        guard corners.count >= 3 else { return [] }
+        return corners.indices.map { k -> (start: CGPoint, end: CGPoint, arcs: Int) in
+            let i = corners[k], j = corners[(k + 1) % corners.count]
+            return (points[i], points[j], (j - i + n) % n)
+        }
+    }
+
+    /// The cloud's scale: its arc size compared with `unit` (the default arc at the drawing scale).
+    /// Each side was split into a whole number of arcs, so a range of sizes gives the same cloud –
+    /// the roundest number in that range is shown (a cloud drawn with the default arcs shows 1, not 0.97).
+    static func scale(of polyline: Polyline, unit: CGFloat) -> CGFloat {
+        let sides = self.sides(of: polyline)
+        let arcs = sides.reduce(0) { $0 + $1.arcs }
+        guard arcs > 0, unit > 0 else { return 1 }
+        let perimeter = sides.reduce(CGFloat(0)) { $0 + Geometry.distance($1.start, $1.end) }
+        let average = perimeter / CGFloat(arcs) / unit
+        // sizes that split every side into the same number of arcs (see polyline(around:))
+        var lower: CGFloat = 0, upper = CGFloat.infinity
+        for side in sides {
+            let length = Geometry.distance(side.start, side.end) / unit
+            lower = max(lower, length / (CGFloat(side.arcs) + 0.5))
+            if side.arcs > 1 { upper = min(upper, length / (CGFloat(side.arcs) - 0.5)) }
+        }
+        for step: CGFloat in [1, 0.1, 0.01, 0.001] {
+            let first = (lower / step + 1e-9).rounded(.up), last = (upper / step - 1e-9).rounded(.down)
+            guard first <= last else { continue }
+            return min(max((average / step).rounded(), first), last) * step
+        }
+        return average
+    }
+
+    /// The same cloud with arcs of `arcSize` – the outline, layer and look stay. nil = not a cloud, or no change.
+    static func rescaled(_ polyline: Polyline, arcSize: CGFloat) -> Polyline? {
+        guard isCloud(polyline), arcSize > 0, arcSize.isFinite else { return nil }
+        let outline = sides(of: polyline).map { $0.start }
+        guard let cloud = self.polyline(around: outline, arcSize: arcSize, layer: polyline.layer),
+              let copy = polyline.clone() as? Polyline else { return nil }
+        if cloud.vertices.count == polyline.vertices.count,
+           zip(cloud.vertices, polyline.vertices).allSatisfy({ Geometry.distance($0, $1) < 1e-9 }) { return nil }
+        copy.vertices = cloud.vertices
+        copy.bulges = cloud.bulges
+        return copy
     }
 }
 

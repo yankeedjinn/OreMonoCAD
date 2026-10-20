@@ -77,6 +77,7 @@ final class ViewportEntity: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
 
@@ -569,6 +570,7 @@ final class BlockReference: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
     var definition: BlockDefinition { didSet { cache = nil } }

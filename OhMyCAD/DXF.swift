@@ -168,6 +168,8 @@ class DXFReader {
         func emit(_ entity: CADEntity, inBlocks: Bool, record: Record? = nil) {
             // the object's lineweight (370: hundredths of a mm; negative = ByLayer / ByBlock / default)
             if let weight = record?.int(370), weight >= 0 { entity.lineWeight = CGFloat(weight) / 100 }
+            // the object's linetype scale (48)
+            if let scale = record?.double(48), scale > 0, scale != 1 { entity.lineTypeScale = scale }
             if inBlocks {
                 if currentBlock != nil { blockEntities.append(entity) }
             } else {
@@ -231,9 +233,10 @@ class DXFReader {
             case ("TABLES", "LTYPE"):
                 // a line type from the drawing that is not in the library yet → available for the app session
                 guard let name = record.string(2), LineTypeLibrary.named(name) == nil else { continue }
-                let pattern = record.pairs.filter { $0.code == 49 }.compactMap { Double($0.value).map { CGFloat($0) } }
+                let elements = DXFReader.lineTypeElements(of: record)
                 let description = record.string(3) ?? ""
-                LineTypeLibrary.fromDrawing.append(LineType(name: name.capitalized, description: description, pattern: pattern))
+                LineTypeLibrary.fromDrawing.append(LineType(name: name.capitalized, description: description,
+                                                            pattern: elements.pattern, marks: elements.marks))
 
             case ("TABLES", "LAYER"):
                 guard let name = record.string(2) else { continue }
@@ -751,6 +754,43 @@ extension DXFReader {
         return sum / 2
     }
 
+    /// LTYPE: dashes (49) and the texts of complex line types. Each element can carry an embedded text or shape
+    /// (74: 2 = text, 4 = shape, 1 = absolute rotation; 46 size, 50 rotation, 44/45 offset, 9 text) that sits
+    /// after it. Shapes from SHX files cannot be read – only the built-in complex types (matched by name) have them.
+    private static func lineTypeElements(of record: Record) -> (pattern: [CGFloat], marks: [LineMark]) {
+        var pattern: [CGFloat] = []
+        var marks: [LineMark] = []
+        var flags = 0
+        var mark = LineMark(content: .text(""))
+        func finishMark() {
+            if flags & 2 != 0, case .text(let text) = mark.content, !text.isEmpty, mark.size > 0 {
+                mark.index = pattern.count
+                marks.append(mark)
+            }
+            flags = 0
+        }
+        for pair in record.pairs {
+            let number = Double(pair.value.trimmingCharacters(in: .whitespaces)).map { CGFloat($0) }
+            switch pair.code {
+            case 49:
+                finishMark()
+                if let value = number { pattern.append(value) }
+            case 74:
+                flags = Int(pair.value.trimmingCharacters(in: .whitespaces)) ?? 0
+                mark = LineMark(content: .text(""))
+                mark.absolute = flags & 1 != 0
+            case 46: if let value = number { mark.size = value }
+            case 50: if let value = number { mark.rotation = value }
+            case 44: if let value = number { mark.offset.x = value }
+            case 45: if let value = number { mark.offset.y = value }
+            case 9: mark.content = .text(pair.value)
+            default: break
+            }
+        }
+        finishMark()
+        return (pattern, marks)
+    }
+
     /// HATCH: boundary (polylines and edges – lines, arcs, ellipses, splines) and pattern.
     /// The pattern lines in DXF are already converted to angle and scale, so the hatch is created with angle 0 and scale 1.
     private static func hatch(from record: Record, color: NSColor?) -> HatchEntity? {
@@ -1113,9 +1153,11 @@ class DXFWriter {
         for type in lineTypes {
             pair(0, "LTYPE"); pair(2, type.dxfName); pair(70, "0")
             pair(3, type.description.isEmpty ? type.name : type.description); pair(72, "65")
-            pair(73, String(type.pattern.count))
-            number(40, type.patternLength)
-            for element in type.pattern { number(49, element) }   // + dash, − gap, 0 dot
+            // R12 knows no texts and shapes in line types – only the dashes are written
+            let pattern = type.plainPattern
+            pair(73, String(pattern.count))
+            number(40, pattern.reduce(0) { $0 + abs($1) })
+            for element in pattern { number(49, element) }   // + dash, − gap, 0 dot
         }
         pair(0, "ENDTAB")
 

@@ -267,7 +267,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click where to place it. Its size is set on paper, so it suits any drawing scale, and it keeps pointing north when the view or the drawing coordinates are rotated. It is one block (“North Arrow”) – edit that block to change its look, e.g. the letter."),
         .revisionCloud: (
             summary: "A revision cloud – scalloped arcs around a changed part of the drawing (one closed polyline).",
-            usage: "Click the corners of the outline · ↩, right-click, double-click, C or a click on the first corner closes it · ⌫ removes the last corner · R = rectangle from two corners, P = back to corners · A = arc size in mm on paper (remembered)."),
+            usage: "Click the corners of the outline · ↩, right-click, double-click, C or a click on the first corner closes it · ⌫ removes the last corner · R = rectangle from two corners, P = back to corners · A = arc size in mm on paper (remembered). The arcs of a drawn cloud change in Properties › Scale (1 = 8 mm on paper)."),
         .wipeout: (
             summary: "A wipeout – an area that covers what lies below it with the background color, so a text or a dimension over a hatch or lines stays readable.",
             usage: "Click two opposite corners of a rectangle (or type width and height) · P = outline by corners (↩, right-click, double-click, C or a click on the first corner closes it, ⌫ removes the last corner) · R = back to the rectangle. It covers lines and hatches but stays below texts and dimensions, so draw it around a text that is already there (Edit › Draw Order puts it above or below other objects). Its frame shows on screen only and is not printed; wipeouts are not exported to DXF."),
@@ -1921,15 +1921,16 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func style(for entity: CADEntity) -> StrokeStyle {
         let color = layerManager?.resolvedColor(for: entity) ?? entity.color ?? .white
         var dash: [CGFloat] = []
+        var marks: LineMarks?
         if let type = layerManager?.lineType(for: entity), !type.isContinuous {
-            // line type by the drawing scale: a 3.5 mm dash on paper = 3.5 × scale units in the drawing
-            let pointsPerMM = unitsPerPaperMM * viewport.getCurrentZoom()
-            if type.patternLength * pointsPerMM >= 3 {
-                dash = type.dashPattern(pointsPerMM: pointsPerMM)
-            }
-            // a smaller pattern would just be a gray line → drawn solid (as in AutoCAD)
+            // line type by the drawing scale: a 3.5 mm dash on paper = 3.5 × scale units in the drawing,
+            // times the object's linetype scale; a smaller pattern would just be a gray line → drawn solid (as in AutoCAD)
+            let pointsPerMM = unitsPerPaperMM * viewport.getCurrentZoom() * (entity.lineTypeScale ?? 1)
+            let parts = type.strokeParts(pointsPerMM: pointsPerMM, minimumPeriod: 3)
+            dash = parts.dash
+            marks = parts.marks
         }
-        return StrokeStyle(color: color, lineWidth: displayedLineWidth(for: entity), dash: dash)
+        return StrokeStyle(color: color, lineWidth: displayedLineWidth(for: entity), dash: dash, marks: marks)
     }
 
     /// Line width on screen (points) according to LWT, the scale and the mode.

@@ -113,18 +113,22 @@ nonisolated struct LineTypeRecord: Codable {
     var description: String?
     /// mm on paper: + dash, − gap, 0 dot
     var pattern: [CGFloat]
+    /// The whole definition with texts and shapes – only for complex line types.
+    var definition: String?
 
     @MainActor init(_ type: LineType) {
         name = type.name
         description = type.description
         pattern = type.pattern
+        definition = type.marks.isEmpty ? nil : type.definition
     }
 
     /// Built-in / known type from the library, otherwise the type straight from the file (available for the session).
     @MainActor var lineType: LineType {
-        if pattern.isEmpty { return .continuous }
-        if let known = LineTypeLibrary.named(name), known.pattern == pattern { return known }
-        let type = LineType(name: name, description: description ?? "", pattern: pattern)
+        let marks = definition.flatMap { try? LineType.parse($0).marks } ?? []
+        if pattern.isEmpty && marks.isEmpty { return .continuous }
+        if let known = LineTypeLibrary.named(name), known.pattern == pattern, known.marks == marks { return known }
+        let type = LineType(name: name, description: description ?? "", pattern: pattern, marks: marks)
         if LineTypeLibrary.named(name) == nil {
             LineTypeLibrary.fromDrawing.append(type)
         }
@@ -234,6 +238,8 @@ nonisolated struct EntityRecord: Codable {
     var color: RGBARecord?
     /// nil = lineweight by layer
     var lineWeight: CGFloat?
+    /// Linetype scale of the object, nil = 1.
+    var lineTypeScale: CGFloat?
     /// Draw order (pseudo Z), nil = 0.
     var drawOrder: Int?
     /// The group the object belongs to.
@@ -428,6 +434,7 @@ enum NativeEntityCoder {
         r.layer = entity.layer
         r.color = entity.color.map { RGBARecord($0) }
         r.lineWeight = entity.lineWeight
+        r.lineTypeScale = entity.lineTypeScale
         r.drawOrder = entity.drawOrder == 0 ? nil : entity.drawOrder
         r.group = entity.groupID
         return r
@@ -527,6 +534,7 @@ enum NativeEntityCoder {
             entity = nil
         }
         entity?.lineWeight = r.lineWeight
+        entity?.lineTypeScale = r.lineTypeScale
         entity?.drawOrder = r.drawOrder ?? 0
         entity?.groupID = r.group
         return entity

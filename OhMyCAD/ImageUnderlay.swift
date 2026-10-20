@@ -69,6 +69,7 @@ final class ImageEntity: CADEntity {
     var layer: String
     var color: NSColor?
     var lineWeight: CGFloat?
+    var lineTypeScale: CGFloat?
     var drawOrder = 0
     var groupID: UUID?
 

@@ -1632,15 +1632,9 @@ extension LineStylePreview {
     /// Line sample with weight (for the compact layer panel and the lineweight menu).
     static func image(for type: LineType, weight: CGFloat, width: CGFloat, height: CGFloat) -> NSImage {
         return NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: 1, y: rect.midY))
-            path.line(to: NSPoint(x: rect.maxX - 1, y: rect.midY))
             // 0.13 mm ≈ 1 px … 1 mm and more ≈ 4 px
-            path.lineWidth = min(max(weight * 4.5, 0.8), 4)
-            var dash = type.screenPattern
-            if !dash.isEmpty { path.setLineDash(&dash, count: dash.count, phase: 0) }
-            Theme.iconLight.setStroke()
-            path.stroke()
+            stroke(type, from: CGPoint(x: 1, y: rect.midY), to: CGPoint(x: rect.maxX - 1, y: rect.midY),
+                   width: min(max(weight * 4.5, 0.8), 4), color: Theme.iconLight)
             return true
         }
     }
@@ -2077,6 +2071,8 @@ final class PropertiesPanelView: NSView {
             }
         }
 
+        if !selection.isEmpty { addLineTypeScaleRows(for: selection) }
+
         // hatches
         let hatches = selection.compactMap { $0 as? HatchEntity }
         if !hatches.isEmpty && hatches.count == selection.count, let first = hatches.first {
@@ -2122,6 +2118,19 @@ final class PropertiesPanelView: NSView {
             addInfo("Edit points: drag the blue grips · Cut out: select the hatch and a closed shape over it")
         }
 
+        // revision clouds (polylines whose arcs are all alike – RevisionCloud.swift)
+        let clouds = selection.compactMap { $0 as? Polyline }.filter { RevisionCloud.isCloud($0) }
+        if !clouds.isEmpty && clouds.count == selection.count, let first = clouds.first {
+            addSection("Revision Cloud")
+            let unit = RevisionCloud.defaultArcSizeMM * max(unitsPerPaperMM?() ?? 1, 1e-9)
+            let scales = Set(clouds.map { LineType.format(RevisionCloud.scale(of: $0, unit: unit)) })
+            addNumber("Scale", scales.count == 1 ? RevisionCloud.scale(of: first, unit: unit) : nil,
+                      tip: "Size of the arcs: 1 = \(LineType.format(RevisionCloud.defaultArcSizeMM)) mm on paper at the drawing scale, 2 = twice as large. The outline stays.") { [weak self] value in
+                guard value > 0 else { NSSound.beep(); return }
+                self?.edit("Change Revision Cloud Scale", Polyline.self) { RevisionCloud.rescaled($0, arcSize: value * unit) }
+            }
+        }
+
         // hatch + closed shapes: offer cutting them out
         if selection.contains(where: { $0 is HatchEntity }),
            selection.contains(where: { ($0 as? CurveEntity)?.isClosedCurve ?? false }) {
@@ -2140,6 +2149,41 @@ final class PropertiesPanelView: NSView {
 
         // geometry (information about the object is in the Info panel)
         addGeometry(for: selection)
+    }
+
+    /// Linetype scale of the objects; for the Batting line type also the insulation thickness it gives.
+    private func addLineTypeScaleRows(for selection: [CADEntity]) {
+        let scales = Set(selection.map { LineType.format($0.lineTypeScale ?? 1) })
+        let firstScale = selection.first?.lineTypeScale ?? 1
+        let change: (String, @escaping (CADEntity) -> CGFloat?) -> Void = { [weak self] name, newScale in
+            self?.onEdit?(name) { entity in
+                guard let scale = newScale(entity) else { return nil }
+                let value: CGFloat? = abs(scale - 1) < 1e-9 ? nil : scale
+                guard entity.lineTypeScale != value else { return nil }
+                let copy = entity.clone()
+                copy.lineTypeScale = value
+                return copy
+            }
+        }
+        addNumber("Line scale", scales.count == 1 ? firstScale : nil,
+                  tip: "Linetype scale of the object: multiplies the dashes, texts and shapes of its layer's line type (1 = as defined)") { value in
+            guard value > 0 else { NSSound.beep(); return }
+            change("Change Linetype Scale") { _ in value }
+        }
+        // insulation (Batting): the thickness in drawing units instead of a scale
+        let widths = selection.map { lineTypeOf?($0).battingWidth }
+        guard let firstWidth = widths.first ?? nil, widths.allSatisfy({ $0 != nil }) else { return }
+        let unit = max(unitsPerPaperMM?() ?? 1, 1e-9)
+        func thickness(_ entity: CADEntity, width: CGFloat) -> CGFloat { return width * unit * (entity.lineTypeScale ?? 1) }
+        let thicknesses = Set(zip(selection, widths).map { LineType.format(thickness($0, width: $1 ?? firstWidth)) })
+        addNumber("Thickness", thicknesses.count == 1 ? thickness(selection[0], width: firstWidth) : nil,
+                  tip: "Thickness of the insulation in drawing units – the line is its middle; it sets the linetype scale") { [weak self] value in
+            guard value > 0 else { NSSound.beep(); return }
+            change("Change Insulation Thickness") { entity in
+                guard let width = self?.lineTypeOf?(entity).battingWidth, width > 0 else { return nil }
+                return value / (width * unit)
+            }
+        }
     }
 
     private func addGeometry(for selection: [CADEntity]) {
@@ -2553,6 +2597,10 @@ final class PropertiesPanelView: NSView {
     var modelExtents: (() -> CGRect?)?
     /// Model layers (for hiding in a viewport).
     var modelLayerNames: (() -> [String])?
+    /// Drawing units per mm on paper at the drawing scale (the arc size of revision clouds, insulation thickness).
+    var unitsPerPaperMM: (() -> CGFloat)?
+    /// The line type an object is drawn with (by its layer).
+    var lineTypeOf: ((CADEntity) -> LineType)?
 
     private func addViewportRows(_ viewport: ViewportEntity) {
         addSection("Viewport")
