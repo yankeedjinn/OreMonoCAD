@@ -1285,7 +1285,7 @@ final class ToolSectionCaptionView: NSView {
     }
 }
 
-/// The tool panel's menus with rows drawn by the app, so their icons show on every macOS.
+/// Menus with rows drawn by the app, so their icons and line previews show on every macOS.
 private func withRows(_ menu: NSMenu) -> NSMenu {
     MenuRows.apply(to: menu)
     return menu
@@ -1930,7 +1930,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         customWeight.tag = -1
         customWeight.image = ToolIcons.settingsImage(size: 18)
         menu.addItem(customWeight)
-        _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+        _ = withRows(menu).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }
 
     @objc private func styleTypeChosen(_ sender: NSMenuItem) {
