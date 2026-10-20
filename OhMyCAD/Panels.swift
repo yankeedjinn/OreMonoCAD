@@ -200,7 +200,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         var menuProvider: (() -> NSMenu?)?
         override var isFlipped: Bool { return true }
         // right-click on an empty place of the panel: which sections to show
-        override func menu(for event: NSEvent) -> NSMenu? { return menuProvider?() }
+        override func menu(for event: NSEvent) -> NSMenu? { return menuProvider?().map(withRows) }
     }
 
     private func setupUI() {
@@ -419,6 +419,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
                               action: #selector(favoriteToggled(_:)), keyEquivalent: "")
         item.target = self
         item.tag = tool.rawValue
+        item.image = NSImage(systemSymbolName: isFavorite ? "star.slash" : "star", accessibilityDescription: nil)
         menu.addItem(item)
         return menu
     }
@@ -515,11 +516,14 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let hide = NSMenuItem(title: "Hide \(section.title)", action: #selector(sectionVisibilityToggled(_:)), keyEquivalent: "")
         hide.target = self
         hide.representedObject = section.title
+        hide.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
         menu.addItem(hide)
         let index = visibleSections.firstIndex(of: section) ?? 0
         let up = NSMenuItem(title: "Move Up", action: index > 0 ? #selector(sectionMovedUp(_:)) : nil, keyEquivalent: "")
         let down = NSMenuItem(title: "Move Down", action: index < visibleSections.count - 1 ? #selector(sectionMovedDown(_:)) : nil,
                               keyEquivalent: "")
+        up.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil)
+        down.image = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil)
         for item in [up, down] {
             item.target = self
             item.representedObject = section.title
@@ -564,6 +568,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         menu.addItem(.separator())
         let reset = NSMenuItem(title: "Reset Tool Panel Layout", action: #selector(layoutReset(_:)), keyEquivalent: "")
         reset.target = self
+        reset.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: nil)
         menu.addItem(reset)
     }
 
@@ -1205,7 +1210,7 @@ final class ToolButtonView: NSView {
     }
 
     @objc private func showMenu() {
-        guard let menu = menuProvider?() else { return }
+        guard let menu = menuProvider?().map(withRows) else { return }
         menuShown = true
         menu.popUp(positioning: nil, at: NSPoint(x: bounds.maxX + 2, y: bounds.maxY), in: self)
         // the menu “swallows” the mouse-up – restore the state manually
@@ -1276,8 +1281,14 @@ final class ToolSectionCaptionView: NSView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        return menuProvider?()
+        return menuProvider?().map(withRows)
     }
+}
+
+/// The tool panel's menus with rows drawn by the app, so their icons show on every macOS.
+private func withRows(_ menu: NSMenu) -> NSMenu {
+    MenuRows.apply(to: menu)
+    return menu
 }
 
 // MARK: - Layer Panel
@@ -1897,6 +1908,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let customType = NSMenuItem(title: "Custom Linetype…", action: #selector(styleTypeChosen(_:)), keyEquivalent: "")
         customType.target = self
         customType.tag = -1
+        customType.image = ToolIcons.settingsImage(size: 18)
         menu.addItem(customType)
 
         menu.addItem(.separator())
@@ -1916,6 +1928,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let customWeight = NSMenuItem(title: "Custom Lineweight…", action: #selector(styleWeightChosen(_:)), keyEquivalent: "")
         customWeight.target = self
         customWeight.tag = -1
+        customWeight.image = ToolIcons.settingsImage(size: 18)
         menu.addItem(customWeight)
         _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }

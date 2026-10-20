@@ -588,6 +588,7 @@ enum HatchMenuBuilder {
             }
             let removeItem = NSMenuItem(title: "Remove Custom Pattern", action: nil, keyEquivalent: "")
             removeItem.submenu = removeMenu
+            removeItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
             menu.addItem(removeItem)
         }
     }

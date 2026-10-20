@@ -12,6 +12,12 @@
 
 import Cocoa
 
+/// Commands of the main menu that are not tools but have an icon of their own.
+enum MenuIcon: String {
+    case selectSimilar, group, ungroup, pasteAtOrigin, drawingCoordinates, geodeticBasePoint, rotateToCoordinates
+    case editBlock, model, layouts, newLayout, duplicateLayout, viewport, toolPanel, drawingAids
+}
+
 enum ToolIcons {
     private static var cache: [String: NSImage] = [:]
 
@@ -603,6 +609,15 @@ enum ToolIcons {
         return image
     }
 
+    /// A command of the main menu that is not a tool.
+    static func image(for icon: MenuIcon, size: CGFloat) -> NSImage {
+        let key = "menu-\(icon.rawValue)-\(size)"
+        if let cached = cache[key] { return cached }
+        let image = render(size: size, description: icon.rawValue) { drawMenuIcon(icon, $0) }
+        cache[key] = image
+        return image
+    }
+
     /// Sliders – the one icon of all menu items that open a dialog (the “…” items).
     static func settingsImage(size: CGFloat) -> NSImage {
         let key = "settings-\(size)"
@@ -616,6 +631,91 @@ enum ToolIcons {
         }
         cache[key] = image
         return image
+    }
+
+    private static func drawMenuIcon(_ icon: MenuIcon, _ p: IconPainter) {
+        switch icon {
+        case .selectSimilar:
+            // two equal circles
+            p.circle(7, 12, 5)
+            p.circle(17, 12, 5, accent: true)
+        case .group:
+            // two shapes in a dashed frame
+            p.rect(2.5, 2.5, 19, 19, dashed: true, accent: true)
+            p.circle(9, 14.5, 3.3)
+            p.rect(11.5, 5.5, 6.5, 6.5)
+        case .ungroup:
+            // the same shapes, the frame broken apart
+            p.circle(7.5, 16.5, 3.5)
+            p.rect(13.5, 3.5, 7, 7)
+            p.polyline([(2.5, 9.5), (2.5, 2.5), (9.5, 2.5)], dashed: true, accent: true)
+            p.polyline([(14.5, 21.5), (21.5, 21.5), (21.5, 14.5)], dashed: true, accent: true)
+        case .pasteAtOrigin:
+            // a clipboard with a crosshair (the original coordinates)
+            p.rect(5, 3, 14, 17)
+            p.rect(9, 18.5, 6, 3.5)
+            p.circle(12, 10.5, 2.4, accent: true)
+            p.line(12, 5.5, 12, 7.6, accent: true)
+            p.line(12, 13.4, 12, 15.5, accent: true)
+            p.line(7.5, 10.5, 9.2, 10.5, accent: true)
+            p.line(14.8, 10.5, 16.5, 10.5, accent: true)
+        case .drawingCoordinates:
+            // the X and Y axes from the origin
+            p.line(5, 5, 19, 5, accent: true)
+            p.arrowhead(19.6, 5, 1, 0, accent: true)
+            p.line(5, 5, 5, 19)
+            p.arrowhead(5, 19.6, 0, 1)
+            p.dot(5, 5)
+        case .geodeticBasePoint:
+            // a survey mark: a circle with a cross
+            p.circle(12, 12, 6.5, accent: true)
+            p.line(12, 2.5, 12, 8)
+            p.line(12, 16, 12, 21.5)
+            p.line(2.5, 12, 8, 12)
+            p.line(16, 12, 21.5, 12)
+        case .rotateToCoordinates:
+            // the axes and the turn of the view onto them
+            p.line(6, 6, 19, 6)
+            p.arrowhead(19.6, 6, 1, 0)
+            p.line(6, 6, 6, 19)
+            p.arrowhead(6, 19.6, 0, 1)
+            p.arc(6, 6, 10, from: 30, to: 70, accent: true)
+            p.arrowhead(9.42, 15.4, -0.94, 0.342, accent: true)
+        case .editBlock:
+            // a block frame and a pencil
+            p.rect(3, 3, 12, 12, dashed: true, accent: true)
+            p.polyline([(9, 9), (9, 12), (18.5, 21.5), (21.5, 18.5), (12, 9)], closed: true)
+        case .model:
+            // a cube – the 1:1 model
+            let s = 9.5 * cos(CGFloat.pi / 6)
+            p.polyline([(12, 21.5), (12 + s, 16.75), (12 + s, 7.25), (12, 2.5), (12 - s, 7.25), (12 - s, 16.75)], closed: true, accent: true)
+            p.polyline([(12 - s, 16.75), (12, 12), (12 + s, 16.75)])
+            p.line(12, 12, 12, 2.5)
+        case .layouts:
+            // a sheet with its title block
+            p.rect(4, 2.5, 16, 19)
+            p.rect(12, 2.5, 8, 5, accent: true)
+        case .newLayout:
+            p.rect(4, 2.5, 16, 19)
+            p.line(8, 12, 16, 12, accent: true)
+            p.line(12, 8, 12, 16, accent: true)
+        case .duplicateLayout:
+            p.rect(8, 2.5, 13, 15, accent: true)
+            p.polyline([(3.5, 7), (3.5, 21.5), (15, 21.5), (15, 17.5)])
+        case .viewport:
+            // a sheet with a window onto the model
+            p.rect(4, 2.5, 16, 19)
+            p.rect(7, 9, 10, 9.5, accent: true)
+        case .toolPanel:
+            p.rect(3, 13, 7.5, 7.5, accent: true)
+            p.rect(13.5, 13, 7.5, 7.5)
+            p.rect(3, 3, 7.5, 7.5)
+            p.rect(13.5, 3, 7.5, 7.5)
+        case .drawingAids:
+            // the endpoint snap marker
+            p.rect(6, 6, 12, 12, accent: true)
+            p.dot(12, 12)
+        }
     }
 
     private static func drawMatch(_ property: MatchProperty, _ p: IconPainter) {

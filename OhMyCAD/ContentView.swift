@@ -4272,81 +4272,95 @@ extension MainViewController {
             return menuItem
         }
 
-        func submenu(_ title: String, in parent: NSMenu? = nil) -> NSMenu {
+        func submenu(_ title: String, in parent: NSMenu? = nil, image: NSImage? = nil) -> NSMenu {
             let menu = NSMenu(title: title)
             let menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             menuItem.submenu = menu
+            menuItem.image = image
             (parent ?? mainMenu).addItem(menuItem)
             return menu
         }
 
+        // Menu icons: drawing functions show the icons of the tool panel, common commands
+        // Apple's symbols (as the system's own menus do); toggles and lists have none.
+        func symbol(_ name: String) -> NSImage? {
+            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        }
+        func icon(_ menuIcon: MenuIcon) -> NSImage {
+            return ToolIcons.image(for: menuIcon, size: 17)
+        }
+        let settingsIcon = ToolIcons.settingsImage(size: 17)
+
         // App
         let appMenu = submenu("OhMyCAD")
-        item(appMenu, "About OhMyCAD", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        item(appMenu, "About OhMyCAD", #selector(NSApplication.orderFrontStandardAboutPanel(_:))).image = symbol("info.circle")
         appMenu.addItem(.separator())
-        item(appMenu, "Settings…", #selector(showSettings(_:)), ",", target: self)
+        item(appMenu, "Settings…", #selector(showSettings(_:)), ",", target: self).image = symbol("gearshape")
         appMenu.addItem(.separator())
-        item(appMenu, "Hide OhMyCAD", #selector(NSApplication.hide(_:)), "h")
+        item(appMenu, "Hide OhMyCAD", #selector(NSApplication.hide(_:)), "h").image = symbol("eye.slash")
         appMenu.addItem(.separator())
-        item(appMenu, "Quit OhMyCAD", #selector(NSApplication.terminate(_:)), "q")
+        item(appMenu, "Quit OhMyCAD", #selector(NSApplication.terminate(_:)), "q").image = symbol("power")
 
         // File
         let fileMenu = submenu("File")
-        item(fileMenu, "New", #selector(newDocument(_:)), "n", target: self)
-        item(fileMenu, "New Tab", #selector(newTab(_:)), "t", target: self)
-        item(fileMenu, "Open…", #selector(openDocument(_:)), "o", target: self)
-        let recentMenu = submenu("Open Recent", in: fileMenu)
+        item(fileMenu, "New", #selector(newDocument(_:)), "n", target: self).image = symbol("doc.badge.plus")
+        item(fileMenu, "New Tab", #selector(newTab(_:)), "t", target: self).image = symbol("plus.square.on.square")
+        item(fileMenu, "Open…", #selector(openDocument(_:)), "o", target: self).image = symbol("folder")
+        let recentMenu = submenu("Open Recent", in: fileMenu, image: symbol("clock"))
         recentMenu.delegate = self      // items are filled in in menuNeedsUpdate
-        item(fileMenu, "Open Backup…", #selector(openBackup(_:)), modifiers: [], target: self)
-        item(fileMenu, "Import…", #selector(importDocument(_:)), "i", modifiers: [.command, .shift], target: self)
+        item(fileMenu, "Open Backup…", #selector(openBackup(_:)), modifiers: [], target: self).image = symbol("clock.arrow.circlepath")
+        item(fileMenu, "Import…", #selector(importDocument(_:)), "i", modifiers: [.command, .shift], target: self).image = symbol("tray.and.arrow.down")
         fileMenu.addItem(.separator())
-        item(fileMenu, "Save", #selector(saveDocument(_:)), "s", target: self)
-        item(fileMenu, "Save As…", #selector(saveDocumentAs(_:)), "s", modifiers: [.command, .shift], target: self)
-        item(fileMenu, "Export DXF…", #selector(exportDXF(_:)), "e", modifiers: [.command, .shift], target: self)
-        item(fileMenu, "Export DXF in S-JTSK…", #selector(exportSurveyDXF(_:)), modifiers: [], target: self)
-        item(fileMenu, "Export PDF…", #selector(exportPDF(_:)), "p", modifiers: [.command, .option], target: self)
-        item(fileMenu, "Export Image (PNG, JPEG, TIFF)…", #selector(exportImage(_:)), "e", modifiers: [.command, .option], target: self)
+        item(fileMenu, "Save", #selector(saveDocument(_:)), "s", target: self).image = symbol("square.and.arrow.down")
+        item(fileMenu, "Save As…", #selector(saveDocumentAs(_:)), "s", modifiers: [.command, .shift], target: self).image = symbol("square.and.arrow.down.on.square")
+        item(fileMenu, "Export DXF…", #selector(exportDXF(_:)), "e", modifiers: [.command, .shift], target: self).image = symbol("square.and.arrow.up")
+        item(fileMenu, "Export DXF in S-JTSK…", #selector(exportSurveyDXF(_:)), modifiers: [], target: self).image = symbol("globe")
+        item(fileMenu, "Export PDF…", #selector(exportPDF(_:)), "p", modifiers: [.command, .option], target: self).image = symbol("doc.richtext")
+        item(fileMenu, "Export Image (PNG, JPEG, TIFF)…", #selector(exportImage(_:)), "e", modifiers: [.command, .option], target: self).image = symbol("photo")
         fileMenu.addItem(.separator())
-        item(fileMenu, "Plot / Print…", #selector(printDrawing(_:)), "p", target: self)
+        item(fileMenu, "Plot / Print…", #selector(printDrawing(_:)), "p", target: self).image = symbol("printer")
         fileMenu.addItem(.separator())
-        item(fileMenu, "Close Tab", #selector(closeCurrentTab(_:)), "w", target: self)
-        item(fileMenu, "Close Window", #selector(NSWindow.performClose(_:)), "w", modifiers: [.command, .shift])
+        item(fileMenu, "Close Tab", #selector(closeCurrentTab(_:)), "w", target: self).image = symbol("xmark")
+        item(fileMenu, "Close Window", #selector(NSWindow.performClose(_:)), "w", modifiers: [.command, .shift]).image = symbol("xmark.square")
 
         // Edit
         let editMenu = submenu("Edit")
-        item(editMenu, "Undo", #selector(undoAction(_:)), "z", target: self)
-        item(editMenu, "Redo", #selector(redoAction(_:)), "z", modifiers: [.command, .shift], target: self)
+        item(editMenu, "Undo", #selector(undoAction(_:)), "z", target: self).image = symbol("arrow.uturn.backward")
+        item(editMenu, "Redo", #selector(redoAction(_:)), "z", modifiers: [.command, .shift], target: self).image = symbol("arrow.uturn.forward")
         editMenu.addItem(.separator())
         // without a target: a text field being edited (layer renaming…) gets them first, otherwise the drawing objects
-        item(editMenu, "Cut", #selector(NSText.cut(_:)), "x")
-        item(editMenu, "Copy", #selector(NSText.copy(_:)), "c")
-        item(editMenu, "Paste", #selector(NSText.paste(_:)), "v")
+        item(editMenu, "Cut", #selector(NSText.cut(_:)), "x").image = symbol("scissors")
+        item(editMenu, "Copy", #selector(NSText.copy(_:)), "c").image = symbol("doc.on.doc")
+        item(editMenu, "Paste", #selector(NSText.paste(_:)), "v").image = symbol("doc.on.clipboard")
         item(editMenu, "Paste at Original Coordinates", #selector(pasteAtOriginalCoordinates(_:)), "v",
-             modifiers: [.command, .shift], target: self)
+             modifiers: [.command, .shift], target: self).image = icon(.pasteAtOrigin)
         editMenu.addItem(.separator())
-        item(editMenu, "Delete", #selector(deleteSelection), "\u{8}", target: self)
-        item(editMenu, "Select All", #selector(selectAllEntities(_:)), "a", target: self)
-        item(editMenu, "Select Similar", #selector(selectSimilar(_:)), "a", modifiers: [.command, .shift], target: self)
-        item(editMenu, "Find and Replace…", #selector(findAndReplace(_:)), "f", target: self)
-        let similarMenu = submenu("Select Similar Matches", in: editMenu)
+        item(editMenu, "Delete", #selector(deleteSelection), "\u{8}", target: self).image = symbol("trash")
+        item(editMenu, "Select All", #selector(selectAllEntities(_:)), "a", target: self).image = DrawingTool.select.icon(pointSize: 13)
+        item(editMenu, "Select Similar", #selector(selectSimilar(_:)), "a", modifiers: [.command, .shift], target: self).image = icon(.selectSimilar)
+        item(editMenu, "Find and Replace…", #selector(findAndReplace(_:)), "f", target: self).image = symbol("magnifyingglass")
+        let similarMenu = submenu("Select Similar Matches", in: editMenu, image: settingsIcon)
         for property in SimilarProperty.allCases {
             let menuItem = item(similarMenu, property.title, #selector(toggleSimilarProperty(_:)), modifiers: [], target: self)
             menuItem.representedObject = property.rawValue
             menuItem.toolTip = property.detail
         }
-        item(editMenu, "Filter…", #selector(filterObjects(_:)), modifiers: [], target: self)
-            .toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text"
+        let filter = item(editMenu, "Filter…", #selector(filterObjects(_:)), modifiers: [], target: self)
+        filter.toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text"
+        filter.image = DrawingTool.filter.icon(pointSize: 13)
         editMenu.addItem(.separator())
-        let orderMenu = submenu("Draw Order", in: editMenu)
-        item(orderMenu, "Bring to Front", #selector(bringToFront(_:)), "f", modifiers: [.command, .shift], target: self)
-        item(orderMenu, "Bring Forward", #selector(bringForward(_:)), "f", modifiers: [.command, .shift, .option], target: self)
-        item(orderMenu, "Send Backward", #selector(sendBackward(_:)), "b", modifiers: [.command, .shift, .option], target: self)
-        item(orderMenu, "Send to Back", #selector(sendToBack(_:)), "b", modifiers: [.command, .shift], target: self)
+        let orderMenu = submenu("Draw Order", in: editMenu, image: symbol("square.3.layers.3d"))
+        item(orderMenu, "Bring to Front", #selector(bringToFront(_:)), "f", modifiers: [.command, .shift], target: self).image = symbol("square.3.layers.3d.top.filled")
+        item(orderMenu, "Bring Forward", #selector(bringForward(_:)), "f", modifiers: [.command, .shift, .option], target: self).image = symbol("square.2.layers.3d.top.filled")
+        item(orderMenu, "Send Backward", #selector(sendBackward(_:)), "b", modifiers: [.command, .shift, .option], target: self).image = symbol("square.2.layers.3d.bottom.filled")
+        item(orderMenu, "Send to Back", #selector(sendToBack(_:)), "b", modifiers: [.command, .shift], target: self).image = symbol("square.3.layers.3d.bottom.filled")
         editMenu.addItem(.separator())
-        item(editMenu, "Group", #selector(groupSelection(_:)), "g", modifiers: [.command, .option], target: self)
-            .toolTip = "The selected objects become one group – a click on one of them selects them all"
-        item(editMenu, "Ungroup", #selector(ungroupSelection(_:)), "g", modifiers: [.command, .option, .shift], target: self)
-            .toolTip = "The selected groups fall apart into separate objects"
+        let group = item(editMenu, "Group", #selector(groupSelection(_:)), "g", modifiers: [.command, .option], target: self)
+        group.toolTip = "The selected objects become one group – a click on one of them selects them all"
+        group.image = icon(.group)
+        let ungroup = item(editMenu, "Ungroup", #selector(ungroupSelection(_:)), "g", modifiers: [.command, .option, .shift], target: self)
+        ungroup.toolTip = "The selected groups fall apart into separate objects"
+        ungroup.image = icon(.ungroup)
         item(editMenu, "Select Groups as a Whole", #selector(toggleWholeGroups(_:)), modifiers: [], target: self)
             .toolTip = "Off = a click selects a single object of a group, e.g. to edit it alone"
 
@@ -4389,79 +4403,80 @@ extension MainViewController {
         let blockCreate = item(insertMenu, "Create Block", #selector(selectToolFromMenu(_:)), modifiers: [], target: self)
         blockCreate.tag = DrawingTool.blockCreate.rawValue
         blockCreate.image = DrawingTool.blockCreate.icon(pointSize: 13)
-        let blockList = submenu("Insert Block", in: insertMenu)
+        let blockList = submenu("Insert Block", in: insertMenu, image: DrawingTool.blockInsert.icon(pointSize: 13))
         blockList.delegate = self      // the block list is filled in in menuNeedsUpdate
-        item(insertMenu, "Block Manager…", #selector(showBlockManager(_:)), "b", modifiers: [.command, .option], target: self)
-        item(insertMenu, "Edit Block…", #selector(editBlockFromMenu(_:)), modifiers: [], target: self)
-        item(insertMenu, "Save Block Changes", #selector(saveBlockEdit(_:)), "s", modifiers: [.command, .option], target: self)
-        item(insertMenu, "Discard Block Changes", #selector(discardBlockEdit(_:)), modifiers: [], target: self)
+        item(insertMenu, "Block Manager…", #selector(showBlockManager(_:)), "b", modifiers: [.command, .option], target: self).image = settingsIcon
+        item(insertMenu, "Edit Block…", #selector(editBlockFromMenu(_:)), modifiers: [], target: self).image = icon(.editBlock)
+        item(insertMenu, "Save Block Changes", #selector(saveBlockEdit(_:)), "s", modifiers: [.command, .option], target: self).image = symbol("checkmark")
+        item(insertMenu, "Discard Block Changes", #selector(discardBlockEdit(_:)), modifiers: [], target: self).image = symbol("xmark.circle")
         insertMenu.addItem(.separator())
         let attach = item(insertMenu, "Attach External Reference…", #selector(attachXref(_:)), modifiers: [], target: self)
         attach.image = DrawingTool.xref.icon(pointSize: 13)
-        item(insertMenu, "Reload External References", #selector(reloadXrefs(_:)), modifiers: [], target: self)
+        item(insertMenu, "Reload External References", #selector(reloadXrefs(_:)), modifiers: [], target: self).image = symbol("arrow.clockwise")
         insertMenu.addItem(.separator())
         let attachPicture = item(insertMenu, "Attach Image or PDF…", #selector(attachImage(_:)), modifiers: [], target: self)
         attachPicture.image = DrawingTool.image.icon(pointSize: 13)
 
         // Format – drawing, style and tool settings (as in AutoCAD)
         let formatMenu = submenu("Format")
-        item(formatMenu, "Document Settings…", #selector(documentSettings(_:)), ",", modifiers: [.command, .option], target: self)
-        let ucsMenu = submenu("Drawing Coordinates", in: formatMenu)
+        item(formatMenu, "Document Settings…", #selector(documentSettings(_:)), ",", modifiers: [.command, .option], target: self).image = settingsIcon
+        let ucsMenu = submenu("Drawing Coordinates", in: formatMenu, image: icon(.drawingCoordinates))
         item(ucsMenu, "Align to Object", #selector(ucsFromObject(_:)), modifiers: [], target: self)
         item(ucsMenu, "By Two Points", #selector(ucsFromTwoPoints(_:)), modifiers: [], target: self)
         item(ucsMenu, "By Angle…", #selector(ucsByAngle(_:)), modifiers: [], target: self)
         ucsMenu.addItem(.separator())
         item(ucsMenu, "World (No Rotation)", #selector(ucsWorld(_:)), modifiers: [], target: self)
-        item(formatMenu, "Geodetic Base Point…", #selector(editGeoReference(_:)), modifiers: [], target: self)
+        item(formatMenu, "Geodetic Base Point…", #selector(editGeoReference(_:)), modifiers: [], target: self).image = icon(.geodeticBasePoint)
         formatMenu.addItem(.separator())
-        item(formatMenu, "Text Style…", #selector(textStyle(_:)), modifiers: [], target: self)
-        item(formatMenu, "Dimension Style…", #selector(dimensionStyle(_:)), modifiers: [], target: self)
-        let hatchMenu = submenu("Hatch Pattern", in: formatMenu)
+        item(formatMenu, "Text Style…", #selector(textStyle(_:)), modifiers: [], target: self).image = DrawingTool.text.icon(pointSize: 13)
+        item(formatMenu, "Dimension Style…", #selector(dimensionStyle(_:)), modifiers: [], target: self).image = DrawingTool.dimLinear.icon(pointSize: 13)
+        let hatchMenu = submenu("Hatch Pattern", in: formatMenu, image: DrawingTool.hatch.icon(pointSize: 13))
         hatchMenu.delegate = self      // items are filled in in menuNeedsUpdate
         formatMenu.addItem(.separator())
-        let arcMenu = submenu("Arc Method", in: formatMenu)
+        let arcMenu = submenu("Arc Method", in: formatMenu, image: DrawingTool.arc.icon(pointSize: 13))
         for method in ArcMethod.allCases {
             let menuItem = item(arcMenu, method.title, #selector(selectArcMethod(_:)), modifiers: [], target: self)
             menuItem.tag = method.rawValue
             menuItem.image = ToolIcons.image(for: method, size: 18)
             menuItem.subtitle = method.detail
         }
-        item(formatMenu, "Fillet Radius…", #selector(setFilletRadius(_:)), modifiers: [], target: self)
-        item(formatMenu, "Chamfer Distances…", #selector(setChamferDistances(_:)), modifiers: [], target: self)
+        item(formatMenu, "Fillet Radius…", #selector(setFilletRadius(_:)), modifiers: [], target: self).image = DrawingTool.fillet.icon(pointSize: 13)
+        item(formatMenu, "Chamfer Distances…", #selector(setChamferDistances(_:)), modifiers: [], target: self).image = DrawingTool.chamfer.icon(pointSize: 13)
 
         // View
         let viewMenu = submenu("View")
-        item(viewMenu, "Zoom In", #selector(zoomIn), "=", target: self)
-        item(viewMenu, "Zoom Out", #selector(zoomOut), "-", target: self)
-        item(viewMenu, "Zoom Extents", #selector(zoomExtents), "e", target: self)
-        item(viewMenu, "Zoom Selected", #selector(zoomSelected(_:)), "e", modifiers: [.command, .control], target: self)
-        item(viewMenu, "Zoom Window", #selector(zoomWindow(_:)), modifiers: [], target: self)
+        item(viewMenu, "Zoom In", #selector(zoomIn), "=", target: self).image = DrawingTool.zoomIn.icon(pointSize: 13)
+        item(viewMenu, "Zoom Out", #selector(zoomOut), "-", target: self).image = DrawingTool.zoomOut.icon(pointSize: 13)
+        item(viewMenu, "Zoom Extents", #selector(zoomExtents), "e", target: self).image = DrawingTool.zoomExtents.icon(pointSize: 13)
+        item(viewMenu, "Zoom Selected", #selector(zoomSelected(_:)), "e", modifiers: [.command, .control], target: self).image = DrawingTool.zoomSelected.icon(pointSize: 13)
+        item(viewMenu, "Zoom Window", #selector(zoomWindow(_:)), modifiers: [], target: self).image = DrawingTool.zoomWindow.icon(pointSize: 13)
         viewMenu.addItem(.separator())
-        item(viewMenu, "Save View…", #selector(saveNamedView(_:)), "v", modifiers: [.command, .option], target: self)
-        let namedViewsMenu = submenu("Named Views", in: viewMenu)
+        item(viewMenu, "Save View…", #selector(saveNamedView(_:)), "v", modifiers: [.command, .option], target: self).image = symbol("bookmark")
+        let namedViewsMenu = submenu("Named Views", in: viewMenu, image: symbol("rectangle.stack"))
         namedViewsMenu.delegate = self      // items are filled in in menuNeedsUpdate
         viewMenu.addItem(.separator())
-        item(viewMenu, "Rotate View…", #selector(rotateViewByAngle(_:)), modifiers: [], target: self)
-        item(viewMenu, "Rotate View to Drawing Coordinates", #selector(rotateViewToUCS(_:)), modifiers: [], target: self)
-        item(viewMenu, "Reset View Rotation", #selector(resetViewRotation(_:)), modifiers: [], target: self)
+        item(viewMenu, "Rotate View…", #selector(rotateViewByAngle(_:)), modifiers: [], target: self).image = symbol("rotate.right")
+        item(viewMenu, "Rotate View to Drawing Coordinates", #selector(rotateViewToUCS(_:)), modifiers: [], target: self).image = icon(.rotateToCoordinates)
+        item(viewMenu, "Reset View Rotation", #selector(resetViewRotation(_:)), modifiers: [], target: self).image = DrawingTool.northArrow.icon(pointSize: 13)
         viewMenu.addItem(.separator())
-        item(viewMenu, "Layers Panel", #selector(toggleLayerPanel), "1", target: self)
-        item(viewMenu, "Properties Panel", #selector(togglePropertiesPanel), "2", target: self)
-        item(viewMenu, "Info Panel", #selector(toggleInfoPanel(_:)), "3", target: self)
+        item(viewMenu, "Layers Panel", #selector(toggleLayerPanel), "1", target: self).image = ToolIcons.image(for: MatchProperty.layer, size: 17)
+        item(viewMenu, "Properties Panel", #selector(togglePropertiesPanel), "2", target: self).image = symbol("list.bullet.rectangle")
+        item(viewMenu, "Info Panel", #selector(toggleInfoPanel(_:)), "3", target: self).image = symbol("info.square")
         // which tool panel sections to show (the panel fills the submenu each time it opens)
         if let toolbarView = toolbarView {
             let toolPanelItem = NSMenuItem(title: "Tool Panel", action: nil, keyEquivalent: "")
             toolPanelItem.submenu = toolbarView.makeToolPanelMenu()
+            toolPanelItem.image = icon(.toolPanel)
             viewMenu.addItem(toolPanelItem)
         }
-        item(viewMenu, "Reset Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self)
-        item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self)
-        item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self)
+        item(viewMenu, "Reset Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
+        item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
+        item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self).image = symbol("macwindow.on.rectangle")
         viewMenu.addItem(.separator())
         item(viewMenu, "Show Grid  (F7)", #selector(toggleGrid), "g", target: self)
         item(viewMenu, "Show Axes", #selector(toggleAxes), modifiers: [], target: self)
         // drawing modes (status line); ⌥ + digit and F-keys are caught by the window (handleModeKey)
-        let aidsMenu = submenu("Drawing Aids", in: viewMenu)
+        let aidsMenu = submenu("Drawing Aids", in: viewMenu, image: icon(.drawingAids))
         item(aidsMenu, "Snap  (⌥3, F3)", #selector(toggleSnap), modifiers: [], target: self)
         item(aidsMenu, "Snap Tracking  (⌥1, F11)", #selector(toggleSnapTracking), modifiers: [], target: self)
         item(aidsMenu, "Ortho  (⌥8, F8, or hold Shift)", #selector(toggleOrtho), modifiers: [], target: self)
@@ -4484,42 +4499,43 @@ extension MainViewController {
         item(viewMenu, "Show Lineweights – LWT  (⌥5)", #selector(toggleLineWeights), "l", modifiers: [.command, .shift], target: self)
         item(viewMenu, "Lineweights Fixed on Screen", #selector(toggleScreenWeights), target: self)
         item(viewMenu, "Smooth Lines (Antialiasing)", #selector(toggleSmoothLines), target: self)
-        item(viewMenu, "Custom Scale…", #selector(addCustomScale), target: self)
+        item(viewMenu, "Custom Scale…", #selector(addCustomScale), target: self).image = DrawingTool.scaleBar.icon(pointSize: 13)
 
         // Layout
         let layoutMenu = submenu("Layout")
-        item(layoutMenu, "Model", #selector(showModelSpace(_:)), "0", modifiers: [.command, .control], target: self)
+        item(layoutMenu, "Model", #selector(showModelSpace(_:)), "0", modifiers: [.command, .control], target: self).image = icon(.model)
         let layoutsItem = NSMenuItem(title: "Layouts", action: nil, keyEquivalent: "")
         let layoutsList = NSMenu(title: "Layouts")
         layoutsList.delegate = self
         layoutsItem.submenu = layoutsList
+        layoutsItem.image = icon(.layouts)
         layoutMenu.addItem(layoutsItem)
         layoutMenu.addItem(.separator())
-        item(layoutMenu, "New Layout", #selector(newLayout(_:)), "l", modifiers: [.command, .control], target: self)
-        item(layoutMenu, "Duplicate Layout", #selector(duplicateLayoutFromMenu(_:)), modifiers: [], target: self)
-        item(layoutMenu, "Rename Layout…", #selector(renameLayoutFromMenu(_:)), modifiers: [], target: self)
-        item(layoutMenu, "Page Setup…", #selector(pageSetupFromMenu(_:)), modifiers: [], target: self)
-        item(layoutMenu, "Delete Layout…", #selector(deleteLayoutFromMenu(_:)), modifiers: [], target: self)
+        item(layoutMenu, "New Layout", #selector(newLayout(_:)), "l", modifiers: [.command, .control], target: self).image = icon(.newLayout)
+        item(layoutMenu, "Duplicate Layout", #selector(duplicateLayoutFromMenu(_:)), modifiers: [], target: self).image = icon(.duplicateLayout)
+        item(layoutMenu, "Rename Layout…", #selector(renameLayoutFromMenu(_:)), modifiers: [], target: self).image = symbol("pencil")
+        item(layoutMenu, "Page Setup…", #selector(pageSetupFromMenu(_:)), modifiers: [], target: self).image = settingsIcon
+        item(layoutMenu, "Delete Layout…", #selector(deleteLayoutFromMenu(_:)), modifiers: [], target: self).image = symbol("trash")
         layoutMenu.addItem(.separator())
-        item(layoutMenu, "Add Viewport", #selector(addViewport(_:)), "v", modifiers: [.command, .control], target: self)
+        item(layoutMenu, "Add Viewport", #selector(addViewport(_:)), "v", modifiers: [.command, .control], target: self).image = icon(.viewport)
         layoutMenu.addItem(.separator())
-        item(layoutMenu, "Plot / Print…", #selector(printDrawing(_:)), modifiers: [], target: self)
+        item(layoutMenu, "Plot / Print…", #selector(printDrawing(_:)), modifiers: [], target: self).image = symbol("printer")
 
         // Window
         let windowMenu = submenu("Window")
-        item(windowMenu, "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m")
-        item(windowMenu, "Zoom", #selector(NSWindow.performZoom(_:)), modifiers: [])
+        item(windowMenu, "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m").image = symbol("minus.square")
+        item(windowMenu, "Zoom", #selector(NSWindow.performZoom(_:)), modifiers: []).image = symbol("arrow.up.left.and.arrow.down.right")
         windowMenu.addItem(.separator())
-        item(windowMenu, "Show Next Tab", #selector(selectNextTab(_:)), "\t", modifiers: [.control], target: self)
-        item(windowMenu, "Show Previous Tab", #selector(selectPreviousTab(_:)), "\t", modifiers: [.control, .shift], target: self)
+        item(windowMenu, "Show Next Tab", #selector(selectNextTab(_:)), "\t", modifiers: [.control], target: self).image = symbol("chevron.right")
+        item(windowMenu, "Show Previous Tab", #selector(selectPreviousTab(_:)), "\t", modifiers: [.control, .shift], target: self).image = symbol("chevron.left")
         NSApp.windowsMenu = windowMenu
 
         // Help (macOS adds menu search to it by itself)
         let helpMenu = submenu("Help")
-        item(helpMenu, "Keyboard Shortcuts…", #selector(showKeyboardShortcuts(_:)), modifiers: [], target: self)
+        item(helpMenu, "Keyboard Shortcuts…", #selector(showKeyboardShortcuts(_:)), modifiers: [], target: self).image = symbol("keyboard")
         helpMenu.addItem(.separator())
-        item(helpMenu, "Report a Problem…", #selector(reportProblem(_:)), modifiers: [], target: self)
-        item(helpMenu, "Show Log in Finder", #selector(showLogInFinder(_:)), modifiers: [], target: self)
+        item(helpMenu, "Report a Problem…", #selector(reportProblem(_:)), modifiers: [], target: self).image = symbol("exclamationmark.bubble")
+        item(helpMenu, "Show Log in Finder", #selector(showLogInFinder(_:)), modifiers: [], target: self).image = symbol("doc.text")
         #if DEBUG
         // development build only: test the crash report (run outside Xcode – there Xcode catches the crash)
         helpMenu.addItem(.separator())
