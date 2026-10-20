@@ -52,7 +52,7 @@ final class HatchEntity: CADEntity {
     }
 
     var infoText: String {
-        var text = String(format: "Hatch\n%@\n\nPattern: %@\nAngle:   %.1f°\nScale:   %@",
+        var text = String(format: "Hatch\n%@\n\nPattern: %@\nAngle:   %.2f°\nScale:   %@",
                           commonInfo, pattern.name, Double(angle * 180 / .pi), LineType.format(scale))
         if !pattern.isSolid {
             text += "\nSpacing: " + LineType.format(pattern.smallestSpacing * scale)

@@ -763,7 +763,7 @@ enum XrefLoader {
             // remember the date even on error – it is loaded again once the file changes
             source.modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             source.error = FileManager.default.fileExists(atPath: url.path)
-                ? "Can't read the file: \(error.localizedDescription)"
+                ? "Cannot read the file: \(error.localizedDescription)"
                 : "File not found – use Block Manager › Browse… to find it"
             return []
         }
@@ -881,6 +881,7 @@ final class BlockManagerController: NSObject, NSTableViewDataSource, NSTableView
                         backing: .buffered, defer: false)
         super.init()
         panel.title = "Block Manager"
+        panel.isReleasedWhenClosed = false
         build()
     }
 

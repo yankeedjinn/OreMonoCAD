@@ -637,7 +637,7 @@ final class ToolButtonView: NSView {
     var hasMenu = false { didSet { needsDisplay = true } }
     var isSelected = false { didSet { updateAppearance() } }
     var image: NSImage? {
-        didSet { imageView.image = image }
+        didSet { updateAppearance() }
     }
 
     private let imageView = NSImageView()
@@ -674,7 +674,9 @@ final class ToolButtonView: NSView {
             background = .clear
         }
         layer?.backgroundColor = background.cgColor
-        imageView.contentTintColor = isSelected ? .white : Theme.textSoft
+        // two-color tool icon; one dark/white color on the selected button
+        imageView.image = image.flatMap { ToolIcons.colored($0, selected: isSelected) } ?? image
+        imageView.contentTintColor = isSelected ? Theme.selectedInk : Theme.textSoft
         needsDisplay = true
     }
 
@@ -687,7 +689,7 @@ final class ToolButtonView: NSView {
         path.line(to: NSPoint(x: bounds.maxX - 3, y: 9))
         path.line(to: NSPoint(x: bounds.maxX - 9, y: 3))
         path.close()
-        (isSelected ? NSColor.white : Theme.menuTriangle).setFill()
+        (isSelected ? Theme.selectedInk : Theme.menuTriangle).setFill()
         path.fill()
     }
 
@@ -758,7 +760,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     var onSelectLayerObjects: ((String) -> Void)?
     /// Layers that the selected objects lie on (the ○ mark in the compact panel).
     var selectedObjectLayers: (() -> Set<String>)?
-    /// Detach into its own window / return under the Layers… button / maximize the window.
+    /// Detach into its own window / return to the right panel / maximize the window.
     var onDetach: (() -> Void)?
     var onAttach: (() -> Void)?
     var onToggleMaximize: (() -> Void)?
@@ -857,8 +859,8 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
         // Buttons of the full table (window)
         let buttons: [(String, String, Selector)] = [
-            ("+", "New layer with a temporary name – double-click the name to rename it", #selector(addLayer)),
-            ("−", "Delete layer (must be empty)", #selector(deleteLayer)),
+            ("+", "New layer – double-click its name to rename it", #selector(addLayer)),
+            ("−", "Delete the selected layer (must be empty)", #selector(deleteLayer)),
             ("Rename…", "Rename the selected layer (or double-click its name)", #selector(renameLayer)),
             ("Set Current", "Make the selected layer current (or double-click the row)", #selector(setCurrent))
         ]
@@ -2443,7 +2445,7 @@ final class PropertiesPanelView: NSView {
             if !first.text.contains("\n") {
                 addText("Content", first.text, placeholder: "Text") { [weak self] value in
                     guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { NSSound.beep(); return }
-                    self?.edit("Edit Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.text = value; return c }
+                    self?.edit("Change Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.text = value; return c }
                 }
             }
             let editButton = NSButton(title: "Edit on Drawing", target: nil, action: nil)
@@ -3407,7 +3409,7 @@ enum DocumentSettingsDialog {
                     polar: Bool, polarIncrement: CGFloat) -> Result? {
         let alert = NSAlert()
         alert.messageText = "Document Settings"
-        alert.informativeText = "Units, grid and angle snapping of this drawing (saved with the drawing)."
+        alert.informativeText = "Units, grid and polar angles of this drawing (saved with the drawing)."
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
 
@@ -3440,7 +3442,7 @@ enum DocumentSettingsDialog {
         y -= 22
         let convert = NSButton(checkboxWithTitle: "Convert the existing drawing", target: nil, action: nil)
         convert.frame = NSRect(x: 128, y: y, width: 200, height: 18)
-        convert.toolTip = "On: objects keep their real size (coordinates are recalculated). Off: only the meaning of a unit changes."
+        convert.toolTip = "On: objects keep their real size (coordinates are recalculated). Off: only the meaning of a unit changes"
         convert.state = .on
         view.addSubview(convert)
 
@@ -3451,11 +3453,11 @@ enum DocumentSettingsDialog {
         gridField.placeholderString = "e.g. 10"
         view.addSubview(gridField)
         y -= 22
-        let snapCheck = NSButton(checkboxWithTitle: "Snap to grid  (F9)", target: nil, action: nil)
+        let snapCheck = NSButton(checkboxWithTitle: "Snap to grid  (⌥9, F9)", target: nil, action: nil)
         snapCheck.frame = NSRect(x: 128, y: y, width: 190, height: 18)
         snapCheck.state = gridSnap ? .on : .off
         view.addSubview(snapCheck)
-        let showCheck = NSButton(checkboxWithTitle: "Show grid", target: nil, action: nil)
+        let showCheck = NSButton(checkboxWithTitle: "Show grid  (F7)", target: nil, action: nil)
         y -= 20
         showCheck.frame = NSRect(x: 128, y: y, width: 190, height: 18)
         showCheck.state = showGrid ? .on : .off
@@ -3467,8 +3469,8 @@ enum DocumentSettingsDialog {
         polarField.addItems(withObjectValues: ["1", "5", "10", "15", "22.5", "30", "45", "90"])
         polarField.stringValue = LineType.format(polarIncrement)
         view.addSubview(polarField)
-        let polarCheck = NSButton(checkboxWithTitle: "On  (F10)", target: nil, action: nil)
-        polarCheck.frame = NSRect(x: 228, y: y + 3, width: 100, height: 18)
+        let polarCheck = NSButton(checkboxWithTitle: "On  (⌥0, F10)", target: nil, action: nil)
+        polarCheck.frame = NSRect(x: 222, y: y + 3, width: 106, height: 18)
         polarCheck.state = polar ? .on : .off
         view.addSubview(polarCheck)
 

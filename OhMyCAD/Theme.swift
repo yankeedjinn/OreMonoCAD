@@ -19,6 +19,16 @@ enum Theme {
     /// Accent color from the macOS settings (selected tool, current layer, usage heading).
     static var accent: NSColor { .controlAccentColor }
 
+    /// Icon on the selected (accent-colored) tool button: dark on a light accent such as yellow, white otherwise.
+    static var selectedInk: NSColor {
+        guard let c = accent.usingColorSpace(.sRGB) else { return .white }
+        let luminance = 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+        return luminance > 0.6 ? gray(0.12) : .white
+    }
+
+    /// Gray part of the tool icons (the accent part uses `accent`).
+    static let iconBase = gray(0.88)
+
     // MARK: Backgrounds
 
     static let windowBackground = NSColor.darkGray  // main window behind the panels

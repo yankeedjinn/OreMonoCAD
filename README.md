@@ -7,14 +7,17 @@ It is a personal project: built for one architect's everyday drawing, kept delib
 ## Features
 
 - Lines, polylines, arcs, circles, ellipses, polygons, splines, construction lines
-- Trim, Extend, Break, Fillet, Chamfer, Offset, Mirror, Array, Join, Explode
+- Trim, PowerTrim, Extend, Break, Fillet, Chamfer, Offset, Mirror, Array, Join, Explode
 - Dimensions (linear, aligned, chain, angular, radius, diameter), text, leaders
 - Hatches with a pick-inside-area fill
+- Walls, room labels with floor area, revision clouds, wipeouts, scale bar and north arrow
+- Image and PDF underlays, external references, groups, Filter
+- Plot / print, PDF and image export, plot style tables (.ctb)
 - Layers, blocks with in-place editing, layouts with viewports, named views
 - DXF import and export, native `.ohmycad` format
 - Survey support: geodetic base point (S-JTSK), point list import, rotated view / UCS
 - Snaps, ortho, dynamic input next to the cursor, Find and Replace
-- Autosave, crash recovery and backups of previous versions
+- Auto-save, crash recovery and backups of previous versions
 - Hover help for every tool: a short summary at once, usage instructions after a moment
 
 ## Requirements

@@ -249,7 +249,7 @@ final class TextEntity: CADEntity {
 
     var infoText: String {
         let lines = text.components(separatedBy: "\n").count
-        var info = String(format: "Text\n%@\n\nPosition: %.3f, %.3f\nHeight:   %.3f\nRotation: %.1f°\nFont:     %@ %@\nLines:    %ld",
+        var info = String(format: "Text\n%@\n\nPosition: %.3f, %.3f\nHeight:   %.3f\nRotation: %.2f°\nFont:     %@ %@\nLines:    %ld",
                           commonInfo, position.x, position.y, height, rotation * 180 / .pi,
                           fontFamily.isEmpty ? FontLibrary.systemFamilyTitle : fontFamily, fontFace, lines)
         if widthFactor != 1 { info += String(format: "\nWidth:    %.2f×", widthFactor) }
@@ -529,6 +529,7 @@ final class TextEditorDialog: NSObject, NSWindowDelegate {
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         super.init()
         window.title = title
+        window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 360)
         window.delegate = self
         build(initial: initial, unitName: unitName, showWidth: showWidth)
@@ -583,7 +584,7 @@ final class TextEditorDialog: NSObject, NSWindowDelegate {
         numberField(spacingField, initial.lineSpacing, width: 60)
         widthField.placeholderString = "no wrap"
         heightField.toolTip = "Height of capital letters in drawing units"
-        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping."
+        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping"
         heightField.target = self
         heightField.action = #selector(formatChanged)
         justifyControl.selectedSegment = TextJustify.allCases.firstIndex(of: initial.justify) ?? 0
@@ -900,7 +901,7 @@ final class TextFormatPanel: NSViewController {
         setupNumber(widthField, format.boxWidth)
         setupNumber(spacingField, format.lineSpacing, width: 48)
         widthField.placeholderString = "no wrap"
-        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping."
+        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping"
         heightField.toolTip = "Height of capital letters in drawing units"
         rotationField.toolTip = "The preview at the cursor stays level; the placed text is rotated"
 

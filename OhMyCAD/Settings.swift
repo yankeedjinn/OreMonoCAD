@@ -290,11 +290,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             check("Repeat the last tool with ↩, Space or right-click", AppSettings.repeatLastTool,
                   tip: "Only when the Select tool is active and nothing is in progress") { AppSettings.repeatLastTool = $0 },
             check("Smooth lines and text (antialiasing)", AppSettings.smoothLines,
-                  tip: "Also in View › Smooth Lines") { AppSettings.smoothLines = $0 },
-            check("Ask whether to close polylines and splines", AppSettings.askToClose,
+                  tip: "Also in View › Smooth Lines (Antialiasing)") { AppSettings.smoothLines = $0 },
+            check("Ask to close polylines and splines", AppSettings.askToClose,
                   tip: "Default for the CLS button (⌥4)") { AppSettings.askToClose = $0 },
             valueBoxCheck,
-            note("These settings apply to the whole app and all drawings. Units, grid and polar step of one drawing are in Format › Document Settings (⌥⌘,).")
+            note("These settings apply to the whole app and all drawings. Units, grid and polar angles of one drawing are in Format › Document Settings… (⌥⌘,).")
         ])
 
         // Drawing
@@ -806,7 +806,7 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
 
         let reset = NSButton(title: "Reset All to Defaults", target: self, action: #selector(resetAll))
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a key cell and type one letter (A–Z), or ⇧ and a letter for Shift (+F works too); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥3–⌥0 and F3, F7–F10, F12 switch modes, digits start typed values, ↩, Space or right-click repeats the last tool. Help › Keyboard Shortcuts lists them all.")
+            "Click a key cell and type one letter (A–Z), or ⇧ and a letter for Shift (+F works too); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥3–⌥0 and F3, F7–F10, F12 switch modes, digits start typed values, ↩, Space or right-click repeats the last tool. Help › Keyboard Shortcuts… lists them all.")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 540

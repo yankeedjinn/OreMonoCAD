@@ -228,7 +228,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click and type right on the drawing – ↩ places it, ⌥↩ = new line, Esc cancels. The ☰ menu next to the text opens font, typeface, height, rotation, alignment and width, which turns plain text into formatted text. Hold the button (or right-click it) for Paragraph (a box that wraps) or Formatted (panel opens at once). Double-click a text to edit it the same way."),
         .measure: (
             summary: "Measures without drawing anything – distance, angle, radius, area and perimeter, coordinates or length of objects.",
-            usage: "Hold the button (or right-click it) to choose what to measure. Distance and Angle: click the points · Area: click the corners (↩ finishes), click inside a closed area, or click a closed object · Length: click objects to add them up. The result shows on the drawing and in the bottom line; Esc clears it."),
+            usage: "Hold the button (or right-click it) to choose what to measure. Distance and Angle: click the points · Area: click the corners (↩ finishes, ⌫ removes the last one), click inside a closed area, or click a closed object · Length: click objects to add them up. The result shows on the drawing and in the bottom line; Esc clears it."),
         .blockCreate: (
             summary: "Turns the selected objects into a named block – a reusable symbol such as a door, a window, furniture or a title block.",
             usage: "Select the objects (↩), click the base point (you will insert the block by it) and type the name. The objects become one block. Using the same name again redefines the block – every copy in the drawing changes. Explode turns a block back into objects."),
@@ -286,7 +286,7 @@ enum DrawingTool: Int, CaseIterable {
         return DrawingTool.help[self]?.usage ?? "(No instructions yet.)"
     }
 
-    /// Tool icon – drawn in code in the style of SF Symbols (ToolIcons.swift).
+    /// Tool icon – drawn in code (ToolIcons.swift).
     func icon(pointSize: CGFloat = 15) -> NSImage? {
         return ToolIcons.image(for: self, size: pointSize + 4)
     }
@@ -624,7 +624,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     /// Value box at the cursor: true = always visible, false = appears once you start typing a number
-    /// (F12, ⌥6, View › Show Value Box While Drawing, Settings). Typing values always works.
+    /// (F12, ⌥6, View › Drawing Aids › Show Value Box While Drawing, Settings). Typing values always works.
     var valueBoxAlways = AppSettings.valueBoxAlways {
         didSet {
             AppSettings.valueBoxAlways = valueBoxAlways
@@ -1003,7 +1003,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                       let copy = original.clone() as? TextEntity {
                 copy.text = value
                 copy.apply(session.format)
-                onCommit?([original], [copy], "Edit Text")
+                onCommit?([original], [copy], "Change Text")
                 selectionManager?.select([copy])
             }
         } else if !empty {
@@ -4548,8 +4548,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-        guard let value = Double(text), range.contains(CGFloat(value)) else {
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard let value = ExpressionEvaluator.evaluate(text), range.contains(CGFloat(value)) else {
             onMessage?("The arc size is from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
             return
         }
@@ -4643,8 +4643,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-        guard let value = Double(text), range.contains(CGFloat(value)) else {
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard let value = ExpressionEvaluator.evaluate(text), range.contains(CGFloat(value)) else {
             onMessage?("The wall thickness is from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
             return
         }

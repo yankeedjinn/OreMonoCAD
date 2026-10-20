@@ -1081,7 +1081,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// The Layers… button (⌘1): shows the layers in the right panel (or their window); a second press collapses them.
+    /// View › Layers Panel (⌘1): shows the layers in the right panel (or their window); a second press collapses them.
     private func showLayerManager() {
         switch layersMode {
         case .window:
@@ -1326,9 +1326,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         guard activeTab.isEdited else { return true }
         let alert = NSAlert()
         alert.messageText = "Do you want to save the changes made to “\(activeTab.title)”?"
-        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.informativeText = "Your changes will be lost if you don't save them."
         alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don’t Save")
+        alert.addButton(withTitle: "Don't Save")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         switch alert.runModal() {
@@ -1912,9 +1912,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                              basePoint: .zero, entities: [], source: source)
             definition.entities = XrefLoader.load(source)
             if let error = source.error {
+                Log.warning("The drawing could not be attached: \(error)")
                 let alert = NSAlert()
                 alert.messageText = "The drawing could not be attached"
                 alert.informativeText = error
+                alert.alertStyle = .warning
                 alert.beginSheetModal(for: window, completionHandler: nil)
                 return
             }
@@ -2003,6 +2005,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func showImageProblem(_ text: String) {
         if currentTool == .image { selectTool(.select) }
+        Log.warning("The image or PDF cannot be attached: \(text)")
         let alert = NSAlert()
         alert.messageText = "The image or PDF cannot be attached"
         alert.informativeText = text
@@ -2060,7 +2063,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let highest = all.map { $0.drawOrder }.max() ?? 0
         let selected = selectionManager.getSelectedEntities(from: all).filter { !layerManager.isLayerLocked($0.layer) }
         guard !selected.isEmpty else {
-            statusBar.showMessage("Select the objects first.")
+            statusBar.showMessage("Select at least one object first.")
             NSSound.beep()
             return
         }
@@ -3569,11 +3572,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        if let value = Double(field.stringValue.replacingOccurrences(of: ",", with: ".")), value >= 0 {
+        if let value = ExpressionEvaluator.evaluate(field.stringValue), value >= 0 {
             editorView.filletRadius = CGFloat(value)
             statusBar.setPrompt(editorView.prompt)
         } else {
-            statusBar.showMessage("Invalid radius.")
+            statusBar.showMessage("“\(field.stringValue)” is not a valid radius.")
         }
     }
 
@@ -3602,13 +3605,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         alert.window.initialFirstResponder = first
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         func number(_ field: NSTextField) -> Double? {
-            let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-            return text.isEmpty ? nil : Double(text)
+            let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? nil : ExpressionEvaluator.evaluate(text)
         }
         let a = number(first), b = number(second)
         // one field empty = the same distance as in the other
         guard let d1 = a ?? b, let d2 = b ?? a, d1 >= 0, d2 >= 0 else {
-            statusBar.showMessage("Invalid chamfer distances.")
+            statusBar.showMessage("The chamfer distances are not valid numbers.")
             return
         }
         editorView.chamferFirst = CGFloat(d1)
@@ -4142,7 +4145,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return !selectionManager.isEmpty
         case #selector(groupSelection(_:)):
             return selectionManager.count >= 2
-        case #selector(ungroupSelection(_:)):
+        case #selector(ungroupSelection(_:)), #selector(selectSimilar(_:)):
             return !selectionManager.isEmpty
                 && selectionManager.getSelectedEntities(from: document.getAllEntities()).contains { $0.groupID != nil }
         case #selector(toggleWholeGroups(_:)):
@@ -4264,7 +4267,7 @@ extension MainViewController {
             menuItem.toolTip = property.detail
         }
         item(editMenu, "Filter…", #selector(filterObjects(_:)), modifiers: [], target: self)
-            .toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text."
+            .toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text"
         editMenu.addItem(.separator())
         let orderMenu = submenu("Draw Order", in: editMenu)
         item(orderMenu, "Bring to Front", #selector(bringToFront(_:)), "f", modifiers: [.command, .shift], target: self)
@@ -4273,11 +4276,11 @@ extension MainViewController {
         item(orderMenu, "Send to Back", #selector(sendToBack(_:)), "b", modifiers: [.command, .shift], target: self)
         editMenu.addItem(.separator())
         item(editMenu, "Group", #selector(groupSelection(_:)), "g", modifiers: [.command, .option], target: self)
-            .toolTip = "The selected objects become one group – a click on one of them selects them all."
+            .toolTip = "The selected objects become one group – a click on one of them selects them all"
         item(editMenu, "Ungroup", #selector(ungroupSelection(_:)), "g", modifiers: [.command, .option, .shift], target: self)
-            .toolTip = "The selected groups fall apart into separate objects."
+            .toolTip = "The selected groups fall apart into separate objects"
         item(editMenu, "Select Groups as a Whole", #selector(toggleWholeGroups(_:)), modifiers: [], target: self)
-            .toolTip = "Off = a click selects a single object of a group, e.g. to edit it alone."
+            .toolTip = "Off = a click selects a single object of a group, e.g. to edit it alone"
 
         // Tools – by group, the shortcuts work on the drawing area
         let toolsMenu = submenu("Tools")
@@ -4374,7 +4377,7 @@ extension MainViewController {
         item(viewMenu, "Rotate View to Drawing Coordinates", #selector(rotateViewToUCS(_:)), modifiers: [], target: self)
         item(viewMenu, "Reset View Rotation", #selector(resetViewRotation(_:)), modifiers: [], target: self)
         viewMenu.addItem(.separator())
-        item(viewMenu, "Layer Manager…", #selector(toggleLayerPanel), "1", target: self)
+        item(viewMenu, "Layers Panel", #selector(toggleLayerPanel), "1", target: self)
         item(viewMenu, "Properties Panel", #selector(togglePropertiesPanel), "2", target: self)
         item(viewMenu, "Info Panel", #selector(toggleInfoPanel(_:)), "3", target: self)
         item(viewMenu, "Reset Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self)
@@ -4479,7 +4482,7 @@ extension MainViewController {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Log.warning("Simulated crash (Help › Simulate Crash)")
-        fatalError("Simulated crash (Help > Simulate Crash)")
+        fatalError("Simulated crash (Help › Simulate Crash)")
     }
     #endif
 

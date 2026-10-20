@@ -551,6 +551,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         super.init()
         window.title = source.layout.map { "Plot – \($0.name)" } ?? "Plot – Model"
+        window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 820, height: 560)
         window.delegate = self
         buildUI()
@@ -658,7 +659,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         stylePopup.target = self
         stylePopup.action = #selector(styleChosen)
         stylePopup.toolTip = "How colors are printed: as they are, all black, in gray, or by an AutoCAD plot style table (.ctb). "
-            + "Choose “Import .ctb…” to load a table; it is saved in the drawing."
+            + "Choose “Import .ctb…” to load a table; it is saved in the drawing"
         lineweightBox.target = self
         lineweightBox.action = #selector(controlChanged)
         lineweightBox.toolTip = "Off = all lines thin (0.1 mm)"

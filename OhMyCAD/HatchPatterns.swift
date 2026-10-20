@@ -445,7 +445,7 @@ enum HatchSettingsDialog {
     /// Returns (angle in degrees, scale or nil = from the drawing scale).
     static func run(angle: CGFloat, scale: CGFloat?, drawingScale: DrawingScale) -> (angle: CGFloat, scale: CGFloat?)? {
         let alert = NSAlert()
-        alert.messageText = "Hatch Angle & Scale"
+        alert.messageText = "Hatch – Angle & Scale"
         alert.informativeText = """
         Pattern sizes are in mm; the scale multiplies them.
         Leave Scale empty to follow the drawing scale (\(drawingScale.title) → \(LineType.format(drawingScale.factor))).
