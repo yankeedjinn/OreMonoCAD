@@ -92,6 +92,12 @@ final class ToolbarView: NSView {
             caption.font = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
             caption.textColor = Theme.textHeading
             caption.alignment = .center
+            // a long name (ARCHITECTURE) gets a slightly smaller font so it fits the narrow panel
+            var fontSize: CGFloat = 9.5
+            while caption.intrinsicContentSize.width > bounds.width - 4 && fontSize > 7 {
+                fontSize -= 0.5
+                caption.font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+            }
             caption.frame = NSRect(x: 0, y: y, width: bounds.width, height: 13)
             content.addSubview(caption)
             y += 14

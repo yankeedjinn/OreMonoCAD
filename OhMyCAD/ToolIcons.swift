@@ -225,6 +225,13 @@ enum ToolIcons {
             // an L-shaped wall: both faces with the mitered corner, the clicked line dashed inside
             p.polyline([(3, 21), (3, 3), (21, 3), (21, 9), (9, 9), (9, 21)], closed: true, accent: true)
             p.polyline([(6, 21), (6, 6), (21, 6)], dashed: true)
+        case .wallFromCurve:
+            // a curved wall (both faces and the ends) around the curve it was made from – the curve runs through and stays
+            p.arc(3, 3, 18, from: 14, to: 76, accent: true)
+            p.arc(3, 3, 10, from: 14, to: 76, accent: true)
+            p.line(12.70, 5.42, 20.47, 7.35, accent: true)
+            p.line(5.42, 12.70, 7.35, 20.47, accent: true)
+            p.arc(3, 3, 14, from: 0, to: 90)
         case .hatch:
             p.rect(3.5, 3.5, 17, 17)
             p.line(3.5, 10, 10, 3.5, accent: true)

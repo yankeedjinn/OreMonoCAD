@@ -6,6 +6,7 @@
 //  draws both faces at the wall thickness, with mitered corners. The result is ordinary closed polylines –
 //  an open wall is one outline (both faces and the ends), a closed wall gives two (the outer and the inner face).
 //  Walls are not joined to each other automatically – Trim or PowerTrim cleans up where they meet.
+//  Wall from Curve builds the same outlines along selected lines, arcs, polylines and splines.
 //
 
 import Cocoa
@@ -93,6 +94,113 @@ enum Walls {
             guard k > 1e-6 else { return points[j] + before * offset }   // the line turns back on itself
             return points[j] + (before + after) * (offset / k)
         }
+    }
+}
+
+// MARK: - Wall from Curve
+
+extension Walls {
+    /// Where a wall made from a curve lies: on the curve, outside it or inside it.
+    enum CurveAlignment: CaseIterable {
+        case center, outside, inside
+
+        var title: String {
+            switch self {
+            case .center: return "centered on the curve"
+            case .outside: return "outside the curve"
+            case .inside: return "inside the curve"
+            }
+        }
+
+        /// The next one for J: centered → outside → inside → centered.
+        var next: CurveAlignment {
+            switch self {
+            case .center: return .outside
+            case .outside: return .inside
+            case .inside: return .center
+            }
+        }
+    }
+
+    /// Can a wall follow this object?
+    static func canFollow(_ entity: CADEntity) -> Bool {
+        return entity is Line || entity is Arc || entity is Polyline || entity is Spline || entity is Circle || entity is Ellipse
+    }
+
+    /// Walls along existing curves. Curves whose ends touch become one wall with mitered corners;
+    /// arcs and splines are followed by short straight pieces. Empty = nothing a wall can follow.
+    static func outlines(alongCurves curves: [CADEntity], thickness: CGFloat, alignment: CurveAlignment,
+                         layer: String) -> [Polyline] {
+        guard thickness > 0, thickness.isFinite else { return [] }
+        var result: [Polyline] = []
+        for chain in chains(of: curves, flatness: thickness / 100) {
+            let justification: Justification
+            switch alignment {
+            case .center:
+                justification = .center
+            case .outside, .inside:
+                // inside = the side the curve bends toward: the left one when it runs counterclockwise
+                // (an open curve is judged as if closed by a straight line; a straight line counts as counterclockwise)
+                let counterclockwise = HatchEntity.signedArea(chain.points) >= 0
+                justification = (alignment == .inside) == counterclockwise ? .left : .right
+            }
+            result += outlines(along: chain.points, closed: chain.closed, thickness: thickness,
+                               justification: justification, layer: layer)
+        }
+        return result
+    }
+
+    /// The curves as point chains – the ones whose ends touch joined into one (as Join does).
+    private static func chains(of curves: [CADEntity], flatness: CGFloat) -> [(points: [CGPoint], closed: Bool)] {
+        var result: [(points: [CGPoint], closed: Bool)] = []
+        var pool: [[CGPoint]] = []
+        var extent = CGRect.null
+        for curve in curves where canFollow(curve) {
+            var points: [CGPoint] = []
+            for primitive in curve.primitives() {
+                for point in HatchRegionFinder.flatten(primitive, flatness: flatness) where DrawingSafety.isFinite(point) {
+                    if let last = points.last, Geometry.distance(last, point) < 1e-9 { continue }
+                    points.append(point)
+                }
+            }
+            guard points.count >= 2 else { continue }
+            extent = extent.union(curve.boundingBox())
+            if (curve as? CurveEntity)?.isClosedCurve ?? false {
+                result.append((points, true))
+            } else {
+                pool.append(points)
+            }
+        }
+
+        let tolerance = extent.isNull ? 1e-6 : max(hypot(extent.width, extent.height) * 1e-9, 1e-6)
+        func same(_ a: CGPoint, _ b: CGPoint) -> Bool { return Geometry.distance(a, b) <= tolerance }
+
+        while !pool.isEmpty {
+            var current = pool.removeFirst()
+            var grew = true
+            while grew, !(current.count > 2 && same(current[0], current[current.count - 1])) {
+                grew = false
+                for (index, other) in pool.enumerated() {
+                    if same(current[current.count - 1], other[0]) {
+                        current += other.dropFirst()
+                    } else if same(current[current.count - 1], other[other.count - 1]) {
+                        current += Array(other.reversed()).dropFirst()
+                    } else if same(current[0], other[other.count - 1]) {
+                        current = other + current.dropFirst()
+                    } else if same(current[0], other[0]) {
+                        current = Array(other.reversed()) + current.dropFirst()
+                    } else {
+                        continue
+                    }
+                    pool.remove(at: index)
+                    grew = true
+                    break
+                }
+            }
+            let closed = current.count > 2 && same(current[0], current[current.count - 1])
+            result.append((current, closed))
+        }
+        return result
     }
 }
 

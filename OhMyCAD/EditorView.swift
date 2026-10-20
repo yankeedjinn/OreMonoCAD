@@ -10,11 +10,12 @@ import Cocoa
 // MARK: - Drawing Tools
 
 enum ToolGroup: Int, CaseIterable {
-    case draw, modify, transform, dimension, insert, view
+    case draw, architecture, modify, transform, dimension, insert, view
 
     var title: String {
         switch self {
         case .draw: return "Draw"
+        case .architecture: return "Architecture"
         case .modify: return "Modify"
         case .transform: return "Transform"
         case .dimension: return "Annotate"
@@ -25,7 +26,7 @@ enum ToolGroup: Int, CaseIterable {
 }
 
 enum DrawingTool: Int, CaseIterable {
-    case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, wall, hatch, hatchRebuild, hatchCut
+    case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, wall, wallFromCurve, hatch, hatchRebuild, hatchCut
     case trim, extend, fillet, chamfer, powerTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties, filter
     case move, copy, rotate, scale, mirror, stretch, array
     case dimLinear, dimAligned, dimContinue, dimAngular, dimRadius, dimDiameter, leader
@@ -46,6 +47,7 @@ enum DrawingTool: Int, CaseIterable {
         case .polyline: return "Polyline"
         case .spline: return "Spline"
         case .wall: return "Wall"
+        case .wallFromCurve: return "Wall from Curve"
         case .trim: return "Trim"
         case .extend: return "Extend"
         case .fillet: return "Fillet"
@@ -126,7 +128,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Inscribed: click the center, then a corner. Circumscribed: the center, then the middle of a side. By one side: the two corners of one side (the polygon grows to the left). Press I, C or E while drawing to switch, S for the number of sides – or type radius, angle and sides at the cursor (Tab = next field)."),
         .rectangle: (
             summary: "A rectangle, stored as a closed polyline.",
-            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field)."),
+            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field). C = from the center or from a corner, S = square on/off – both switch any time, also while drawing. From the center the typed width and height are the whole rectangle; for a square one side is enough."),
         .polyline: (
             summary: "Connected straight segments forming a single object.",
             usage: "Click the points · ↩, Esc, right-click or double-click finishes (with CLS on it asks whether to close) · C or clicking the first point closes · ⌫ removes the last point."),
@@ -136,6 +138,9 @@ enum DrawingTool: Int, CaseIterable {
         .wall: (
             summary: "A wall drawn with a double line – click its line, and both faces appear at the wall thickness with mitered corners.",
             usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. Walls are not joined automatically – clean up where they meet with Trim or PowerTrim."),
+        .wallFromCurve: (
+            summary: "Turns selected lines, arcs, polylines and splines into walls – both faces at the wall thickness along the curve.",
+            usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay."),
         .hatch: (
             summary: "Fills or hatches a closed area – found automatically from whatever surrounds it.",
             usage: "Move over an area to see it highlighted, click to hatch it. Hold the button (or right-click it) for patterns, custom patterns and settings; type angle and scale at the cursor. Gaps up to 3 px are bridged. Exactly the clicked area is filled: shapes inside it are left out as islands, and nothing inside those islands is filled."),
@@ -366,6 +371,7 @@ enum DrawingTool: Int, CaseIterable {
         case .breakAtPoint: return "⇧E"
         case .revisionCloud: return "⇧R"
         case .wall: return "⇧L"
+        case .wallFromCurve: return "⇧P"
         case .wipeout: return "⇧W"
         case .filter: return "⇧S"
         case .image: return "⇧I"
@@ -378,7 +384,8 @@ enum DrawingTool: Int, CaseIterable {
 
     var group: ToolGroup {
         switch self {
-        case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .wall, .hatch, .hatchRebuild, .hatchCut: return .draw
+        case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .hatch, .hatchRebuild, .hatchCut: return .draw
+        case .wall, .wallFromCurve: return .architecture
         case .trim, .extend, .fillet, .chamfer, .powerTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter: return .modify
         case .move, .copy, .rotate, .scale, .mirror, .stretch, .array: return .transform
         case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud, .wipeout, .scaleBar, .northArrow: return .dimension
@@ -1591,7 +1598,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     self.openArrayDialog(center: nil)
                 }
             }
-        case .explode, .join, .hatchRebuild, .hatchCut:
+        case .explode, .join, .hatchRebuild, .hatchCut, .wallFromCurve:
             stage = .selectObjects
         case .stretch:
             stage = .window
@@ -1750,7 +1757,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             text += " · hold the Measure button for other measurements"
         case .rectangle:
-            text = points.isEmpty ? "Rectangle: first corner" : "Rectangle: opposite corner"
+            let modes = [rectangleFromCenter ? "from center" : nil, rectangleSquare ? "square" : nil].compactMap { $0 }
+            text = modes.isEmpty ? "Rectangle" : "Rectangle (" + modes.joined(separator: ", ") + ")"
+            if points.isEmpty {
+                text += rectangleFromCenter ? ": center" : ": first corner"
+            } else {
+                text += rectangleFromCenter ? ": corner" : ": opposite corner"
+            }
+            text += " · C = " + (rectangleFromCenter ? "from a corner" : "from the center") + " · S = square " + (rectangleSquare ? "off" : "on")
         case .polyline:
             text = points.isEmpty ? "Polyline: first point"
                 : "Polyline: next point (or length + ↩) · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
@@ -1761,6 +1775,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             let what = "Wall \(DynamicInputView.format(wallThicknessMM)) mm, \(wallJustification.title)"
             text = points.isEmpty ? what + ": first point · T = thickness · J = side"
                 : what + ": next point (or length + ↩) · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
+        case .wallFromCurve:
+            text = "Wall from Curve \(DynamicInputView.format(wallThicknessMM)) mm, \(wallCurveAlignment.title): "
+                + "select lines, arcs, polylines or splines · T = thickness · J = side · ↩ or right-click = create"
         case .hatch:
             text = "Hatch (\(hatchPattern.title), \(LineType.format(currentHatchAngle))°, scale \(LineType.format(currentHatchScale))"
                 + (hatchScale == nil ? " = drawing scale" : "") + "): click inside a closed area · hold the Hatch button for patterns"
@@ -2529,6 +2546,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             return
         }
+        if currentTool == .wallFromCurve {
+            // the walls of the selected curves – no cursor needed
+            for outline in wallFromCurveOutlines() {
+                outline.draw(in: context, transform: transform, style: StrokeStyle(color: .systemGreen, lineWidth: 1.5, dash: [6, 4]))
+            }
+            return
+        }
         guard let cursor = currentWorldPoint else { return }
         let previewStyle = StrokeStyle(color: .lightGray, lineWidth: 1, dash: [6, 4])
 
@@ -2787,9 +2811,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         case .rectangle:
             guard all.count >= 2 else { return [] }
-            let a = all[0], b = all[1]
             // sides parallel to the axes of the drawing coordinates
-            let d = toUCSVector(b - a)
+            let (a, d) = rectangleDiagonal(from: all[0], to: all[1])
+            let b = a + fromUCSVector(d)
             guard abs(d.x) > tiny, abs(d.y) > tiny else {
                 // zero width or height so far – at least a line in the preview
                 return (!final && Geometry.distance(a, b) > tiny) ? [Line(start: a, end: b, layer: layer)] : []
@@ -3407,8 +3431,15 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .widthHeight:
             guard let corner = points.first else { return p }
             let d = toUCSVector(p - corner)
-            let w = first.map { $0 < 0 ? $0 : $0 * (d.x < 0 ? -1 : 1) } ?? d.x
-            let h = second.map { $0 < 0 ? $0 : $0 * (d.y < 0 ? -1 : 1) } ?? d.y
+            // from the center the cursor is at a corner – an entered width or height is the whole side, so half of it
+            let part: CGFloat = currentTool == .rectangle && rectangleFromCenter ? 0.5 : 1
+            var w = first.map { ($0 < 0 ? $0 : $0 * (d.x < 0 ? -1 : 1)) * part } ?? d.x
+            var h = second.map { ($0 < 0 ? $0 : $0 * (d.y < 0 ? -1 : 1)) * part } ?? d.y
+            // a square: one entered side gives the other
+            if currentTool == .rectangle && rectangleSquare {
+                if first != nil && second == nil { h = abs(w) * (d.y < 0 ? -1 : 1) }
+                if second != nil && first == nil { w = abs(h) * (d.x < 0 ? -1 : 1) }
+            }
             return corner + fromUCSVector(CGPoint(x: w, y: h))
 
         case .angle:
@@ -3461,7 +3492,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return [Geometry.ccwDelta(from: start, to: Geometry.angle(from: arc.center, to: p)) * 180 / .pi]
         case .widthHeight:
             guard let corner = points.first else { return [] }
-            let d = toUCSVector(p - corner)
+            let d = currentTool == .rectangle ? rectangleDiagonal(from: corner, to: p).diagonal : toUCSVector(p - corner)
             return [abs(d.x), abs(d.y)]
         case .angle:
             guard let base = points.first else { return [] }
@@ -3744,6 +3775,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             } else {
                 runSelectionCommand()
             }
+        case .wallFromCurve:
+            finishWallFromCurve()
         case .measure:
             if measureKind == .areaPoints && points.count >= 3 { finishMeasuredArea() }
         case .dimContinue, .matchProperties, .xline:
@@ -4183,6 +4216,47 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         stateChanged()
     }
 
+    // MARK: Rectangle
+
+    /// C: the first click is the center of the rectangle (not its corner). Switches any time, also while drawing.
+    var rectangleFromCenter = false {
+        didSet { stateChanged() }
+    }
+
+    /// S: the rectangle is a square.
+    var rectangleSquare = false {
+        didSet { stateChanged() }
+    }
+
+    /// The rectangle from the first click to `point`: its first corner and its diagonal along the axes
+    /// of the drawing coordinates. Square = equal sides (the longer one, toward the cursor);
+    /// from the center = the first click is the center and the cursor a corner.
+    private func rectangleDiagonal(from first: CGPoint, to point: CGPoint) -> (corner: CGPoint, diagonal: CGPoint) {
+        var d = toUCSVector(point - first)
+        if rectangleSquare {
+            let side = max(abs(d.x), abs(d.y))
+            d = CGPoint(x: d.x < 0 ? -side : side, y: d.y < 0 ? -side : side)
+        }
+        if rectangleFromCenter { return (first - fromUCSVector(d), d * 2) }
+        return (first, d)
+    }
+
+    /// C = from the center / from a corner, S = square on/off.
+    private func rectangleLetter(_ letter: String) -> Bool {
+        switch letter {
+        case "c":
+            rectangleFromCenter.toggle()
+            onMessage?("Rectangle from center " + (rectangleFromCenter ? "ON" : "OFF"))
+            return true
+        case "s":
+            rectangleSquare.toggle()
+            onMessage?("Square " + (rectangleSquare ? "ON" : "OFF"))
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: Polygon
 
     /// Number of sides and input method (remembered between launches).
@@ -4563,7 +4637,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     /// Thickness of new walls in mm (remembered between launches).
     var wallThicknessMM: CGFloat = AppSettings.wallThicknessMM {
-        didSet { AppSettings.wallThicknessMM = wallThicknessMM }
+        didSet {
+            AppSettings.wallThicknessMM = wallThicknessMM
+            onPromptChanged?(prompt)
+            needsDisplay = true
+        }
     }
 
     /// Where the wall lies relative to the clicked line.
@@ -4624,6 +4702,62 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 onMessage?("Closing (C) needs at least three points.")
                 NSSound.beep()
             }
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Where a wall from a curve lies (Wall from Curve).
+    var wallCurveAlignment: Walls.CurveAlignment = .center {
+        didSet { stateChanged() }
+    }
+
+    /// The selected curves a wall can follow (not on locked layers).
+    private var wallFromCurveSources: [CADEntity] {
+        return selectedEntities.filter { Walls.canFollow($0) && !(layerManager?.isLayerLocked($0.layer) ?? false) }
+    }
+
+    /// The last preview – computed again only when the selection, thickness or side changes.
+    private var wallFromCurveCache: (key: String, outlines: [Polyline])?
+
+    private func wallFromCurveOutlines() -> [Polyline] {
+        let sources = wallFromCurveSources
+        let key = sources.map { $0.id.uuidString }.joined() + "|\(wallThickness)|\(wallCurveAlignment)"
+        if let cache = wallFromCurveCache, cache.key == key { return cache.outlines }
+        let outlines = Walls.outlines(alongCurves: sources, thickness: wallThickness, alignment: wallCurveAlignment,
+                                      layer: currentLayerName)
+        wallFromCurveCache = (key, outlines)
+        return outlines
+    }
+
+    private func finishWallFromCurve() {
+        guard !wallFromCurveSources.isEmpty else {
+            onMessage?("Select lines, arcs, polylines or splines first.")
+            return
+        }
+        wallFromCurveCache = nil      // the objects may have changed since the preview
+        let outlines = wallFromCurveOutlines()
+        guard !outlines.isEmpty else {
+            onMessage?("No wall can be made from the selected objects.")
+            return
+        }
+        onCommit?([], outlines, DrawingTool.wallFromCurve.title)
+        selectionManager?.select(outlines)
+        onToolChangeRequested?(.select)
+        onMessage?("Wall from Curve: \(outlines.count) outline\(outlines.count == 1 ? "" : "s"), "
+                   + "\(DynamicInputView.format(wallThicknessMM)) mm, \(wallCurveAlignment.title)")
+    }
+
+    /// Letters in Wall from Curve; true = the letter was used.
+    private func wallFromCurveLetter(_ letter: String) -> Bool {
+        switch letter {
+        case "t":
+            DispatchQueue.main.async { [weak self] in self?.askWallThickness() }
+            return true
+        case "j":
+            wallCurveAlignment = wallCurveAlignment.next
+            onMessage?("Wall from Curve: " + wallCurveAlignment.title)
             return true
         default:
             return false
@@ -5818,7 +5952,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             } else {
                 endCurrentTool()
             }
-        case .explode, .join, .hatchRebuild, .hatchCut:
+        case .explode, .join, .hatchRebuild, .hatchCut, .wallFromCurve:
             if nothingSelected { endCurrentTool() } else { confirm() }
         case .measure where measureKind == .areaPoints && points.count >= 3:
             confirm()
@@ -6197,6 +6331,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // rectangle: C = from the center / from a corner, S = square
+        if currentTool == .rectangle, !shifted, characters.count == 1, rectangleLetter(characters.lowercased()) {
+            return
+        }
+
         // revision cloud and wipeout: R / P = rectangle or corners, A = arc size (cloud), C = close
         if drawsOutline, !shifted, characters.count == 1, outlineLetter(characters.lowercased()) {
             return
@@ -6204,6 +6343,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         // wall: T = thickness, J = side, C = close
         if currentTool == .wall, !shifted, characters.count == 1, wallLetter(characters.lowercased()) {
+            return
+        }
+        if currentTool == .wallFromCurve, !shifted, characters.count == 1, wallFromCurveLetter(characters.lowercased()) {
             return
         }
 
