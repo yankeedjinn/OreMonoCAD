@@ -570,6 +570,8 @@ class Viewport {
 
 class GridRenderer {
     var showGrid = true
+    /// The colored X and Y axes of the drawing coordinates.
+    var showAxes = true
     var gridSpacing: CGFloat = 10.0
     /// When snapping to the grid, no lines finer than the snap step are drawn.
     var snapActive = false
@@ -641,7 +643,7 @@ class GridRenderer {
         let origin = CGPoint.zero.applying(transform)
         let reach = (viewSize.width + viewSize.height) * 2
         context.setLineWidth(1.0)
-        for (axis, color) in [(CGPoint(x: 1, y: 0), NSColor.systemRed), (CGPoint(x: 0, y: 1), NSColor.systemGreen)] {
+        for (axis, color) in [(CGPoint(x: 1, y: 0), NSColor.systemRed), (CGPoint(x: 0, y: 1), NSColor.systemGreen)] where showAxes {
             let tip = axis.applying(transform)
             let d = CGPoint(x: tip.x - origin.x, y: tip.y - origin.y)
             let length = hypot(d.x, d.y)

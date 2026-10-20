@@ -1021,6 +1021,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             self.showCursorCoordinates(point)
         }
         statusBar.onToggleGridSnap = { [weak self] in self?.toggleGridSnap() }
+        statusBar.onToggleShowGrid = { [weak self] in self?.toggleGrid() }
+        statusBar.onToggleShowAxes = { [weak self] in self?.toggleAxes() }
         statusBar.onCoordinatesClicked = { [weak self] in self?.toggleCoordinateDisplay() }
         statusBar.onFunctionKeysInfo = { [weak self] in self?.showFunctionKeysInfo() }
         refreshFunctionKeysState()
@@ -1218,6 +1220,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             tab.ucsOrigin = editorView.ucsOrigin
         }
         tab.showLineWeights = editorView.showLineWeights
+        tab.showGrid = editorView.showGrid
+        tab.showAxes = editorView.showAxes
         tab.lineWeightOnScreen = editorView.lineWeightOnScreen
         tab.hatchPattern = editorView.hatchPattern
         tab.hatchAngle = editorView.hatchAngle
@@ -1234,6 +1238,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         setupCallbacks()
         editorView.drawingScale = tab.drawingScale
         editorView.showLineWeights = tab.showLineWeights
+        editorView.showGrid = tab.showGrid
+        editorView.showAxes = tab.showAxes
         editorView.lineWeightOnScreen = tab.lineWeightOnScreen
         editorView.hatchPattern = tab.hatchPattern
         editorView.hatchAngle = tab.hatchAngle
@@ -1271,6 +1277,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let tab = DrawingTab(untitledNumber: freeUntitledNumber())
         tab.drawingScale = current.drawingScale
         tab.showLineWeights = current.showLineWeights
+        tab.showGrid = current.showGrid
+        tab.showAxes = current.showAxes
         tab.lineWeightOnScreen = current.lineWeightOnScreen
         tab.hatchPattern = current.hatchPattern
         tab.hatchAngle = current.hatchAngle
@@ -2763,10 +2771,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                      geoLocal: tab.geoReference?.local,
                                      geoY: tab.geoReference?.y,
                                      geoX: tab.geoReference?.x,
-                                     geoHeightZero: tab.geoReference?.heightZero)
+                                     geoHeightZero: tab.geoReference?.heightZero,
+                                     showGrid: tab.showGrid ? nil : false,
+                                     showAxes: tab.showAxes ? nil : false)
     }
 
     private func applySettings(_ settings: DrawingSettingsRecord?) {
+        // older drawings and drawings without settings show the grid and the axes
+        editorView.showGrid = settings?.showGrid ?? true
+        editorView.showAxes = settings?.showAxes ?? true
         guard let settings = settings else { return }
         if let paper = settings.scalePaper, let model = settings.scaleModel, paper > 0, model > 0 {
             editorView.drawingScale = DrawingScale(paper: paper, model: model)
@@ -3841,7 +3854,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             statusBar.showMessage("Document settings belong to the model – switched to Model")
         }
         guard let result = DocumentSettingsDialog.run(units: editorView.drawingUnits, gridSize: editorView.gridSize,
-                                                      gridSnap: editorView.gridSnapEnabled, showGrid: editorView.gridRenderer.showGrid,
+                                                      gridSnap: editorView.gridSnapEnabled, showGrid: editorView.showGrid,
                                                       polar: editorView.polarEnabled, polarIncrement: editorView.polarIncrement) else { return }
         let oldUnits = editorView.drawingUnits
         if result.units != oldUnits && result.convertDrawing {
@@ -3873,7 +3886,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         syncViewportUnits(activeTab, mmPerUnit: result.units.mmPerUnit)
         editorView.gridSize = result.gridSize
         editorView.gridSnapEnabled = result.gridSnap
-        editorView.gridRenderer.showGrid = result.showGrid
+        editorView.showGrid = result.showGrid
         editorView.polarIncrement = result.polarIncrement
         editorView.polarEnabled = result.polar
         markSettingsChanged()
@@ -3881,10 +3894,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(result.gridSize)) · polar \(LineType.format(result.polarIncrement))°")
     }
 
+    /// Show Grid and Show Axes are saved in the drawing, so switching them is a change of the drawing.
     @objc func toggleGrid() {
-        editorView.gridRenderer.showGrid.toggle()
-        editorView.needsDisplay = true
-        statusBar.showMessage(editorView.gridRenderer.showGrid ? "Show grid ON" : "Show grid OFF")
+        editorView.showGrid.toggle()
+        hasUnsavedChanges = true
+        statusBar.showMessage(editorView.showGrid ? "Show grid ON" : "Show grid OFF")
+    }
+
+    @objc func toggleAxes() {
+        editorView.showAxes.toggle()
+        hasUnsavedChanges = true
+        statusBar.showMessage(editorView.showAxes ? "Show axes ON" : "Show axes OFF")
     }
 
     @objc func toggleSnap() {
@@ -4021,6 +4041,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                            lineContinue: editorView.lineContinue, lineWeights: editorView.showLineWeights,
                            scale: editorView.drawingScale, screenWeights: editorView.lineWeightOnScreen,
                            gridSnap: editorView.gridSnapEnabled, gridSize: editorView.gridSize,
+                           showGrid: editorView.showGrid, showAxes: editorView.showAxes,
                            polar: editorView.polarEnabled, polarIncrement: editorView.polarIncrement,
                            unit: editorView.drawingUnits.suffix)
         statusBar.setSnapTracking(editorView.snapTrackingEnabled)
@@ -4138,7 +4159,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             menuItem.state = menuItem.tag == currentTool.rawValue ? .on : .off
             return true
         case #selector(toggleGrid):
-            menuItem.state = editorView.gridRenderer.showGrid ? .on : .off
+            menuItem.state = editorView.showGrid ? .on : .off
+            return true
+        case #selector(toggleAxes):
+            menuItem.state = editorView.showAxes ? .on : .off
             return true
         case #selector(toggleSnap):
             menuItem.state = editorView.snapEnabled ? .on : .off
@@ -4435,6 +4459,7 @@ extension MainViewController {
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self)
         viewMenu.addItem(.separator())
         item(viewMenu, "Show Grid  (F7)", #selector(toggleGrid), "g", target: self)
+        item(viewMenu, "Show Axes", #selector(toggleAxes), modifiers: [], target: self)
         // drawing modes (status line); ⌥ + digit and F-keys are caught by the window (handleModeKey)
         let aidsMenu = submenu("Drawing Aids", in: viewMenu)
         item(aidsMenu, "Snap  (⌥3, F3)", #selector(toggleSnap), modifiers: [], target: self)

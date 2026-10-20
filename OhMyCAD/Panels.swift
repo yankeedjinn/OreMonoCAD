@@ -240,8 +240,8 @@ final class ToolbarView: NSView, NSMenuDelegate {
     private func tools(in section: ToolPanelSection) -> [DrawingTool] {
         switch section {
         case .favorites: return ToolPanelLayout.favorites
-        // only one button for combined tools
-        case .group(let group): return DrawingTool.tools(in: group).filter { $0.paletteLeader == $0 }
+        // only one button for combined tools, none for tools offered in another button's menu
+        case .group(let group): return DrawingTool.tools(in: group).filter { $0.paletteLeader == $0 && !Self.menuOnlyTools.contains($0) }
         }
     }
 
@@ -388,6 +388,9 @@ final class ToolbarView: NSView, NSMenuDelegate {
 
     /// Tools (besides combined buttons) that have their own menu.
     private static let toolsWithMenu: Set<DrawingTool> = [.arc, .hatch, .text, .xline, .matchProperties, .measure, .array, .blockInsert]
+
+    /// Tools without a button of their own in the panel – they are in the menu of Hatch or Insert Block.
+    private static let menuOnlyTools: Set<DrawingTool> = [.hatchRebuild, .hatchCut, .blockCreate, .xref, .image]
 
     private func toolMenu(_ tool: DrawingTool) -> NSMenu? {
         if tool.paletteFamily != nil { return makeFamilyMenu(tool) }
@@ -746,7 +749,24 @@ final class ToolbarView: NSView, NSMenuDelegate {
                                                  settings: #selector(hatchSettings(_:)),
                                                  removeCustom: #selector(removeCustomHatchPattern(_:))),
                                   imageSize: 22, header: "Hatch – pattern")
+        menu.addItem(.separator())
+        menu.addItem(toolItem(.hatchRebuild))
+        menu.addItem(toolItem(.hatchCut))
         return menu
+    }
+
+    /// A menu item that starts a tool which has no button of its own in the panel.
+    private func toolItem(_ tool: DrawingTool, title: String? = nil, imageSize: CGFloat = 22) -> NSMenuItem {
+        let item = NSMenuItem(title: title ?? tool.menuTitle, action: #selector(menuToolChosen(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = tool.rawValue
+        item.image = ToolIcons.image(for: tool, size: imageSize)
+        return item
+    }
+
+    @objc private func menuToolChosen(_ sender: NSMenuItem) {
+        guard let tool = DrawingTool(rawValue: sender.tag) else { return }
+        delegate?.toolbarDidSelectTool(tool)
     }
 
     @objc private func hatchPatternChosen(_ sender: NSMenuItem) {
@@ -903,6 +923,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         xref.target = self
         xref.image = ToolIcons.image(for: DrawingTool.xref, size: 18)
         menu.addItem(xref)
+        menu.addItem(toolItem(.image, title: "Attach Image or PDF…", imageSize: 18))
         return menu
     }
 
@@ -3466,6 +3487,8 @@ final class StatusBarView: NSView {
     var onTogglePolar: (() -> Void)?
     var onSetGridSize: ((CGFloat) -> Void)?
     var onSetPolarIncrement: ((CGFloat) -> Void)?
+    var onToggleShowGrid: (() -> Void)?
+    var onToggleShowAxes: (() -> Void)?
 
     private var snapButton: NSButton!
     private var snapMoreButton: NSButton!
@@ -3585,7 +3608,7 @@ final class StatusBarView: NSView {
         trackButton = toggle("Track", "Snap tracking – hold the cursor on a snap point for a moment to track it (a small cross); the cursor then lines up with it horizontally, vertically and at polar angles. Hold it there again to release it\nShortcut: ⌥1 · F11", #selector(trackClicked))
         orthoButton = toggle("Ortho", "Ortho – only horizontal and vertical directions (of the drawing coordinates)\nShortcut: ⌥8 · F8 · or hold Shift", #selector(orthoClicked))
         polarButton = toggle("Polar 15° ", "Polar angles – the direction snaps in steps (the number is the step)\nShortcut: ⌥0 · F10 · right-click = step or Custom…", #selector(polarClicked), valued: true)
-        gridButton = toggle("Grid 10 ", "Snap to grid – points jump to the grid (the number is the grid step)\nShortcut: ⌥9 · F9 · right-click = grid size or Custom…", #selector(gridClicked), valued: true)
+        gridButton = toggle("Grid 10 ", "Snap to grid – points jump to the grid (the number is the grid step)\nShortcut: ⌥9 · F9 · right-click = grid size, Custom…, Show Grid or Show Axes", #selector(gridClicked), valued: true)
         rebuildValueMenus(gridSize: 10, polarIncrement: 15)
         separator()
 
@@ -3713,8 +3736,23 @@ final class StatusBarView: NSView {
         clear.tag = kind == .grid ? 1 : 2
         clear.isEnabled = !custom.isEmpty
         menu.addItem(clear)
+        if kind == .grid {
+            // display of the grid and the axes (saved in the drawing)
+            menu.addItem(.separator())
+            let showGrid = NSMenuItem(title: "Show Grid  (F7)", action: #selector(showGridChosen), keyEquivalent: "")
+            showGrid.target = self
+            showGrid.state = lastShowGrid ? .on : .off
+            menu.addItem(showGrid)
+            let showAxes = NSMenuItem(title: "Show Axes", action: #selector(showAxesChosen), keyEquivalent: "")
+            showAxes.target = self
+            showAxes.state = lastShowAxes ? .on : .off
+            menu.addItem(showAxes)
+        }
         return menu
     }
+
+    @objc private func showGridChosen() { onToggleShowGrid?() }
+    @objc private func showAxesChosen() { onToggleShowAxes?() }
 
     @objc private func valueChosen(_ sender: NSMenuItem) {
         guard let value = sender.representedObject as? CGFloat else { return }
@@ -3759,6 +3797,8 @@ final class StatusBarView: NSView {
 
     private var lastGridSize: CGFloat = 10
     private var lastPolarIncrement: CGFloat = 15
+    private var lastShowGrid = true
+    private var lastShowAxes = true
     @objc private func gridClicked() { onToggleGridSnap?() }
     @objc private func fkeysClicked() {
         fkeysButton.state = fkeysOn ? .on : .off     // the state is decided by macOS, not by the click
@@ -3787,7 +3827,8 @@ final class StatusBarView: NSView {
 
     func setModes(snap: Bool, ortho: Bool, askToClose: Bool, lineContinue: Bool,
                   lineWeights: Bool, scale: DrawingScale, screenWeights: Bool,
-                  gridSnap: Bool, gridSize: CGFloat, polar: Bool, polarIncrement: CGFloat, unit: String) {
+                  gridSnap: Bool, gridSize: CGFloat, showGrid: Bool, showAxes: Bool,
+                  polar: Bool, polarIncrement: CGFloat, unit: String) {
         unitSuffix = unit
         gridButton.state = gridSnap ? .on : .off
         polarButton.state = polar ? .on : .off
@@ -3795,6 +3836,8 @@ final class StatusBarView: NSView {
         retitle(polarButton, "Polar", value: LineType.format(polarIncrement) + "°")
         lastGridSize = gridSize
         lastPolarIncrement = polarIncrement
+        lastShowGrid = showGrid
+        lastShowAxes = showAxes
         rebuildValueMenus(gridSize: gridSize, polarIncrement: polarIncrement)
         lineContinueButton.state = lineContinue ? .on : .off
         lineWeightButton.state = lineWeights ? .on : .off

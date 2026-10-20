@@ -143,13 +143,13 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay."),
         .hatch: (
             summary: "Fills or hatches a closed area – found automatically from whatever surrounds it.",
-            usage: "Move over an area to see it highlighted, click to hatch it. Hold the button (or right-click it) for patterns, custom patterns and settings; type angle and scale at the cursor. Gaps up to 3 px are bridged. Exactly the clicked area is filled: shapes inside it are left out as islands, and nothing inside those islands is filled."),
+            usage: "Move over an area to see it highlighted, click to hatch it. Hold the button (or right-click it) for patterns, custom patterns, settings, Rebuild Hatch and Cut Out of Hatch; type angle and scale at the cursor. Gaps up to 3 px are bridged. Exactly the clicked area is filled: shapes inside it are left out as islands, and nothing inside those islands is filled."),
         .hatchRebuild: (
             summary: "Gives a hatch the shape of the closed area around it – e.g. after you draw the jambs of an opening.",
-            usage: "Select the hatch (or several) and click this button – or click it first, select the hatch and press ↩. The pattern, angle and scale stay."),
+            usage: "Select the hatch (or several) and choose this tool (in the menu of the Hatch button) – or choose it first, select the hatch and press ↩. The pattern, angle and scale stay."),
         .hatchCut: (
             summary: "Cuts closed shapes (rectangle, circle, closed polyline) out of a hatch – an opening in a wall, a hole in a slab.",
-            usage: "Select the hatch together with the closed shapes and click this button – or click it first, select them and press ↩. A shape across the edge trims or splits the hatch, a shape inside makes an island. The shapes stay in the drawing."),
+            usage: "Select the hatch together with the closed shapes and choose this tool (in the menu of the Hatch button) – or choose it first, select them and press ↩. A shape across the edge trims or splits the hatch, a shape inside makes an island. The shapes stay in the drawing."),
         .trim: (
             summary: "Cuts away the part of an object between intersections.",
             usage: "Click the part to remove – every object cuts by default. Shift-click picks specific cutting edges. The red preview shows what will go. Construction lines can be trimmed too: cut on one side they become rays, on both sides ordinary lines."),
@@ -239,7 +239,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select the objects (↩), click the base point (you will insert the block by it) and type the name. The objects become one block. Using the same name again redefines the block – every copy in the drawing changes. Explode turns a block back into objects."),
         .blockInsert: (
             summary: "Places a block of this drawing – as many times as you like.",
-            usage: "Hold the button (or right-click it) to choose the block, open the Block Manager or attach an external reference. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
+            usage: "Hold the button (or right-click it) to choose the block, create one, open the Block Manager, attach an external reference or attach an image or PDF. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
         .xref: (
             summary: "Attaches another drawing (.ohmycad or .dxf) as an external reference – it updates by itself when that file is saved.",
             usage: "Choose the file, then click where its origin (0,0) should go. The reference cannot be edited here; Block Manager reloads it, finds a moved file or binds it into the drawing as an ordinary block."),
@@ -557,6 +557,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// Grid step (in drawing units) – both the drawn grid and snapping.
     var gridSize: CGFloat = 10 {
         didSet { gridRenderer.gridSpacing = gridSize; needsDisplay = true; onModesChanged?() }
+    }
+    /// The background grid is visible (saved in the drawing).
+    var showGrid = true {
+        didSet { gridRenderer.showGrid = showGrid; needsDisplay = true; onModesChanged?() }
+    }
+    /// The colored X/Y axes of the drawing coordinates are visible (saved in the drawing).
+    var showAxes = true {
+        didSet { gridRenderer.showAxes = showAxes; needsDisplay = true; onModesChanged?() }
     }
     /// POLAR: the direction from the previous point snaps in `polarIncrement` degree steps.
     var polarEnabled = false {
