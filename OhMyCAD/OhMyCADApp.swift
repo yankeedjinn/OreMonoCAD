@@ -99,13 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Unsaved changes
 
+    /// Closing the window was already confirmed (the app quits after its last window).
+    private var closeConfirmed = false
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        return mainViewController.confirmDiscardChanges()
+        closeConfirmed = mainViewController.confirmDiscardChanges()
+        return closeConfirmed
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Closing the window was already confirmed – the window is no longer visible then
-        guard window.isVisible else { return .terminateNow }
+        // a flag, not window.isVisible – a minimized or hidden window is not visible either, and must still ask
+        guard !closeConfirmed else { return .terminateNow }
         return mainViewController.confirmDiscardChanges() ? .terminateNow : .terminateCancel
     }
 

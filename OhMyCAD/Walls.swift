@@ -75,8 +75,11 @@ enum Walls {
         return [Polyline(vertices: left + right.reversed(), closed: true, layer: layer)]
     }
 
+    /// Longest miter on the outer side of a corner, as a multiple of the offset; a sharper corner is beveled.
+    private static let miterLimit: CGFloat = 3
+
     /// One face: the clicked line shifted sideways by `offset` (positive = left), its corners mitered
-    /// (the shifted segments meet where they cross).
+    /// (the shifted segments meet where they cross), very sharp outer corners beveled instead of a long spike.
     static func face(of points: [CGPoint], closed: Bool, offset: CGFloat) -> [CGPoint] {
         let n = points.count
         let segmentCount = closed ? n : n - 1
@@ -85,14 +88,19 @@ enum Walls {
             let d = (points[(i + 1) % n] - points[i]).normalized
             return CGPoint(x: -d.y, y: d.x)
         }
-        return (0..<n).map { j -> CGPoint in
-            if !closed && j == 0 { return points[0] + normals[0] * offset }
-            if !closed && j == n - 1 { return points[j] + normals[segmentCount - 1] * offset }
+        return (0..<n).flatMap { j -> [CGPoint] in
+            if !closed && j == 0 { return [points[0] + normals[0] * offset] }
+            if !closed && j == n - 1 { return [points[j] + normals[segmentCount - 1] * offset] }
             let before = normals[(j - 1 + segmentCount) % segmentCount], after = normals[j % segmentCount]
             // the miter: along the sum of both normals, long enough to keep the distance `offset` from both segments
             let k = 1 + before.dot(after)
-            guard k > 1e-6 else { return points[j] + before * offset }   // the line turns back on itself
-            return points[j] + (before + after) * (offset / k)
+            guard k > 1e-6 else { return [points[j] + before * offset] }   // the line turns back on itself
+            // miter length = offset · √(2/k); on the outer side of the turn a too long one becomes a bevel
+            let isOuter = before.cross(after) * offset < 0
+            if isOuter && 2 / k > miterLimit * miterLimit {
+                return [points[j] + before * offset, points[j] + after * offset]
+            }
+            return [points[j] + (before + after) * (offset / k)]
         }
     }
 }

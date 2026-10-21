@@ -81,21 +81,28 @@ class CADDocument {
 
     /// Removes `removed` and inserts `added` at the position of the first removed entity (keeps the draw order).
     func replace(_ removed: [CADEntity], with added: [CADEntity]) {
-        let removedIds = Set(removed.map { $0.id })
-        var insertIndex = entityOrder.firstIndex(where: { removedIds.contains($0) }) ?? entityOrder.count
-        for id in removedIds {
-            if entities.removeValue(forKey: id) != nil,
-               let index = entityOrder.firstIndex(of: id) {
-                entityOrder.remove(at: index)
-                if index < insertIndex { insertIndex -= 1 }
+        let removedIds = Set(removed.map { $0.id }).filter { entities[$0] != nil }
+        for id in removedIds { entities.removeValue(forKey: id) }
+        // one pass over the order – large edits (Convert Units, Explode) stay fast
+        var order: [UUID] = []
+        order.reserveCapacity(entityOrder.count + added.count)
+        var inserted = false
+        func insertAdded() {
+            inserted = true
+            for entity in added where entities[entity.id] == nil {
+                entities[entity.id] = entity
+                order.append(entity.id)
             }
         }
-        insertIndex = min(insertIndex, entityOrder.count)
-        for entity in added where entities[entity.id] == nil {
-            entities[entity.id] = entity
-            entityOrder.insert(entity.id, at: insertIndex)
-            insertIndex += 1
+        for id in entityOrder {
+            if removedIds.contains(id) {
+                if !inserted { insertAdded() }
+            } else {
+                order.append(id)
+            }
         }
+        if !inserted { insertAdded() }
+        entityOrder = order
         revision += 1
         onEntitiesChanged?()
     }

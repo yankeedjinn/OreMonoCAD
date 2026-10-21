@@ -528,7 +528,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// View › Reset Panel Layout: Info, Properties, Layers stacked, default heights.
+    /// View › Reset Right Panel Layout: Info, Properties, Layers stacked, default heights.
     @objc func resetTrayLayout(_ sender: Any?) {
         trayOrder = TrayPanel.allCases
         trayWeights = [.info: 0.25, .properties: 0.4, .layers: 0.35]
@@ -549,7 +549,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// Suffix after the coordinates in the status line (units, rotation).
     private var coordinateSuffix: String {
         var text = editorView.drawingUnits.suffix
-        if editorView.isUCSRotated { text += String(format: " · UCS %@°", LineType.format(Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi)) }
+        if editorView.isUCSRotated { text += String(format: " · UCS %@°", LineType.formatAngle(Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi)) }
         return text
     }
 
@@ -563,6 +563,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         markSettingsChanged()
         statusBar.showMessage(message)
         updateStatusBar()
+        refreshProperties()     // Properties show drawing coordinates
     }
 
     private var ucsAvailable: Bool {
@@ -581,7 +582,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             guard let self = self, let axis = axis else { return }
             self.setUCS(origin: axis.origin, angle: axis.angle,
                         message: String(format: "Drawing coordinates rotated %@° – ortho, grid and new rectangles follow the object · View › Rotate View to Drawing Coordinates turns the screen",
-                                        LineType.format(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
+                                        LineType.formatAngle(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
         }
     }
 
@@ -592,7 +593,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             guard let self = self, let axis = axis else { return }
             self.setUCS(origin: axis.origin, angle: axis.angle,
                         message: String(format: "Drawing coordinates: new origin, X axis at %@°",
-                                        LineType.format(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
+                                        LineType.formatAngle(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
         }
     }
 
@@ -602,7 +603,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                      message: "Angle of the X axis in degrees (counter-clockwise, 0 = world). The origin stays.",
                                      initial: Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi) else { return }
         setUCS(origin: editorView.ucsOrigin, angle: degrees * .pi / 180,
-               message: "Drawing coordinates rotated \(LineType.format(degrees))°")
+               message: "Drawing coordinates rotated \(LineType.formatAngle(degrees))°")
     }
 
     @objc func ucsWorld(_ sender: Any?) {
@@ -634,7 +635,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         activeTab.viewRotation = editorView.viewport.rotation
         markSettingsChanged()
         let degrees = editorView.viewport.rotation * 180 / .pi
-        statusBar.showMessage(abs(degrees) < 1e-9 ? "View not rotated" : "View rotated \(LineType.format(degrees))° – the objects keep their coordinates")
+        statusBar.showMessage(abs(degrees) < 1e-9 ? "View not rotated" : "View rotated \(LineType.formatAngle(degrees))° – the objects keep their coordinates")
     }
 
     private func askAngle(title: String, message: String, initial: CGFloat) -> CGFloat? {
@@ -996,15 +997,24 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             self?.refreshProperties()
         }
 
+        // layers and the current layer are saved in the drawing, so any change of them is a change of the drawing
         layerManager.onLayersChanged = { [weak self] in
+            // objects on a hidden layer don't stay selected – they would be moved or deleted unseen
+            if let self = self {
+                let hidden = self.selectionManager.getSelectedEntities(from: self.document.getAllEntities())
+                    .filter { !self.layerManager.isLayerVisible($0.layer) }
+                if !hidden.isEmpty { self.selectionManager.deselect(hidden) }
+            }
             self?.layerPanel.reloadData()
             self?.refreshProperties()
             self?.editorView.needsDisplay = true
+            self?.hasUnsavedChanges = true
         }
 
         layerManager.onCurrentLayerChanged = { [weak self] in
             self?.layerPanel.reloadData()
             self?.updateStatusBar()
+            self?.hasUnsavedChanges = true
         }
 
         selectionManager.onSelectionChanged = { [weak self] in
@@ -1089,7 +1099,6 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         propertiesPanel.unitsPerPaperMM = { [weak self] in self?.editorView.unitsPerPaperMM ?? 1 }
         propertiesPanel.lineTypeOf = { [weak self] entity in self?.layerManager.lineType(for: entity) ?? .continuous }
         editorView.onViewportDoubleClick = { [weak self] viewport in self?.openModel(at: viewport) }
-        editorView.onTextRequested = { [weak self] point, width in self?.insertText(at: point, boxWidth: width) }
         editorView.onHatchShortcut = { [weak self] name in
             guard let pattern = HatchPatternLibrary.named(name) else { return }
             self?.toolbarDidSelectHatchPattern(pattern)
@@ -1156,6 +1165,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private func refreshProperties() {
         let all = document.getAllEntities()
         let selection = selectionManager.getSelectedEntities(from: all)
+        propertiesPanel.ucsToWorld = editorView.ucsToWorld
         propertiesPanel.update(selection: selection, layerNames: layerManager.getAllLayers().map { $0.name })
         infoPanel.update(selection: selection, objectCount: all.count, layerCount: layerManager.getAllLayers().count)
     }
@@ -1601,7 +1611,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             menu.removeAllItems()
             let definitions = toolbarBlockDefinitions()
             if definitions.isEmpty {
-                let empty = NSMenuItem(title: "No Blocks Yet", action: nil, keyEquivalent: "")
+                let empty = NSMenuItem(title: "No blocks in this drawing yet", action: nil, keyEquivalent: "")
                 empty.isEnabled = false
                 menu.addItem(empty)
             }
@@ -1610,7 +1620,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 item.target = self
                 item.representedObject = definition.name
                 item.image = BlockPreview.image(of: definition, size: 18)
-                item.subtitle = definition.source.map { "External reference · \($0.fileName)" } ?? "\(definition.entities.count) object\(definition.entities.count == 1 ? "" : "s")"
+                item.subtitle = definition.menuSubtitle
                 menu.addItem(item)
             }
             return
@@ -1662,39 +1672,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.showMessage("Text style: \(style.family.isEmpty ? FontLibrary.systemFamilyTitle : style.family) \(style.face), \(LineType.format(style.heightMM)) mm")
     }
 
-    /// New text with a dialog (Formatted / Paragraph).
-    private func insertText(at point: CGPoint, boxWidth: CGFloat?) {
-        let style = editorView.textStyle
-        let initial = TextEditorDialog.Result(text: "", family: style.family, face: style.face,
-                                              height: editorView.newTextHeight, rotationDegrees: 0,
-                                              justify: style.justify, underline: style.underline,
-                                              boxWidth: boxWidth, lineSpacing: 1)
-        let dialog = TextEditorDialog(title: boxWidth == nil ? "New Text" : "New Paragraph Text", initial: initial,
-                                      unitName: editorView.drawingUnits.suffix)
-        guard let result = dialog.run() else {
-            view.window?.makeFirstResponder(editorView)
-            return
-        }
-        let entity = editorView.makeText(result.text, at: point, boxWidth: result.boxWidth)
-        apply(result, to: entity)
-        applyChange(removed: [], added: [entity], actionName: "Add Text")
-        view.window?.makeFirstResponder(editorView)
-    }
-
     /// Editing text directly on the canvas (Properties › Edit) – the gear next to the text opens the format.
     private func editText(_ text: TextEntity) {
         view.window?.makeFirstResponder(editorView)
         editorView.beginEditing(text)
-    }
-
-    private func apply(_ result: TextEditorDialog.Result, to entity: TextEntity) {
-        entity.fontFamily = result.family
-        entity.fontFace = result.face
-        entity.height = result.height
-        entity.rotation = Geometry.normalizeAngle(result.rotationDegrees * .pi / 180)
-        entity.justify = result.justify
-        entity.underline = result.underline
-        entity.lineSpacing = result.lineSpacing
     }
 
     func toolbarDidSelectMeasureKind(_ kind: MeasureKind) {
@@ -1953,9 +1934,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                              basePoint: .zero, entities: [], source: source)
             definition.entities = XrefLoader.load(source)
             if let error = source.error {
-                Log.warning("The drawing could not be attached: \(error)")
+                Log.error("Error Attaching External Reference: \(error)")
                 let alert = NSAlert()
-                alert.messageText = "The drawing could not be attached"
+                alert.messageText = "Error Attaching External Reference"
                 alert.informativeText = error
                 alert.alertStyle = .warning
                 alert.beginSheetModal(for: window, completionHandler: nil)
@@ -2046,9 +2027,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func showImageProblem(_ text: String) {
         if currentTool == .image { selectTool(.select) }
-        Log.warning("The image or PDF cannot be attached: \(text)")
+        Log.error("Error Attaching Image or PDF: \(text)")
         let alert = NSAlert()
-        alert.messageText = "The image or PDF cannot be attached"
+        alert.messageText = "Error Attaching Image or PDF"
         alert.informativeText = text
         alert.alertStyle = .warning
         if let window = view.window, window.attachedSheet == nil {
@@ -2246,15 +2227,22 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     /// Changes a property of the selected objects (via copies, so it can be undone).
     private func changeSelection(actionName: String, _ change: (CADEntity) -> Void) {
-        let selected = selectionManager.getSelectedEntities(from: document.getAllEntities())
-        guard !selected.isEmpty else { return }
+        let all = selectionManager.getSelectedEntities(from: document.getAllEntities())
+        // objects on locked layers stay as they are (like in editSelection)
+        let selected = all.filter { !layerManager.isLayerLocked($0.layer) }
+        guard !selected.isEmpty else {
+            if !all.isEmpty { statusBar.showMessage("The selected objects are on locked layers – nothing changed.") }
+            refreshProperties()
+            return
+        }
         let changed = selected.map { entity -> CADEntity in
             let copy = entity.clone()
             change(copy)
             return copy
         }
         applyChange(removed: selected, added: changed, actionName: actionName)
-        selectionManager.select(changed)
+        let unchanged = all.filter { entity in !selected.contains { $0 === entity } }
+        selectionManager.select(unchanged + changed)
     }
 
     // MARK: Layers
@@ -2274,7 +2262,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     }
 
     private func renameLayer(_ oldName: String, to newName: String) {
-        guard layerManager.renameLayer(oldName, to: newName) else {
+        guard applyLayerRename(from: oldName, to: newName.trimmingCharacters(in: .whitespaces)) else {
             let alert = NSAlert()
             alert.messageText = "The layer cannot be renamed"
             alert.informativeText = layerManager.getLayer(newName.trimmingCharacters(in: .whitespaces)) != nil
@@ -2285,18 +2273,45 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             layerPanel.reloadData()
             return
         }
-        let trimmed = newName.trimmingCharacters(in: .whitespaces)
-        for doc in activeTab.allDocuments {
-            for entity in doc.getAllEntities() {
-                if entity.layer == oldName { entity.layer = trimmed }
-                if let viewport = entity as? ViewportEntity, viewport.frozenLayers.remove(oldName) != nil {
-                    viewport.frozenLayers.insert(trimmed)
-                }
-            }
-        }
         hasUnsavedChanges = true
         refreshPanels()
         editorView.needsDisplay = true
+    }
+
+    /// Renames the layer with its objects. Undoable, so that objects brought back by an older Undo step
+    /// find their layer under the name they have.
+    @discardableResult
+    private func applyLayerRename(from oldName: String, to newName: String) -> Bool {
+        guard layerManager.renameLayer(oldName, to: newName) else { return false }
+        moveObjects(fromLayer: oldName, toLayer: newName)
+        registerLayerUndo(actionName: "Rename Layer") { $0.applyLayerRename(from: newName, to: oldName) }
+        return true
+    }
+
+    /// Objects in the model, on layouts and inside blocks change their layer name (Rename Layer).
+    private func moveObjects(fromLayer oldName: String, toLayer newName: String) {
+        let contents = activeTab.allDocuments.map { $0.getAllEntities() } + activeTab.blocks.definitions.map { $0.entities }
+        for entities in contents {
+            for entity in entities {
+                if entity.layer == oldName { entity.layer = newName }
+                if let viewport = entity as? ViewportEntity, viewport.frozenLayers.remove(oldName) != nil {
+                    viewport.frozenLayers.insert(newName)
+                }
+            }
+        }
+        for definition in activeTab.blocks.definitions { definition.contentDidChange() }
+    }
+
+    /// A layer change goes into the undo history with the objects, so the steps undo in the right order.
+    private func registerLayerUndo(actionName: String, _ undo: @escaping (MainViewController) -> Void) {
+        let undoer = activeTab.undoer
+        undoer.registerUndo(withTarget: self) { target in
+            undo(target)
+            target.refreshPanels()
+            target.editorView.needsDisplay = true
+        }
+        undoer.setActionName(actionName)
+        hasUnsavedChanges = true
     }
 
     private func deleteLayer(_ name: String) {
@@ -2309,8 +2324,21 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             statusBar.showMessage("Layer \(name) contains \(count) object\(count == 1 ? "" : "s") – move or delete them first.")
             return
         }
-        layerManager.removeLayer(name)
-        hasUnsavedChanges = true
+        if let block = activeTab.blocks.blocks.first(where: { $0.entities.contains { $0.layer == name } }) {
+            statusBar.showMessage("Layer \(name) is used inside the block \u{201C}\(block.name)\u{201D} – edit the block first.")
+            return
+        }
+        removeLayerUndoably(name)
+    }
+
+    private func removeLayerUndoably(_ name: String) {
+        guard let layer = layerManager.getLayer(name), layerManager.removeLayer(name) else { return }
+        registerLayerUndo(actionName: "Delete Layer") { $0.restoreLayer(layer) }
+    }
+
+    private func restoreLayer(_ layer: Layer) {
+        layerManager.addLayer(layer)
+        registerLayerUndo(actionName: "Delete Layer") { $0.removeLayerUndoably(layer.name) }
     }
 
     // MARK: Menu – file
@@ -2491,7 +2519,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// true = place by the base point, false = keep S-JTSK, nil = cancel.
     private func askSurveyPlacement(fileName: String) -> Bool? {
         let alert = NSAlert()
-        alert.messageText = "Geodetic survey in S-JTSK"
+        alert.messageText = "Geodetic Survey in S-JTSK"
         let hasReference = activeTab.geoReference != nil
         alert.informativeText = "\(fileName) uses S-JTSK coordinates in meters.\n\n"
             + (hasReference
@@ -2706,6 +2734,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             }
             applySettings(result.settings)
             if let current = result.currentLayer { _ = layerManager.setCurrentLayer(current) }
+            hasUnsavedChanges = false      // restoring the saved current layer is not a change
             if let zoom = result.settings?.viewZoom, let pan = result.settings?.viewPan {
                 editorView.viewport.viewState = (zoom, pan)
             } else {
@@ -2894,6 +2923,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         do {
             let settings = currentSettings()
             let tab = activeTab
+            tab.restoreReferencedBlocks()
             try NativeFormat.write(entities: tab.document.getAllEntities(),
                                    layers: layerManager.getAllLayers(),
                                    currentLayer: layerManager.currentLayerName,
@@ -3112,7 +3142,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                     self.statusBar.showMessage("Saved \(url.lastPathComponent)")
                 }
             } catch {
-                self.showError(title: "Error Plotting", error: error)
+                self.showError(title: settings.rasterFormat == nil ? "Error Exporting PDF" : "Error Exporting Image", error: error)
             }
         }
     }
@@ -3562,7 +3592,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             controller.onReplace = { [weak self] pairs in
                 guard let self = self else { return }
                 self.editorView.cancelCurrentOperation()
-                self.applyChange(removed: pairs.map { $0.old }, added: pairs.map { $0.new }, actionName: "Replace Text")
+                // a text left empty is deleted in the same step (an empty text is invisible and is not saved)
+                let added = pairs.map { $0.new }.filter { entity in
+                    guard let text = entity as? TextEntity else { return true }
+                    return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                self.applyChange(removed: pairs.map { $0.old }, added: added, actionName: "Replace Text")
                 self.editorView.needsDisplay = true
                 self.refreshPanels()
             }
@@ -3610,7 +3645,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     @objc func setFilletRadius(_ sender: Any?) {
         let alert = NSAlert()
-        alert.messageText = "Fillet Radius"
+        alert.messageText = "Fillet – Radius"
         alert.informativeText = "Radius of the fillet (0 = sharp corner):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
@@ -3630,7 +3665,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// Format › Chamfer Distances… – chamfer distances from the corner on the first and the second object.
     @objc func setChamferDistances(_ sender: Any?) {
         let alert = NSAlert()
-        alert.messageText = "Chamfer Distances"
+        alert.messageText = "Chamfer – Distances"
         alert.informativeText = "Distances from the corner used by the Chamfer tool – the first on the first line you click, "
             + "the second on the second line (both 0 = sharp corner):"
         alert.addButton(withTitle: "OK")
@@ -3658,7 +3693,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let a = number(first), b = number(second)
         // one field empty = the same distance as in the other
         guard let d1 = a ?? b, let d2 = b ?? a, d1 >= 0, d2 >= 0 else {
-            statusBar.showMessage("The chamfer distances are not valid numbers.")
+            // the field that holds the wrong value
+            let firstOK = first.stringValue.trimmingCharacters(in: .whitespaces).isEmpty || (a ?? -1) >= 0
+            let wrong = firstOK ? second : first
+            statusBar.showMessage("\u{201C}\(wrong.stringValue)\u{201D} is not a valid distance.")
             return
         }
         editorView.chamferFirst = CGFloat(d1)
@@ -3807,13 +3845,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private func showFunctionKeysInfo() {
         refreshFunctionKeysState()
         let alert = NSAlert()
-        alert.messageText = "Function keys F1–F12"
+        alert.messageText = "Function Keys F1–F12"
         alert.informativeText = """
         Whether the top row sends F1, F2… or controls brightness and volume is a macOS setting for the whole Mac – an app cannot switch it.
 
         • Hold fn (Globe) and press the F-key, or
         • turn on “Use F1, F2, etc. keys as standard function keys” in System Settings › Keyboard › Keyboard Shortcuts… › Function Keys, or
-        • use the shortcuts that always work in OhMyCAD: ⌥3 Snap · ⌥4 CLS · ⌥5 LWT · ⌥6 value box · ⌥7 LNC · ⌥8 Ortho · ⌥9 Grid snap · ⌥0 Polar.
+        • use the shortcuts that always work in OhMyCAD: ⌥1 Snap tracking · ⌥3 Snap · ⌥4 CLS · ⌥5 LWT · ⌥6 value box · ⌥7 LNC · ⌥8 Ortho · ⌥9 Grid snap · ⌥0 Polar.
 
         Keyboards that are not made by Apple usually send F1–F12 directly.
         """
@@ -3837,13 +3875,49 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func togglePolar() {
         editorView.polarEnabled.toggle()
         statusBar.showMessage(editorView.polarEnabled
-            ? "Polar angles ON – every \(LineType.format(editorView.polarIncrement))°" : "Polar angles OFF")
+            ? "Polar angles ON – every \(LineType.formatAngle(editorView.polarIncrement))°" : "Polar angles OFF")
     }
 
     /// A change of the drawing settings is saved with the drawing.
     private func markSettingsChanged() {
         hasUnsavedChanges = true
         updateModes()
+    }
+
+    /// Converts everything besides the objects that is stored in model coordinates (Convert Units),
+    /// and registers the opposite conversion for Undo.
+    private func convertUnitSettings(from oldUnits: DrawingUnits, to newUnits: DrawingUnits, factor: CGFloat) {
+        let tab = activeTab
+        func scaled(_ p: CGPoint) -> CGPoint { return CGPoint(x: p.x * factor, y: p.y * factor) }
+        // viewports on layouts keep showing the same place in the model
+        for layout in tab.layouts {
+            for viewport in layout.viewports { viewport.modelCenter = scaled(viewport.modelCenter) }
+        }
+        tab.ucsOrigin = scaled(tab.ucsOrigin)
+        if tab.activeLayout == nil { editorView.ucsOrigin = tab.ucsOrigin }
+        if var reference = tab.geoReference {
+            reference.local = scaled(reference.local)
+            tab.geoReference = reference
+            GeoReference.active = reference
+        }
+        for index in tab.namedViews.indices where tab.namedViews[index].layout == nil {
+            tab.namedViews[index].zoom /= factor
+            tab.namedViews[index].pan = scaled(tab.namedViews[index].pan)
+        }
+        if tab.activeLayout == nil {
+            editorView.viewport.viewState = (zoom: editorView.viewport.getCurrentZoom() / factor,
+                                             pan: scaled(editorView.viewport.viewState.pan))
+            editorView.drawingUnits = newUnits
+        } else {
+            if let view = tab.viewState { tab.viewState = (zoom: view.zoom / factor, pan: scaled(view.pan)) }
+            tab.units = newUnits
+        }
+        syncViewportUnits(tab, mmPerUnit: newUnits.mmPerUnit)
+        tab.activeUndoer.registerUndo(withTarget: self) { target in
+            target.convertUnitSettings(from: newUnits, to: oldUnits, factor: 1 / factor)
+            target.markSettingsChanged()
+            target.editorView.needsDisplay = true
+        }
     }
 
     /// Document settings: units, grid and angle snapping.
@@ -3862,25 +3936,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             let factor = oldUnits.mmPerUnit / result.units.mmPerUnit
             let t = CGAffineTransform(scaleX: factor, y: factor)
             let originals = document.getAllEntities()
+            // applyTransform already scales dimension text and arrows
             let scaled = originals.map { entity -> CADEntity in
                 let copy = entity.clone()
                 copy.applyTransform(t)
-                if let dimension = copy as? DimensionEntity {
-                    dimension.textHeight *= factor
-                    dimension.arrowSize *= factor
-                }
                 return copy
             }
             applyChange(removed: originals, added: scaled, actionName: "Convert Units")
-            // viewports on layouts keep showing the same place in the model
-            for layout in activeTab.layouts {
-                for viewport in layout.viewports {
-                    viewport.modelCenter = CGPoint(x: viewport.modelCenter.x * factor, y: viewport.modelCenter.y * factor)
-                }
-            }
-            editorView.viewport.viewState = (zoom: editorView.viewport.getCurrentZoom() / factor,
-                                             pan: CGPoint(x: editorView.viewport.viewState.pan.x * factor,
-                                                          y: editorView.viewport.viewState.pan.y * factor))
+            // the settings tied to model coordinates are converted in the same undo step
+            convertUnitSettings(from: oldUnits, to: result.units, factor: factor)
         }
         editorView.drawingUnits = result.units
         syncViewportUnits(activeTab, mmPerUnit: result.units.mmPerUnit)
@@ -3891,7 +3955,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.polarEnabled = result.polar
         markSettingsChanged()
         editorView.needsDisplay = true
-        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(result.gridSize)) · polar \(LineType.format(result.polarIncrement))°")
+        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(result.gridSize)) · polar \(LineType.formatAngle(result.polarIncrement))°")
     }
 
     /// Show Grid and Show Axes are saved in the drawing, so switching them is a change of the drawing.
@@ -3914,7 +3978,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     @objc func toggleSnapTracking() {
         editorView.snapTrackingEnabled.toggle()
-        statusBar.showMessage(editorView.snapTrackingEnabled ? "Snap Tracking ON" : "Snap Tracking OFF")
+        statusBar.showMessage(editorView.snapTrackingEnabled ? "Snap tracking ON" : "Snap tracking OFF")
     }
 
     @objc func toggleOrtho() {
@@ -3925,7 +3989,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// The value box at the cursor: always / only while typing (⌥6, F12, View menu, Settings).
     @objc func toggleDynamicInput() {
         editorView.valueBoxAlways.toggle()
-        statusBar.showMessage(editorView.valueBoxAlways ? "Value box: always at the cursor" : "Value box: only when you type a value")
+        statusBar.showMessage(editorView.valueBoxAlways ? "Value box always visible ON" : "Value box always visible OFF")
     }
 
     @objc func toggleAskToClose() {
@@ -3935,6 +3999,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     @objc func toggleLineWeights() {
         editorView.showLineWeights.toggle()
+        // saved in the drawing, like Show Grid
+        markSettingsChanged()
         statusBar.showMessage(editorView.showLineWeights ? "Lineweights ON" : "Lineweights OFF")
     }
 
@@ -3983,7 +4049,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func toggleScreenWeights() {
         editorView.lineWeightOnScreen.toggle()
         if !editorView.showLineWeights { editorView.showLineWeights = true }
-        updateModes()
+        markSettingsChanged()
         statusBar.showMessage(editorView.lineWeightOnScreen ? "Lineweights fixed on screen ON" : "Lineweights fixed on screen OFF")
     }
 
@@ -3995,6 +4061,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         editorView.drawingScale = scale
+        markSettingsChanged()
         statusBar.showMessage("Scale \(scale.title)")
     }
 
@@ -4002,7 +4069,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func addCustomScale() {
         let alert = NSAlert()
         alert.messageText = "Custom Scale"
-        alert.informativeText = "Enter the scale as paper:model, e.g. 1:75, 3:1 or just 75 (= 1:75)."
+        alert.informativeText = "Scale of the drawing as paper:model (e.g. 1:75, 3:1 or just 75 = 1:75):"
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
@@ -4213,7 +4280,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return !selectionManager.isEmpty
         case #selector(groupSelection(_:)):
             return selectionManager.count >= 2
-        case #selector(ungroupSelection(_:)), #selector(selectSimilar(_:)):
+        case #selector(selectSimilar(_:)):
+            return !selectionManager.isEmpty
+        case #selector(ungroupSelection(_:)):
             return !selectionManager.isEmpty
                 && selectionManager.getSelectedEntities(from: document.getAllEntities()).contains { $0.groupID != nil }
         case #selector(toggleWholeGroups(_:)):
@@ -4382,7 +4451,7 @@ extension MainViewController {
         // Rebuild Hatch and Cut Out of Hatch are in the menu above as tools (Draw group).
         // Tool and style settings are in the Format menu, here only the tools and their kinds.
         toolsMenu.addItem(.separator())
-        let arrayMenu = submenu("Array", in: toolsMenu)
+        let arrayMenu = submenu("Array", in: toolsMenu, image: DrawingTool.array.icon(pointSize: 13))
         for kind in ArrayKind.allCases {
             let menuItem = item(arrayMenu, kind.title, #selector(selectArrayKind(_:)), modifiers: [], target: self)
             menuItem.tag = kind.rawValue
@@ -4390,7 +4459,7 @@ extension MainViewController {
             menuItem.subtitle = kind.detail
         }
 
-        let measureMenu = submenu("Measure", in: toolsMenu)
+        let measureMenu = submenu("Measure", in: toolsMenu, image: DrawingTool.measure.icon(pointSize: 13))
         for kind in MeasureKind.allCases {
             let menuItem = item(measureMenu, kind.title, #selector(selectMeasureKind(_:)), modifiers: [], target: self)
             menuItem.tag = kind.rawValue
@@ -4469,7 +4538,7 @@ extension MainViewController {
             toolPanelItem.image = icon(.toolPanel)
             viewMenu.addItem(toolPanelItem)
         }
-        item(viewMenu, "Reset Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
+        item(viewMenu, "Reset Right Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
         item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self).image = symbol("macwindow.on.rectangle")
         viewMenu.addItem(.separator())
@@ -4482,7 +4551,7 @@ extension MainViewController {
         item(aidsMenu, "Ortho  (⌥8, F8, or hold Shift)", #selector(toggleOrtho), modifiers: [], target: self)
         item(aidsMenu, "Snap to Grid  (⌥9, F9)", #selector(toggleGridSnap), modifiers: [], target: self)
         item(aidsMenu, "Polar Angles  (⌥0, F10)", #selector(togglePolar), modifiers: [], target: self)
-        item(aidsMenu, "Show Value Box While Drawing  (⌥6, F12)", #selector(toggleDynamicInput), modifiers: [], target: self)
+        item(aidsMenu, "Value Box Always Visible  (⌥6, F12)", #selector(toggleDynamicInput), modifiers: [], target: self)
         item(aidsMenu, "Ask to Close Polylines & Splines  (⌥4)", #selector(toggleAskToClose), modifiers: [], target: self)
         item(aidsMenu, "Continuous Lines – LNC  (⌥7)", #selector(toggleLineContinue), modifiers: [], target: self)
         aidsMenu.addItem(.separator())
@@ -4599,6 +4668,7 @@ extension MainViewController {
     func writeDrawingCopy(to url: URL) throws {
         let settings = currentSettings()
         let tab = activeTab
+        tab.restoreReferencedBlocks()
         try NativeFormat.write(entities: tab.document.getAllEntities(),
                                layers: layerManager.getAllLayers(),
                                currentLayer: layerManager.currentLayerName,
@@ -4644,6 +4714,7 @@ extension MainViewController {
     /// The drawing record is assembled here (main thread) and written in the background.
     private func autosave(_ tab: DrawingTab) {
         let started = Date()
+        tab.restoreReferencedBlocks()
         let entities = tab.document.getAllEntities()
         let file = NativeFormat.makeFile(entities: entities,
                                          layers: tab.layerManager.getAllLayers(),
@@ -4939,6 +5010,8 @@ extension MainViewController {
             target = index
         }
         if target != tab.activeLayoutIndex { activateSpace(target) }
+        // switching may be refused (e.g. during a block edit) – the view would then land in the wrong space
+        guard tab.activeLayoutIndex == target else { return }
         guard view.zoom.isFinite, view.zoom > 0, view.pan.x.isFinite, view.pan.y.isFinite else { return }
         editorView.viewport.viewState = (zoom: view.zoom, pan: view.pan)
         if target == nil {

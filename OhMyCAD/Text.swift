@@ -292,6 +292,26 @@ final class TextEntity: CADEntity {
         return result
     }
 
+    /// The lines as drawn: a paragraph (box width) broken where it wraps. DXF TEXT can't wrap, so the export needs them.
+    var wrappedLines: [String] {
+        guard let wrap = wrapWidth else { return text.components(separatedBy: "\n") }
+        let k = height * emScale / TextEntity.referenceSize
+        let storage = NSTextStorage(attributedString: attributedString(fontSize: TextEntity.referenceSize, color: .white))
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: max(wrap / (k * max(widthFactor, 0.05)), 1),
+                                                     height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        let string = storage.string as NSString
+        var lines: [String] = []
+        manager.enumerateLineFragments(forGlyphRange: manager.glyphRange(for: container)) { _, _, _, glyphRange, _ in
+            let range = manager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            lines.append(string.substring(with: range).trimmingCharacters(in: .newlines))
+        }
+        return lines
+    }
+
     func attributedString(fontSize: CGFloat, color: NSColor) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = justify.nsAlignment
@@ -491,240 +511,6 @@ final class TextEntity: CADEntity {
     }
 
     func primitives() -> [Primitive] { return [] }
-}
-
-// MARK: - Text dialog (insert and edit)
-
-/// A window with multi-line text and format: font, style, height, rotation, alignment, underline, width.
-final class TextEditorDialog: NSObject, NSWindowDelegate {
-    struct Result {
-        var text: String
-        var family: String
-        var face: String
-        var height: CGFloat
-        var rotationDegrees: CGFloat
-        var justify: TextJustify
-        var underline: Bool
-        var boxWidth: CGFloat?
-        var lineSpacing: CGFloat
-    }
-
-    private let window: NSWindow
-    private let textView = NSTextView()
-    private let familyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let facePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let heightField = NSTextField()
-    private let rotationField = NSTextField()
-    private let justifyControl = NSSegmentedControl(labels: TextJustify.allCases.map { $0.title },
-                                                    trackingMode: .selectOne, target: nil, action: nil)
-    private let underlineBox = NSButton(checkboxWithTitle: "Underline", target: nil, action: nil)
-    private let widthField = NSTextField()
-    private let spacingField = NSTextField()
-    private var result: Result?
-    private let families: [String]
-
-    /// `height` and `boxWidth` are in drawing units; `unitName` is only for the label.
-    init(title: String, initial: Result, unitName: String, showWidth: Bool = true) {
-        families = FontLibrary.families
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
-                          styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        super.init()
-        window.title = title
-        window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 480, height: 360)
-        window.delegate = self
-        build(initial: initial, unitName: unitName, showWidth: showWidth)
-    }
-
-    private func label(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.alignment = .right
-        return field
-    }
-
-    private func numberField(_ field: NSTextField, _ value: CGFloat?, width: CGFloat = 80) {
-        field.stringValue = value.map { LineType.format($0) } ?? ""
-        field.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        field.widthAnchor.constraint(equalToConstant: width).isActive = true
-    }
-
-    private func build(initial: Result, unitName: String, showWidth: Bool) {
-        guard let content = window.contentView else { return }
-
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.font = NSFont.systemFont(ofSize: 15)
-        textView.string = initial.text
-        textView.isVerticallyResizable = true
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
-        scroll.documentView = textView
-
-        familyPopup.addItem(withTitle: FontLibrary.systemFamilyTitle)
-        familyPopup.menu?.addItem(.separator())
-        familyPopup.addItems(withTitles: families)
-        if initial.family.isEmpty {
-            familyPopup.selectItem(at: 0)
-        } else {
-            familyPopup.selectItem(withTitle: initial.family)
-        }
-        familyPopup.target = self
-        familyPopup.action = #selector(familyChanged)
-        rebuildFaces(select: initial.face)
-        facePopup.target = self
-        facePopup.action = #selector(formatChanged)
-
-        numberField(heightField, initial.height)
-        numberField(rotationField, initial.rotationDegrees)
-        numberField(widthField, initial.boxWidth)
-        numberField(spacingField, initial.lineSpacing, width: 60)
-        widthField.placeholderString = "no wrap"
-        heightField.toolTip = "Height of capital letters in drawing units"
-        widthField.toolTip = "Paragraph width in drawing units – longer lines wrap. Empty = no wrapping"
-        heightField.target = self
-        heightField.action = #selector(formatChanged)
-        justifyControl.selectedSegment = TextJustify.allCases.firstIndex(of: initial.justify) ?? 0
-        justifyControl.target = self
-        justifyControl.action = #selector(formatChanged)
-        underlineBox.state = initial.underline ? .on : .off
-        underlineBox.target = self
-        underlineBox.action = #selector(formatChanged)
-
-        let fontRow = NSStackView(views: [familyPopup, facePopup])
-        fontRow.spacing = 8
-        let sizeRow = NSStackView(views: [heightField, NSTextField(labelWithString: unitName),
-                                          label("Rotation °:"), rotationField])
-        sizeRow.spacing = 6
-        let layoutRow = NSStackView(views: [justifyControl, underlineBox])
-        layoutRow.spacing = 12
-        let widthRow = NSStackView(views: [widthField, NSTextField(labelWithString: unitName),
-                                           label("Line spacing:"), spacingField])
-        widthRow.spacing = 6
-
-        var rows: [[NSView]] = [[label("Font:"), fontRow], [label("Height:"), sizeRow], [label("Alignment:"), layoutRow]]
-        if showWidth { rows.append([label("Width:"), widthRow]) }
-        let grid = NSGridView(views: rows)
-        grid.rowSpacing = 8
-        grid.columnSpacing = 8
-        grid.column(at: 0).xPlacement = .trailing
-        grid.rowAlignment = .firstBaseline
-
-        let ok = NSButton(title: "OK", target: self, action: #selector(okClicked))
-        ok.keyEquivalent = "\r"
-        ok.keyEquivalentModifierMask = [.command]
-        ok.toolTip = "⌘↩ – ↩ alone starts a new line"
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
-        cancel.keyEquivalent = "\u{1b}"
-        let hint = NSTextField(labelWithString: "⌘↩ = OK · ↩ = new line")
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        let buttons = NSStackView(views: [hint, cancel, ok])
-        buttons.spacing = 8
-
-        [scroll, grid, buttons].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview($0)
-        }
-        NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            scroll.bottomAnchor.constraint(equalTo: grid.topAnchor, constant: -12),
-            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            grid.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -14),
-            grid.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -14),
-            buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
-        ])
-        formatChanged()
-        window.initialFirstResponder = textView
-    }
-
-    private var selectedFamily: String {
-        let index = familyPopup.indexOfSelectedItem
-        return index <= 0 ? "" : (familyPopup.titleOfSelectedItem ?? "")
-    }
-
-    private func rebuildFaces(select face: String) {
-        facePopup.removeAllItems()
-        let faces = FontLibrary.faces(of: selectedFamily)
-        facePopup.addItems(withTitles: faces)
-        if faces.contains(face) {
-            facePopup.selectItem(withTitle: face)
-        } else if let regular = faces.first(where: { ["Regular", "Roman", "Book", "Medium"].contains($0) }) {
-            facePopup.selectItem(withTitle: regular)
-        } else {
-            facePopup.selectItem(at: 0)
-        }
-    }
-
-    @objc private func familyChanged() {
-        rebuildFaces(select: facePopup.titleOfSelectedItem ?? "Regular")
-        formatChanged()
-    }
-
-    /// Font preview right in the text field.
-    @objc private func formatChanged() {
-        let font = FontLibrary.font(family: selectedFamily, face: facePopup.titleOfSelectedItem ?? "Regular", size: 15)
-        textView.font = font
-        let justify = TextJustify.allCases[max(0, justifyControl.selectedSegment)]
-        textView.alignment = justify.nsAlignment
-        var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.textColor]
-        if underlineBox.state == .on { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        textView.typingAttributes = attributes
-        if let storage = textView.textStorage {
-            storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = justify.nsAlignment
-            storage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: storage.length))
-        }
-    }
-
-    private func number(_ field: NSTextField) -> CGFloat? {
-        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return nil }
-        return ExpressionEvaluator.evaluate(text).map { CGFloat($0) }
-    }
-
-    @objc private func okClicked() {
-        let text = textView.string.trimmingCharacters(in: .newlines)
-        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { NSSound.beep(); return }
-        guard let height = number(heightField), height > 0 else {
-            NSSound.beep()
-            window.makeFirstResponder(heightField)
-            return
-        }
-        let width = number(widthField).flatMap { $0 > 0 ? $0 : nil }
-        result = Result(text: text, family: selectedFamily, face: facePopup.titleOfSelectedItem ?? "Regular",
-                        height: height, rotationDegrees: number(rotationField) ?? 0,
-                        justify: TextJustify.allCases[max(0, justifyControl.selectedSegment)],
-                        underline: underlineBox.state == .on, boxWidth: width,
-                        lineSpacing: max(0.5, min(number(spacingField) ?? 1, 5)))
-        NSApp.stopModal()
-    }
-
-    @objc private func cancelClicked() {
-        result = nil
-        NSApp.stopModal()
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        NSApp.stopModal()
-    }
-
-    /// Opens the dialog modally. nil = Cancel.
-    func run() -> Result? {
-        window.center()
-        NSApp.runModal(for: window)
-        window.orderOut(nil)
-        return result
-    }
 }
 
 // MARK: - Default text style (Text Style…)
@@ -928,7 +714,7 @@ final class TextFormatPanel: NSViewController {
         let widthRow = NSStackView(views: [widthField, unit(unitName), label("Spacing"), spacingField])
         widthRow.spacing = 5
 
-        let title = NSTextField(labelWithString: "Text format")
+        let title = NSTextField(labelWithString: "Text Format")
         title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         let grid = NSGridView(views: [
             [label("Font"), familyPopup],

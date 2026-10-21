@@ -508,14 +508,14 @@ enum HatchSettingsDialog {
 
         while alert.runModal() == .alertFirstButtonReturn {
             guard let newAngle = ExpressionEvaluator.evaluate(angleField.stringValue) else {
-                alert.informativeText = "The angle is not a valid number."
+                alert.informativeText = "\u{201C}\(angleField.stringValue)\u{201D} is not a valid angle."
                 NSSound.beep()
                 continue
             }
             let scaleText = scaleField.stringValue.trimmingCharacters(in: .whitespaces)
             if scaleText.isEmpty { return (CGFloat(newAngle), nil) }
             guard let newScale = ExpressionEvaluator.evaluate(scaleText), newScale > 0 else {
-                alert.informativeText = "The scale must be a number greater than 0."
+                alert.informativeText = "\u{201C}\(scaleText)\u{201D} is not a valid scale – enter a number greater than 0."
                 NSSound.beep()
                 continue
             }
@@ -574,7 +574,7 @@ enum HatchMenuBuilder {
 
         let settingsItem = NSMenuItem(title: "Angle & Scale…", action: actions.settings, keyEquivalent: "")
         settingsItem.target = actions.target
-        settingsItem.subtitle = "Now \(LineType.format(angle))°, scale \(scaleText)"
+        settingsItem.subtitle = "Now \(LineType.formatAngle(angle))°, scale \(scaleText)"
         settingsItem.image = ToolIcons.settingsImage(size: imageSize)
         menu.addItem(settingsItem)
 

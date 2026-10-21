@@ -670,7 +670,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
         rasterRow.spacing = 10
 
         let grid = NSGridView(views: [
-            [section("Printer / plotter"), NSGridCell.emptyContentView],
+            [section("Printer / Plotter"), NSGridCell.emptyContentView],
             [label("Device:"), devicePopup],
             [NSGridCell.emptyContentView, systemDialogBox],
             [label("Page setup:"), setupRow],
@@ -678,7 +678,7 @@ final class PlotDialog: NSObject, NSWindowDelegate {
             [label("Paper:"), paperPopup],
             [label("Orientation:"), orientationControl],
             [label("Margin (mm):"), marginField],
-            [section("What and how"), NSGridCell.emptyContentView],
+            [section("What and How"), NSGridCell.emptyContentView],
             [label("Plot area:"), areaRow],
             [label("Scale:"), scaleRow],
             [label("Offset:"), offsetRow],

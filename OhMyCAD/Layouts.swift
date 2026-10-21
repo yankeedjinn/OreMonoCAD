@@ -105,7 +105,7 @@ final class ViewportEntity: CADEntity {
     var typeName: String { return "Viewport" }
 
     var infoText: String {
-        return String(format: "Viewport\n%@\n\nSize:   %.1f × %.1f mm\nScale:  %@\nCenter: %.3f, %.3f%@%@",
+        return String(format: "Viewport\n%@\n\nSize:   %.3f × %.3f mm\nScale:  %@\nCenter: %.3f, %.3f%@%@",
                       commonInfo, rect.width, rect.height, scale.title, modelCenter.x, modelCenter.y,
                       frozenLayers.isEmpty ? "" : "\nHidden layers: \(frozenLayers.sorted().joined(separator: ", "))",
                       isLocked ? "\nLocked (the view cannot be panned or rescaled)" : "")
@@ -308,7 +308,7 @@ final class LayoutBarView: NSView {
             }
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: isSelected ? NSFont.systemFont(ofSize: 11, weight: .semibold) : font,
-                .foregroundColor: isSelected ? NSColor.white : Theme.textLayoutTab,
+                .foregroundColor: isSelected ? Theme.textSelectedLayoutTab : Theme.textLayoutTab,
                 .paragraphStyle: paragraph]
             let size = (title as NSString).size(withAttributes: attributes)
             (title as NSString).draw(in: NSRect(x: item.rect.minX + 4, y: item.rect.midY - size.height / 2,
@@ -482,6 +482,16 @@ final class BlockDefinition {
     /// Incremented on every change – references then recompute their content.
     private(set) var version = 0
 
+    /// Objects inside were edited in place (e.g. their layer was renamed) – references recompute their content.
+    func contentDidChange() { version += 1 }
+
+    /// Subtitle in the Insert Block menus: the number of objects and the note, or the file of an external reference.
+    var menuSubtitle: String {
+        if let source = source { return "External reference · \(source.fileName)" + (source.error != nil ? " · ⚠︎ not loaded" : "") }
+        let count = "\(entities.count) object\(entities.count == 1 ? "" : "s")"
+        return note.isEmpty ? count : count + " · " + note
+    }
+
     init(name: String, basePoint: CGPoint, entities: [CADEntity], note: String = "", source: XrefSource? = nil) {
         self.name = name
         self.basePoint = basePoint
@@ -544,6 +554,24 @@ final class BlockLibrary {
         var i = 2
         while named("\(base) \(i)") != nil { i += 1 }
         return "\(base) \(i)"
+    }
+
+    /// Adds back definitions that objects still refer to but that are no longer in the library
+    /// (a block deleted or purged, and then its reference brought back by Undo). Without this
+    /// the reference would be saved with a name the file doesn't define and lost on reopening.
+    func restoreReferenced(by documents: [[CADEntity]]) {
+        var pending = documents.flatMap { $0 } + definitions.flatMap { $0.entities }
+        var restored = false
+        while let entity = pending.popLast() {
+            guard let reference = entity as? BlockReference else { continue }
+            let definition = reference.definition
+            guard !definitions.contains(where: { $0 === definition }) else { continue }
+            if let other = named(definition.name), other !== definition { definition.name = uniqueName(definition.name) }
+            definitions.append(definition)
+            pending += definition.entities
+            restored = true
+        }
+        if restored { onChange?() }
     }
 
     var blocks: [BlockDefinition] { return definitions.filter { !$0.isExternal } }
@@ -901,7 +929,7 @@ final class BlockManagerController: NSObject, NSTableViewDataSource, NSTableView
         column("type", "Type", 120)
         column("objects", "Objects", 60)
         column("used", "Used", 50)
-        column("file", "File / status", 190)
+        column("file", "File / Status", 190)
         table.dataSource = self
         table.delegate = self
         table.rowHeight = 26

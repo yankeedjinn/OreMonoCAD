@@ -81,7 +81,7 @@ final class BlockEditBar: NSView {
         layer?.backgroundColor = Theme.blockEditBar.cgColor
         layer?.cornerRadius = 7
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.systemPurple.withAlphaComponent(0.7).cgColor
+        layer?.borderColor = Theme.blockEditBarBorder.cgColor
 
         label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .white

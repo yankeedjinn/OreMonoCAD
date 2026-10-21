@@ -139,7 +139,7 @@ enum DrawingTool: Int, CaseIterable {
             summary: "A wall drawn with a double line – click its line, and both faces appear at the wall thickness with mitered corners.",
             usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. Walls are not joined automatically – clean up where they meet with Trim or PowerTrim."),
         .wallFromCurve: (
-            summary: "Turns selected lines, arcs, polylines and splines into walls – both faces at the wall thickness along the curve.",
+            summary: "Turns selected lines, arcs, polylines, splines, circles and ellipses into walls – both faces at the wall thickness along the curve.",
             usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay."),
         .hatch: (
             summary: "Fills or hatches a closed area – found automatically from whatever surrounds it.",
@@ -278,7 +278,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click two opposite corners of a rectangle (or type width and height) · P = outline by corners (↩, right-click, double-click, C or a click on the first corner closes it, ⌫ removes the last corner) · R = back to the rectangle. It covers lines and hatches but stays below texts and dimensions, so draw it around a text that is already there (Edit › Draw Order puts it above or below other objects). Its frame shows on screen only and is not printed; wipeouts are not exported to DXF."),
         .leader: (
             summary: "An arrow with a note.",
-            usage: "Click the arrow point, then one or more bend points · ⌫ removes the last point · ↩ or right-click asks for the text."),
+            usage: "Click the arrow point, then one or more bend points · ⌫ removes the last point · ↩, right-click or double-click asks for the text."),
     ]
 
     /// What the tool does (one sentence).
@@ -294,40 +294,6 @@ enum DrawingTool: Int, CaseIterable {
     /// Tool icon – drawn in code (ToolIcons.swift).
     func icon(pointSize: CGFloat = 15) -> NSImage? {
         return ToolIcons.image(for: self, size: pointSize + 4)
-    }
-
-    /// Short label for the tool panel.
-    var shortTitle: String {
-        switch self {
-        case .rectangle: return "Rect"
-        case .hatchRebuild: return "Rebuild"
-        case .hatchCut: return "Cut"
-        case .polyline: return "PLine"
-        case .powerTrim: return "PTrim"
-        case .xline: return "XLine"
-        case .matchProperties: return "Match"
-        case .ellipse: return "Ellipse"
-        case .dimLinear: return "Linear"
-        case .dimAligned: return "Aligned"
-        case .dimContinue: return "Chain"
-        case .dimAngular: return "Angular"
-        case .dimRadius: return "Radius"
-        case .dimDiameter: return "Diameter"
-        case .blockCreate: return "Block"
-        case .blockInsert: return "Insert"
-        case .xref: return "Xref"
-        case .image: return "Image"
-        case .revisionCloud: return "Cloud"
-        case .roomLabel: return "Room"
-        case .scaleBar: return "Scale"
-        case .northArrow: return "North"
-        case .zoomIn: return "In"
-        case .zoomOut: return "Out"
-        case .zoomExtents: return "Extents"
-        case .zoomSelected: return "Selected"
-        case .zoomWindow: return "Window"
-        default: return title
-        }
     }
 
     /// Keyboard shortcut (without modifiers) on the drawing area – custom from Settings, otherwise the default.
@@ -421,9 +387,11 @@ enum DrawingTool: Int, CaseIterable {
         return availableTools.filter { $0.group == group }
     }
 
+    /// Title for menus: “…” for a tool that opens a dialog first, then the shortcut.
     var menuTitle: String {
-        if let shortcut = shortcut { return "\(title)  (\(shortcut))" }
-        return title
+        let name = [.filter, .xref, .image].contains(self) ? title + "…" : title
+        if let shortcut = shortcut { return "\(name)  (\(shortcut))" }
+        return name
     }
 
     /// How many points the tool needs (nil = any number, finished with Enter).
@@ -645,7 +613,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     /// Value box at the cursor: true = always visible, false = appears once you start typing a number
-    /// (F12, ⌥6, View › Drawing Aids › Show Value Box While Drawing, Settings). Typing values always works.
+    /// (F12, ⌥6, View › Drawing Aids › Value Box Always Visible, Settings). Typing values always works.
     var valueBoxAlways = AppSettings.valueBoxAlways {
         didSet {
             AppSettings.valueBoxAlways = valueBoxAlways
@@ -812,8 +780,6 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     var newTextHeight: CGFloat {
         return max(textStyle.heightMM, 0.1) * unitsPerPaperMM
     }
-    /// Editing text somewhere other than on the canvas (currently unused – text is edited directly on the canvas).
-    var onTextRequested: ((_ position: CGPoint, _ boxWidth: CGFloat?) -> Void)?
     var onEditText: ((TextEntity) -> Void)?
 
     /// Text being typed directly on the canvas: field, gear, format and possibly the text being edited.
@@ -1703,7 +1669,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if points.isEmpty {
                 text = lineContinue ? "Line (continuous): first point" : "Line: first point"
             } else if lineContinue {
-                text = "Line (continuous): next point · ↩ / right-click / Esc = end"
+                text = "Line (continuous): next point · ↩, right-click or Esc = end"
                     + (lineChainCount >= 2 ? " · C = close back to the start" : "")
             } else {
                 text = "Line: second point"
@@ -1788,19 +1754,19 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             text += " · C = " + (rectangleFromCenter ? "from a corner" : "from the center") + " · S = square " + (rectangleSquare ? "off" : "on")
         case .polyline:
             text = points.isEmpty ? "Polyline: first point"
-                : "Polyline: next point (or length + ↩) · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
+                : "Polyline: next point (or length + ↩) · ↩ or right-click = finish · click the first point = close · ⌫ = undo point"
         case .spline:
             text = points.isEmpty ? "Spline: first point"
-                : "Spline: next point · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
+                : "Spline: next point · ↩ or right-click = finish · click the first point = close · ⌫ = undo point"
         case .wall:
             let what = "Wall \(DynamicInputView.format(wallThicknessMM)) mm, \(wallJustification.title)"
             text = points.isEmpty ? what + ": first point · T = thickness · J = side"
-                : what + ": next point (or length + ↩) · ↩/right-click = finish · click the first point = close · ⌫ = undo point"
+                : what + ": next point (or length + ↩) · ↩ or right-click = finish · click the first point = close · ⌫ = undo point"
         case .wallFromCurve:
             text = "Wall from Curve \(DynamicInputView.format(wallThicknessMM)) mm, \(wallCurveAlignment.title): "
-                + "select lines, arcs, polylines or splines · T = thickness · J = side · ↩ or right-click = create"
+                + "select lines, arcs, polylines, splines, circles or ellipses · T = thickness · J = side · ↩ or right-click = create"
         case .hatch:
-            text = "Hatch (\(hatchPattern.title), \(LineType.format(currentHatchAngle))°, scale \(LineType.format(currentHatchScale))"
+            text = "Hatch (\(hatchPattern.title), \(LineType.formatAngle(currentHatchAngle))°, scale \(LineType.format(currentHatchScale))"
                 + (hatchScale == nil ? " = drawing scale" : "") + "): click inside a closed area · hold the Hatch button for patterns"
         case .trim:
             text = edges.isEmpty
@@ -1825,9 +1791,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 : "Offset (\(distanceText)): click the side" + (offsetDistance == nil ? " – the copy passes through the clicked point" : "")
                     + " · Esc = choose another object"
         case .fillet:
-            text = String(format: picked.isEmpty
-                          ? "Fillet (radius %.3f): first line or polyline segment · type a radius + ↩ to change it"
-                          : "Fillet (radius %.3f): second line or polyline segment", Double(filletRadius))
+            let radius = DynamicInputView.format(filletRadius)
+            text = picked.isEmpty
+                ? "Fillet (radius \(radius)): first line or polyline segment · type a radius + ↩ to change it"
+                : "Fillet (radius \(radius)): second line or polyline segment"
         case .chamfer:
             let distances = "\(DynamicInputView.format(chamferFirst)) / \(DynamicInputView.format(chamferSecond))"
             text = picked.isEmpty
@@ -1875,7 +1842,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     : "Construction Line: direction (click or type an angle) · more lines through the same point · Esc = end"
             case .horizontal: text = "Horizontal Construction Line: click where it goes"
             case .vertical: text = "Vertical Construction Line: click where it goes"
-            case .angle: text = "Construction Line at \(LineType.format(xlineAngle))°: click where it goes"
+            case .angle: text = "Construction Line at \(LineType.formatAngle(xlineAngle))°: click where it goes"
             }
             text += " · H = horizontal, V = vertical, A = angle, B = two points"
         case .matchProperties:
@@ -1898,7 +1865,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .dimRadius, .dimDiameter:
             text = picked.isEmpty ? "\(currentTool.title): click a circle or an arc" : "\(currentTool.title): text position"
         case .leader:
-            text = points.isEmpty ? "Leader: arrow point" : "Leader: next point · ↩/right-click = enter text · ⌫ = undo point"
+            text = points.isEmpty ? "Leader: arrow point" : "Leader: next point · ↩ or right-click = enter text · ⌫ = undo point"
         case .scaleBar:
             if let scale = scaleBarScale(near: currentWorldPoint ?? .zero) {
                 text = "Scale Bar (\(scale.title)\(paperSpace != nil ? ", nearest viewport" : "")): click where its left end goes · hold the button for the North Arrow"
@@ -2180,7 +2147,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
         let hidden = layerManager?.getAllLayers().filter { !$0.isVisible }.map { $0.name }.joined(separator: "\u{1}") ?? ""
-        let blocks = blockLibrary?.definitions.reduce(0) { $0 &+ $1.version &+ $1.entities.count } ?? 0
+        let blocks = blockSignature
         let key = "\(ObjectIdentifier(document).hashValue)|\(document.revision)|\(blocks)|\(renderEpoch)|\(hidden)"
         guard key != renderListKey else { return }
         renderListKey = key
@@ -3586,6 +3553,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if currentTool == .polygon {
             return "I / C / E = method · S = sides"
         }
+        if currentTool == .rectangle {
+            return "C = from center · S = square"
+        }
         if [.polyline, .spline].contains(currentTool) && points.count >= 3 {
             return "C = close the \(currentTool == .spline ? "spline" : "polyline")"
         }
@@ -3610,6 +3580,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func handleInputLetter(_ letter: String) -> Bool {
         if currentTool == .xline { return switchXLineKind(letter: letter) }
         if currentTool == .polygon { return polygonLetter(letter) }
+        if currentTool == .rectangle { return rectangleLetter(letter) }
         if drawsOutline { return outlineLetter(letter) }
         if currentTool == .wall { return wallLetter(letter) }
         guard letter == "c" else { return false }
@@ -3644,7 +3615,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
         }
         if dynamicInput.hasInvalidField {
-            onMessage?("The value is not a valid number or expression.")
+            onMessage?("\u{201C}\(dynamicInput.invalidFieldText ?? "")\u{201D} is not a valid number or expression.")
             return
         }
         let mode = inputMode
@@ -3654,7 +3625,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if let scale = dynamicInput.lockedValue(1) {
                 if scale > 0 { hatchScale = scale } else { onMessage?("The scale must be greater than 0.") }
             }
-            onMessage?("Hatch: angle \(DynamicInputView.format(currentHatchAngle))°, scale \(DynamicInputView.format(currentHatchScale))")
+            onMessage?("Hatch: angle \(LineType.formatAngle(currentHatchAngle))°, scale \(DynamicInputView.format(currentHatchScale))")
             window?.makeFirstResponder(self)
             stateChanged()
             return
@@ -3679,11 +3650,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         if case .polygon = mode, let typed = dynamicInput.lockedValue(2) {
-            let sides = Int(typed.rounded())
-            if sides >= RegularPolygon.minimumSides && sides <= RegularPolygon.maximumSides {
+            // an expression is allowed, but the result must be a whole number
+            if let sides = Int(exactly: typed.rounded()), abs(typed - typed.rounded()) < 1e-9,
+               sides >= RegularPolygon.minimumSides && sides <= RegularPolygon.maximumSides {
                 polygonSides = sides
             } else {
-                onMessage?("A polygon has \(RegularPolygon.minimumSides) to \(RegularPolygon.maximumSides) sides.")
+                onMessage?(polygonSidesError(DynamicInputView.format(typed)))
             }
             // only the number of sides → no point is entered yet
             if dynamicInput.lockedValue(0) == nil && dynamicInput.lockedValue(1) == nil {
@@ -3892,7 +3864,15 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: Edits (Trim, Extend, PowerTrim, Fillet)
 
     private var cuttingEdges: [CADEntity] {
+        // an edge that left the drawing (Undo, an edit) no longer cuts
+        edges.removeAll { !(document?.contains($0) ?? false) }
         return edges.isEmpty ? visibleEntities : edges
+    }
+
+    /// A trimmed or extended cutting edge stays a cutting edge in its new form.
+    private func replaceEdge(_ old: CADEntity, with new: [CADEntity]) {
+        guard let index = edges.firstIndex(where: { $0 === old }) else { return }
+        edges.replaceSubrange(index...index, with: new)
     }
 
     private func trimClick(at point: CGPoint) {
@@ -3902,6 +3882,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         if let pieces = EditOperations.trimAny(target, at: point, edges: cuttingEdges)?.kept {
             onCommit?([target], pieces, "Trim")
+            replaceEdge(target, with: pieces)
         } else {
             onMessage?("Nothing to trim – the object does not cross any cutting edge.")
         }
@@ -3914,6 +3895,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         if let extended = EditOperations.extend(target, near: point, boundaries: cuttingEdges) {
             onCommit?([target], [extended], "Extend")
+            replaceEdge(target, with: [extended])
         } else {
             onMessage?("No boundary found in that direction.")
         }
@@ -3953,9 +3935,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: Hatch
 
     /// The region graph is built only when the drawing, the visible layers or the zoom change significantly.
+    /// Changes when a block's content changes – inserted blocks then give the finders new edges.
+    private var blockSignature: Int {
+        return blockLibrary?.definitions.reduce(0) { $0 &+ $1.version &+ $1.entities.count } ?? 0
+    }
+
     private func currentHatchFinder() -> HatchRegionFinder {
         let entities = visibleEntities.filter { !($0 is HatchEntity) && !($0 is DimensionEntity) }
-        var signature = entities.count
+        var signature = entities.count &+ blockSignature
         for entity in entities { signature = signature &* 31 &+ entity.id.hashValue }
         let zoomBucket = Int((log2(viewport.getCurrentZoom())).rounded())
         let key = "\(signature)|\(zoomBucket)"
@@ -3999,7 +3986,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         onMessage?(failed == 0
             ? "Hatch rebuilt from the boundaries around it"
-            : "\(failed) hatch(es) not rebuilt – no closed boundary around them (gaps over 3 px?)")
+            : failed == 1 ? "1 hatch not rebuilt – no closed boundary around it (a gap over 3 px?)"
+            : "\(failed) hatches not rebuilt – no closed boundary around them (gaps over 3 px?)")
         if failed > 0 { NSSound.beep() }
     }
 
@@ -4350,13 +4338,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard let sides = Int(field.stringValue.trimmingCharacters(in: .whitespaces)),
-              sides >= RegularPolygon.minimumSides, sides <= RegularPolygon.maximumSides else {
-            onMessage?("A polygon has \(RegularPolygon.minimumSides) to \(RegularPolygon.maximumSides) sides.")
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard let sides = Int(text), sides >= RegularPolygon.minimumSides, sides <= RegularPolygon.maximumSides else {
+            onMessage?(polygonSidesError(text))
             return
         }
         polygonSides = sides
         onMessage?("Polygon: \(sides) sides")
+    }
+
+    private func polygonSidesError(_ text: String) -> String {
+        return "\u{201C}\(text)\u{201D} is not a valid number of sides – enter a whole number from "
+            + "\(RegularPolygon.minimumSides) to \(RegularPolygon.maximumSides)."
     }
 
     // MARK: Image or PDF underlay (ImageUnderlay.swift)
@@ -4455,7 +4448,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// Room outlines among the visible objects – the same ones the drawing uses to update the labels.
     private func currentRoomFinder() -> HatchRegionFinder {
         let entities = visibleEntities.filter { RoomLabels.isBoundary($0) }
-        var signature = entities.count
+        var signature = entities.count &+ blockSignature
         for entity in entities { signature = signature &* 31 &+ entity.id.hashValue }
         let key = "\(signature)|\(unitsPerPaperMM)"
         if let finder = roomFinder, key == roomFinderKey { return finder }
@@ -4514,7 +4507,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// The name of a new room (nil = canceled; empty = only the area).
     private func askForRoomName(area: CGFloat) -> String? {
         let alert = NSAlert()
-        alert.messageText = "Room Label"
+        alert.messageText = "Room Label – Name"
         alert.informativeText = "Floor area \(RoomLabels.areaLine(area)). Name of the room (it can stay empty):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
@@ -4653,8 +4646,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let range = RevisionCloud.arcSizeRangeMM
         let alert = NSAlert()
         alert.messageText = "Revision Cloud – Arc Size"
-        alert.informativeText = "Distance between the arc ends in mm on paper (\(DynamicInputView.format(range.lowerBound))"
-            + " to \(DynamicInputView.format(range.upperBound))). In the drawing it follows the drawing scale."
+        alert.informativeText = "Size of the arcs in mm on paper, measured between their ends (from \(DynamicInputView.format(range.lowerBound))"
+            + " to \(DynamicInputView.format(range.upperBound)); in the drawing it follows the drawing scale):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
@@ -4664,7 +4657,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespaces)
         guard let value = ExpressionEvaluator.evaluate(text), range.contains(CGFloat(value)) else {
-            onMessage?("The arc size is from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
+            onMessage?("\u{201C}\(text)\u{201D} is not a valid arc size – enter a number from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
             return
         }
         revisionCloudArcMM = CGFloat(value)
@@ -4772,7 +4765,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     private func finishWallFromCurve() {
         guard !wallFromCurveSources.isEmpty else {
-            onMessage?("Select lines, arcs, polylines or splines first.")
+            onMessage?("Select lines, arcs, polylines, splines, circles or ellipses first.")
             return
         }
         wallFromCurveCache = nil      // the objects may have changed since the preview
@@ -4808,8 +4801,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let range = Walls.thicknessRangeMM
         let alert = NSAlert()
         alert.messageText = "Wall – Thickness"
-        alert.informativeText = "Thickness of new walls in mm (\(DynamicInputView.format(range.lowerBound))"
-            + " to \(DynamicInputView.format(range.upperBound)))."
+        alert.informativeText = "Thickness of new walls in mm (from \(DynamicInputView.format(range.lowerBound))"
+            + " to \(DynamicInputView.format(range.upperBound))):"
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 24))
@@ -4819,7 +4812,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespaces)
         guard let value = ExpressionEvaluator.evaluate(text), range.contains(CGFloat(value)) else {
-            onMessage?("The wall thickness is from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
+            onMessage?("\u{201C}\(text)\u{201D} is not a valid wall thickness – enter a number from \(DynamicInputView.format(range.lowerBound)) to \(DynamicInputView.format(range.upperBound)) mm.")
             return
         }
         wallThicknessMM = CGFloat(value)
@@ -4882,7 +4875,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         default: return false
         }
         xlineKind = kind
-        onMessage?(kind == .angle ? "Construction Line: at \(LineType.format(xlineAngle))° – hold the button to change the angle"
+        onMessage?(kind == .angle ? "Construction Line: at \(LineType.formatAngle(xlineAngle))° – hold the button to change the angle"
                    : "Construction Line: " + kind.title.lowercased())
         return true
     }
@@ -5134,7 +5127,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// Name of the new block, a note and whether to replace the selected objects with the block. nil = Cancel.
     private func askForBlock(suggested: String) -> (name: String, note: String, replace: Bool)? {
         let alert = NSAlert()
-        alert.messageText = "Create Block"
+        alert.messageText = "Create Block – Name"
         alert.informativeText = "The selected objects become a block. An existing name redefines that block."
         alert.addButton(withTitle: "Create")
         alert.addButton(withTitle: "Cancel")
@@ -5282,7 +5275,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 return
             }
             points.removeAll()
-            let d = p - a
+            // ΔX, ΔY and the angle in drawing coordinates (UCS), like the status bar
+            let d = toUCSVector(p - a)
             let angle = Geometry.normalizeAngle(atan2(d.y, d.x)) * 180 / .pi
             showMeasure(MeasureResult(path: [a, p], lines: ["Distance \(f(Geometry.distance(a, p))) \(unit)",
                                                              "ΔX \(f(d.x)) · ΔY \(f(d.y))", "Angle \(f(angle))°"],
@@ -5307,7 +5301,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         case .point:
             let p = resolvedWorldPoint(for: event)
-            showMeasure(MeasureResult(path: [p], lines: ["X \(f(p.x)) · Y \(f(p.y)) \(unit)"], anchor: p))
+            let ucs = toUCS(p)
+            showMeasure(MeasureResult(path: [p], lines: ["X \(f(ucs.x)) · Y \(f(ucs.y)) \(unit)"], anchor: p))
 
         case .areaPoints:
             let p = resolvedWorldPoint(for: event)
@@ -6018,7 +6013,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         guard tool != .select else { return }
         onToolChangeRequested?(.select)
         if AppSettings.repeatLastTool {
-            onMessage?("\(tool.title) ended · right-click or ↩ repeats it")
+            onMessage?("\(tool.title) ended · ↩ or right-click repeats it")
         } else {
             onMessage?("\(tool.title) ended")
         }
@@ -6678,16 +6673,22 @@ final class ArrayForm: NSObject, NSTextFieldDelegate {
         return CGFloat(number)
     }
 
+    /// A count: an expression is allowed, but the result must be a whole number (otherwise it is ignored like an invalid value).
+    private func integer(_ key: String) -> Int? {
+        guard let v = value(key), abs(v - v.rounded()) < 1e-9 else { return nil }
+        return Int(exactly: v.rounded())
+    }
+
     /// Reads the valid values (invalid ones are ignored, the last valid one stays).
     private func read() {
         switch kind {
         case .rectangular:
-            if let v = value("columns"), v >= 1, v <= 10_000 { settings.columns = Int(v.rounded()) }
-            if let v = value("rows"), v >= 1, v <= 10_000 { settings.rows = Int(v.rounded()) }
+            if let v = integer("columns"), v >= 1, v <= 10_000 { settings.columns = v }
+            if let v = integer("rows"), v >= 1, v <= 10_000 { settings.rows = v }
             if let v = value("dx") { settings.columnSpacing = v }
             if let v = value("dy") { settings.rowSpacing = v }
         case .polar:
-            if let v = value("count"), v >= 2, v <= 10_000 { settings.count = Int(v.rounded()) }
+            if let v = integer("count"), v >= 2, v <= 10_000 { settings.count = v }
             if let v = value("fill"), v != 0, abs(v) <= 360 { settings.fillAngle = v }
         }
     }

@@ -94,6 +94,11 @@ final class DrawingTab {
         return [document] + layouts.map { $0.document }
     }
 
+    /// Before saving: blocks still used by objects (e.g. brought back by Undo after Purge) return to the library.
+    func restoreReferencedBlocks() {
+        blocks.restoreReferenced(by: allDocuments.map { $0.getAllEntities() })
+    }
+
     /// A free name for a new layout (“Layout1”, “Layout2”…).
     func uniqueLayoutName(_ base: String = "Layout") -> String {
         var i = 1

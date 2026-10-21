@@ -281,7 +281,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let content = window?.contentView else { return }
 
         // General
-        let valueBoxCheck = check("Show the value box at the cursor all the time", AppSettings.valueBoxAlways,
+        let valueBoxCheck = check("Value box always visible", AppSettings.valueBoxAlways,
                                   tip: "Off: the box with length, angle, radius… appears only when you start typing a number. Typing values always works. Also ⌥6 or F12") { AppSettings.valueBoxAlways = $0 }
         self.valueBoxCheck = valueBoxCheck
         let general = pane([

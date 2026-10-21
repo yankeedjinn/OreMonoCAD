@@ -222,7 +222,7 @@ final class SnapTracker {
             angle = angle.truncatingRemainder(dividingBy: 360)
             if angle < 0 { angle += 360 }
             if angle >= 359.995 { angle = 0 }
-            labels.append("\(LineType.format(distance)) < \(String(format: "%.2f", Double(angle)).replacingOccurrences(of: ".00", with: ""))°")
+            labels.append("\(LineType.format(distance)) < \(LineType.formatAngle(angle))°")
         }
         context.strokePath()
         context.restoreGState()

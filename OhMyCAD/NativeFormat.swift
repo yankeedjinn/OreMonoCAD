@@ -563,11 +563,15 @@ struct NativeDocument {
 enum NativeFormatError: LocalizedError {
     case notOhMyCAD
     case newerVersion(Int)
+    /// An OhMyCAD drawing whose content could not be read (the detail says where).
+    case damaged(String)
 
     var errorDescription: String? {
         switch self {
         case .notOhMyCAD:
             return "The file is not an OhMyCAD drawing."
+        case .damaged(let detail):
+            return "The drawing is damaged and could not be opened (\(detail)). Try File › Open Backup…"
         case .newerVersion(let version):
             return "The drawing was saved by a newer version of OhMyCAD (format \(version)). Please update the app."
         }
@@ -674,6 +678,25 @@ enum NativeFormat {
         return try encoder.encode(file)
     }
 
+    /// A short description of a decoding error for the user: where in the file and what.
+    static func describe(_ error: Error) -> String {
+        guard let decoding = error as? DecodingError else { return error.localizedDescription }
+        let path: [CodingKey]
+        let what: String
+        switch decoding {
+        case .typeMismatch(_, let context), .valueNotFound(_, let context), .dataCorrupted(let context):
+            path = context.codingPath
+            what = context.debugDescription
+        case .keyNotFound(let key, let context):
+            path = context.codingPath + [key]
+            what = "missing value"
+        @unknown default:
+            return error.localizedDescription
+        }
+        let place = path.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: ".")
+        return place.isEmpty ? what : "\(place): \(what)"
+    }
+
     static func read(from url: URL) throws -> NativeDocument {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
@@ -684,6 +707,12 @@ enum NativeFormat {
         do {
             file = try decoder.decode(OhMyCADFile.self, from: data)
         } catch {
+            Log.error("Reading \(url.lastPathComponent) failed: \(error)")
+            // a JSON file that says it is OhMyCAD is a damaged drawing, not some other file
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               object["format"] as? String == "OhMyCAD" {
+                throw NativeFormatError.damaged(NativeFormat.describe(error))
+            }
             throw NativeFormatError.notOhMyCAD
         }
         guard file.format == "OhMyCAD" else { throw NativeFormatError.notOhMyCAD }

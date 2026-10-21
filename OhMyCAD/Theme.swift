@@ -88,6 +88,7 @@ enum Theme {
     static let inlineTextBackground = gray(0.16, 0.95)  // text typed directly on the drawing
     static let inlineTextButton = gray(0.22, 0.95)      // format button next to it
     static let blockEditBar = NSColor(srgbRed: 0.24, green: 0.16, blue: 0.34, alpha: 0.96)
+    static let blockEditBarBorder = NSColor.systemPurple.withAlphaComponent(0.7)
 
     // MARK: Tabs and layout bar
 
@@ -99,6 +100,7 @@ enum Theme {
     static let tabClosePressed = gray(0.40)
     static let layoutBarBackground = gray(0.14)
     static let layoutTab = gray(0.19)
+    static let textSelectedLayoutTab = NSColor.white    // name of the selected layout tab
     static let layoutBarBorder = gray(0.25)
     static let trayBackground = gray(0.13)          // right column behind Properties and Layers
 
@@ -106,9 +108,33 @@ enum Theme {
 
     static let inputBackground = gray(0.08, 0.92)
     static let confirmBackground = gray(0.08, 0.95)
+    static let confirmBorder = NSColor.systemGreen.withAlphaComponent(0.7)   // the “Close?” question
     static let inputField = gray(0.18)
     static let inputFieldLocked = NSColor(calibratedRed: 0.35, green: 0.30, blue: 0.05, alpha: 1)
     static let inputHint = NSColor(calibratedRed: 0.95, green: 0.82, blue: 0.45, alpha: 1)
+
+    // MARK: Status line toggles with a value (GRID 10, POLAR 15°)
+
+    /// Name on the toggle: white on the accent color when on, the label color when off.
+    static let toggleNameOn = NSColor.white
+    static let toggleNameOff = NSColor.labelColor
+
+    /// The number when off: amber (darker orange in light mode).
+    static let toggleValueOff = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.3, alpha: 1)
+            : NSColor(calibratedRed: 0.78, green: 0.42, blue: 0.0, alpha: 1)
+    }
+
+    /// The number when on: light yellow on a blue/purple/green accent, dark blue on a warm one.
+    static var toggleValueOn: NSColor {
+        let accent = NSColor.controlAccentColor.usingColorSpace(.deviceRGB) ?? .systemBlue
+        let hue = accent.hueComponent
+        let warm = accent.saturationComponent > 0.25 && (hue < 0.2 || hue > 0.95)
+        return warm
+            ? NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.35, alpha: 1)
+            : NSColor(calibratedRed: 1.0, green: 0.93, blue: 0.45, alpha: 1)
+    }
 
     // MARK: Previews
 

@@ -831,7 +831,7 @@ enum EditOperations {
             }
             let style = current.sources[0]
             let polyline = Polyline(vertices: points, closed: closed, bulges: bulges, layer: style.layer, color: style.color)
-            polyline.lineWeight = style.lineWeight
+            _ = polyline.withStyle(of: style)      // lineweight, line type scale, draw order, group
             removed.append(contentsOf: current.sources)
             added.append(polyline)
         }

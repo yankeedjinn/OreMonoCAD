@@ -641,10 +641,10 @@ enum ProblemReporter {
                 alert.runModal()
             }
         } catch {
-            Log.error("Problem report could not be saved: \(error.localizedDescription)")
+            Log.error("Error Saving Report: \(error.localizedDescription)")
             let alert = NSAlert()
             alert.alertStyle = .critical
-            alert.messageText = "The problem report could not be saved"
+            alert.messageText = "Error Saving Report"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }

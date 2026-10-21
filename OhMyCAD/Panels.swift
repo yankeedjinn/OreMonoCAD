@@ -699,7 +699,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
             tipView.removeFromSuperview()
             content.addSubview(tipView, positioned: .above, relativeTo: nil)
         }
-        let shortcut = tool.shortcut.map { "  \($0)" } ?? ""
+        let shortcut = tool.shortcut.map { "  (\($0))" } ?? ""
         tipView.configure(title: tool.title + shortcut, summary: tool.summary + (tipCombined ? familyNote(tool) : ""), usage: tool.usage, expanded: false)
         positionTip(next: button, in: content)
         tipView.isHidden = false
@@ -707,7 +707,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
 
     @objc private func expandTip() {
         guard !tipView.isHidden, let tool = tipTool, let button = tipButton, let content = window?.contentView else { return }
-        let shortcut = tool.shortcut.map { "  \($0)" } ?? ""
+        let shortcut = tool.shortcut.map { "  (\($0))" } ?? ""
         tipView.configure(title: tool.title + shortcut, summary: tool.summary + (tipCombined ? familyNote(tool) : ""), usage: tool.usage, expanded: true)
         positionTip(next: button, in: content)
     }
@@ -761,11 +761,13 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     /// A menu item that starts a tool which has no button of its own in the panel.
-    private func toolItem(_ tool: DrawingTool, title: String? = nil, imageSize: CGFloat = 22) -> NSMenuItem {
-        let item = NSMenuItem(title: title ?? tool.menuTitle, action: #selector(menuToolChosen(_:)), keyEquivalent: "")
+    private func toolItem(_ tool: DrawingTool, imageSize: CGFloat = 22) -> NSMenuItem {
+        let item = NSMenuItem(title: tool.menuTitle, action: #selector(menuToolChosen(_:)), keyEquivalent: "")
         item.target = self
         item.tag = tool.rawValue
         item.image = ToolIcons.image(for: tool, size: imageSize)
+        // the tool has no button of its own, so its help is shown here
+        item.subtitle = tool.summary
         return item
     }
 
@@ -905,10 +907,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
             let item = NSMenuItem(title: definition.name, action: #selector(blockChosen(_:)), keyEquivalent: "")
             item.target = self
             item.image = BlockPreview.image(of: definition, size: 22)
-            var subtitle = "\(definition.entities.count) object\(definition.entities.count == 1 ? "" : "s")"
-            if let source = definition.source { subtitle = "External reference · \(source.fileName)" + (source.error != nil ? " · ⚠︎ not loaded" : "") }
-            else if !definition.note.isEmpty { subtitle += " · \(definition.note)" }
-            item.subtitle = subtitle
+            item.subtitle = definition.menuSubtitle
             item.state = definition === current ? .on : .off
             item.representedObject = definition.name
             blockMenuItems[ObjectIdentifier(item)] = definition
@@ -918,6 +917,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let create = NSMenuItem(title: "Create Block", action: #selector(createBlockChosen(_:)), keyEquivalent: "")
         create.target = self
         create.image = ToolIcons.image(for: DrawingTool.blockCreate, size: 18)
+        create.subtitle = DrawingTool.blockCreate.summary
         menu.addItem(create)
         let manager = NSMenuItem(title: "Block Manager…", action: #selector(blockManagerChosen(_:)), keyEquivalent: "")
         manager.target = self
@@ -927,8 +927,9 @@ final class ToolbarView: NSView, NSMenuDelegate {
         let xref = NSMenuItem(title: "Attach External Reference…", action: #selector(attachXrefChosen(_:)), keyEquivalent: "")
         xref.target = self
         xref.image = ToolIcons.image(for: DrawingTool.xref, size: 18)
+        xref.subtitle = DrawingTool.xref.summary
         menu.addItem(xref)
-        menu.addItem(toolItem(.image, title: "Attach Image or PDF…", imageSize: 18))
+        menu.addItem(toolItem(.image, imageSize: 18))
         return menu
     }
 
@@ -1980,25 +1981,27 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         add("Select Objects on Layer", #selector(menuSelectObjects))
         menu.addItem(.separator())
         add("Delete Layer", #selector(menuDelete), symbol: "trash")
+        MenuRows.apply(to: menu)
     }
 
     @objc private func showMoreMenu(_ sender: NSButton) {
         menuLayer = selectedLayerName
         let menu = NSMenu(title: "Layers")
-        func add(_ title: String, _ action: Selector, enabled: Bool = true) {
+        func add(_ title: String, _ action: Selector, symbol: String? = nil, enabled: Bool = true) {
             let item = NSMenuItem(title: title, action: enabled ? action : nil, keyEquivalent: "")
             item.target = self
+            if let symbol = symbol { item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) }
             menu.addItem(item)
         }
         let hasSelection = menuLayer != nil
-        add("Set Current", #selector(menuSetCurrent), enabled: hasSelection)
-        add("Rename…", #selector(menuRename), enabled: hasSelection)
+        add("Set Current", #selector(menuSetCurrent), symbol: "pencil", enabled: hasSelection)
+        add("Rename…", #selector(menuRename), symbol: "character.cursor.ibeam", enabled: hasSelection)
         menu.addItem(.separator())
         add("Show All Layers", #selector(menuShowAll))
         add("Unlock All Layers", #selector(menuUnlockAll))
         menu.addItem(.separator())
         add("Open in Window (Full Table)", #selector(detachClicked))
-        _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+        _ = withRows(menu).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }
 
     @objc private func menuSetCurrent() {
@@ -2348,6 +2351,28 @@ final class PropertiesPanelView: NSView {
     /// Editing geometry and other properties: the action name for Undo and a function that turns an object
     /// into an edited copy (nil = the object does not change).
     var onEdit: ((String, @escaping (CADEntity) -> CADEntity?) -> Void)?
+    /// Drawing coordinates (UCS → world): positions and angles are shown like in the status bar.
+    var ucsToWorld = CGAffineTransform.identity
+    private var ucsAngle: CGFloat { return atan2(ucsToWorld.b, ucsToWorld.a) }
+    private func shown(_ p: CGPoint) -> CGPoint { return p.applying(ucsToWorld.inverted()) }
+    private func stored(_ p: CGPoint) -> CGPoint { return p.applying(ucsToWorld) }
+    /// Angle from the drawing X axis in degrees ↔ world angle in radians.
+    private func shownDegrees(_ angle: CGFloat) -> CGFloat { return Geometry.normalizeAngle(angle - ucsAngle) * 180 / .pi }
+    private func storedAngle(_ degrees: CGFloat) -> CGFloat { return Geometry.normalizeAngle(degrees * .pi / 180 + ucsAngle) }
+
+    /// X and Y rows of a point in drawing coordinates; `apply` gets the new point in world coordinates.
+    private func addPointRows(_ xLabel: String, _ yLabel: String, _ point: CGPoint, tip: String? = nil,
+                              apply: @escaping (CGPoint) -> Void) {
+        let p = shown(point)
+        addNumber(xLabel, p.x, tip: tip) { [weak self] v in
+            guard let self = self else { return }
+            apply(self.stored(CGPoint(x: v, y: p.y)))
+        }
+        addNumber(yLabel, p.y, tip: tip) { [weak self] v in
+            guard let self = self else { return }
+            apply(self.stored(CGPoint(x: p.x, y: v)))
+        }
+    }
     /// The drawing's blocks (block replacement in Properties).
     var blockDefinitions: (() -> [BlockDefinition])?
     /// Reload an external reference from the file.
@@ -2671,7 +2696,7 @@ final class PropertiesPanelView: NSView {
             let unit = RevisionCloud.defaultArcSizeMM * max(unitsPerPaperMM?() ?? 1, 1e-9)
             let scales = Set(clouds.map { LineType.format(RevisionCloud.scale(of: $0, unit: unit)) })
             addNumber("Scale", scales.count == 1 ? RevisionCloud.scale(of: first, unit: unit) : nil,
-                      tip: "Size of the arcs: 1 = \(LineType.format(RevisionCloud.defaultArcSizeMM)) mm on paper at the drawing scale, 2 = twice as large. The outline stays.") { [weak self] value in
+                      tip: "Size of the arcs: 1 = \(LineType.format(RevisionCloud.defaultArcSizeMM)) mm on paper at the drawing scale, 2 = twice as large; the outline stays") { [weak self] value in
                 guard value > 0 else { NSSound.beep(); return }
                 self?.edit("Change Revision Cloud Scale", Polyline.self) { RevisionCloud.rescaled($0, arcSize: value * unit) }
             }
@@ -2712,7 +2737,7 @@ final class PropertiesPanelView: NSView {
             }
         }
         addNumber("Line scale", scales.count == 1 ? firstScale : nil,
-                  tip: "Linetype scale of the object: multiplies the dashes, texts and shapes of its layer's line type (1 = as defined)") { value in
+                  tip: "Linetype scale of the object: multiplies the dashes, texts and shapes of its layer's linetype (1 = as defined)") { value in
             guard value > 0 else { NSSound.beep(); return }
             change("Change Linetype Scale") { _ in value }
         }
@@ -2761,17 +2786,11 @@ final class PropertiesPanelView: NSView {
         switch entity {
         case let line as Line:
             addSection("Line")
-            addNumber("Start X", line.startPoint.x) { [weak self] v in
-                self?.edit("Move Start Point", Line.self) { l in let c = l.clone() as! Line; c.startPoint.x = v; return c }
+            addPointRows("Start X", "Start Y", line.startPoint) { [weak self] p in
+                self?.edit("Move Start Point", Line.self) { l in let c = l.clone() as! Line; c.startPoint = p; return c }
             }
-            addNumber("Start Y", line.startPoint.y) { [weak self] v in
-                self?.edit("Move Start Point", Line.self) { l in let c = l.clone() as! Line; c.startPoint.y = v; return c }
-            }
-            addNumber("End X", line.endPoint.x) { [weak self] v in
-                self?.edit("Move End Point", Line.self) { l in let c = l.clone() as! Line; c.endPoint.x = v; return c }
-            }
-            addNumber("End Y", line.endPoint.y) { [weak self] v in
-                self?.edit("Move End Point", Line.self) { l in let c = l.clone() as! Line; c.endPoint.y = v; return c }
+            addPointRows("End X", "End Y", line.endPoint) { [weak self] p in
+                self?.edit("Move End Point", Line.self) { l in let c = l.clone() as! Line; c.endPoint = p; return c }
             }
             let angle = Geometry.angle(from: line.startPoint, to: line.endPoint)
             addNumber("Length", line.length, tip: "The start point stays, the direction is kept") { [weak self] length in
@@ -2782,21 +2801,20 @@ final class PropertiesPanelView: NSView {
                     return c
                 }
             }
-            addNumber("Angle °", angle * 180 / .pi, tip: "Rotates the line around its start point") { [weak self] degrees in
-                self?.edit("Change Angle", Line.self) { l in
+            addNumber("Angle °", shownDegrees(angle), tip: "Rotates the line around its start point") { [weak self] degrees in
+                guard let self = self else { return }
+                let world = self.storedAngle(degrees)
+                self.edit("Change Angle", Line.self) { l in
                     let c = l.clone() as! Line
-                    c.endPoint = Geometry.pointOnCircle(l.startPoint, l.length, degrees * .pi / 180)
+                    c.endPoint = Geometry.pointOnCircle(l.startPoint, l.length, world)
                     return c
                 }
             }
 
         case let circle as Circle:
             addSection("Circle")
-            addNumber("Center X", circle.center.x) { [weak self] v in
-                self?.edit("Move Circle", Circle.self) { o in let c = o.clone() as! Circle; c.center.x = v; return c }
-            }
-            addNumber("Center Y", circle.center.y) { [weak self] v in
-                self?.edit("Move Circle", Circle.self) { o in let c = o.clone() as! Circle; c.center.y = v; return c }
+            addPointRows("Center X", "Center Y", circle.center) { [weak self] p in
+                self?.edit("Move Circle", Circle.self) { o in let c = o.clone() as! Circle; c.center = p; return c }
             }
             addNumber("Radius", circle.radius) { [weak self] r in
                 guard r > 0 else { NSSound.beep(); return }
@@ -2809,31 +2827,32 @@ final class PropertiesPanelView: NSView {
 
         case let arc as Arc:
             addSection("Arc")
-            addNumber("Center X", arc.center.x) { [weak self] v in
-                self?.edit("Move Arc", Arc.self) { o in let c = o.clone() as! Arc; c.center.x = v; return c }
-            }
-            addNumber("Center Y", arc.center.y) { [weak self] v in
-                self?.edit("Move Arc", Arc.self) { o in let c = o.clone() as! Arc; c.center.y = v; return c }
+            addPointRows("Center X", "Center Y", arc.center) { [weak self] p in
+                self?.edit("Move Arc", Arc.self) { o in let c = o.clone() as! Arc; c.center = p; return c }
             }
             addNumber("Radius", arc.radius) { [weak self] r in
                 guard r > 0 else { NSSound.beep(); return }
                 self?.edit("Change Radius", Arc.self) { o in let c = o.clone() as! Arc; c.radius = r; return c }
             }
-            addNumber("Start °", arc.startAngle * 180 / .pi, tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
-                self?.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.startAngle = Geometry.normalizeAngle(v * .pi / 180); return c }
+            addNumber("Start °", shownDegrees(arc.startAngle), tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
+                guard let self = self else { return }
+                let world = self.storedAngle(v)
+                self.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.startAngle = world; return c }
             }
-            addNumber("End °", arc.endAngle * 180 / .pi, tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
-                self?.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.endAngle = Geometry.normalizeAngle(v * .pi / 180); return c }
+            addNumber("End °", shownDegrees(arc.endAngle), tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
+                guard let self = self else { return }
+                let world = self.storedAngle(v)
+                self.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.endAngle = world; return c }
             }
 
         case let polyline as Polyline:
             if let box = PropertiesPanelView.rectangleBox(polyline) {
                 addSection("Rectangle")
-                addNumber("X", box.minX, tip: "Lower-left corner") { [weak self] v in
-                    self?.editRectangle { $0.origin.x = v }
-                }
-                addNumber("Y", box.minY, tip: "Lower-left corner") { [weak self] v in
-                    self?.editRectangle { $0.origin.y = v }
+                // with a rotated UCS the corner is not “lower-left” in drawing coordinates – the vertex rows remain
+                if abs(ucsAngle) < 1e-12 {
+                    addPointRows("X", "Y", box.origin, tip: "Lower-left corner") { [weak self] p in
+                        self?.editRectangle { $0.origin = p }
+                    }
                 }
                 addNumber("Width", box.width, tip: "The lower-left corner stays") { [weak self] v in
                     guard v > 0 else { NSSound.beep(); return }
@@ -2846,7 +2865,7 @@ final class PropertiesPanelView: NSView {
             }
             addSection("Polyline")
             addCheck("Closed", polyline.closed) { [weak self] closed in
-                self?.edit(closed ? "Close Polyline" : "Open Polyline", Polyline.self) { p in
+                self?.edit("Change Closed", Polyline.self) { p in
                     guard p.vertices.count >= 3 || !closed else { return nil }
                     let c = p.clone() as! Polyline
                     c.closed = closed
@@ -2865,7 +2884,7 @@ final class PropertiesPanelView: NSView {
         case let spline as Spline:
             addSection("Spline")
             addCheck("Closed", spline.closed) { [weak self] closed in
-                self?.edit(closed ? "Close Spline" : "Open Spline", Spline.self) { s in
+                self?.edit("Change Closed", Spline.self) { s in
                     let c = Spline(controlPoints: s.controlPoints, closed: closed, layer: s.layer, color: s.color)
                     return s.copyStyle(to: c)
                 }
@@ -2891,11 +2910,8 @@ final class PropertiesPanelView: NSView {
                                    layer: e.layer, color: e.color)
                 return copy.withStyle(of: e)
             }
-            addNumber("Center X", ellipse.center.x) { [weak self] v in
-                self?.edit("Move Ellipse", Ellipse.self) { e in rebuilt(e, center: CGPoint(x: v, y: e.center.y)) }
-            }
-            addNumber("Center Y", ellipse.center.y) { [weak self] v in
-                self?.edit("Move Ellipse", Ellipse.self) { e in rebuilt(e, center: CGPoint(x: e.center.x, y: v)) }
+            addPointRows("Center X", "Center Y", ellipse.center) { [weak self] p in
+                self?.edit("Move Ellipse", Ellipse.self) { e in rebuilt(e, center: p) }
             }
             addNumber("Major r.", ellipse.majorRadius, tip: "Half of the long axis") { [weak self] v in
                 self?.edit("Change Ellipse", Ellipse.self) { e in rebuilt(e, major: v) }
@@ -2903,9 +2919,11 @@ final class PropertiesPanelView: NSView {
             addNumber("Minor r.", ellipse.minorRadius, tip: "Half of the short axis") { [weak self] v in
                 self?.edit("Change Ellipse", Ellipse.self) { e in rebuilt(e, minor: v) }
             }
-            addNumber("Rotation °", Geometry.normalizeAngle(ellipse.rotation) * 180 / .pi,
+            addNumber("Rotation °", shownDegrees(ellipse.rotation),
                       tip: "Direction of the major axis, counter-clockwise from the X axis") { [weak self] v in
-                self?.edit("Rotate Ellipse", Ellipse.self) { e in rebuilt(e, rotation: v * .pi / 180) }
+                guard let self = self else { return }
+                let world = self.storedAngle(v)
+                self.edit("Change Rotation", Ellipse.self) { e in rebuilt(e, rotation: world) }
             }
             if !ellipse.isFull {
                 addNumber("Start °", ellipse.startParam * 180 / .pi, tip: "Parametric angle of the start of the arc") { [weak self] v in
@@ -2971,7 +2989,7 @@ final class PropertiesPanelView: NSView {
             let action = ControlAction { [weak self] control in
                 guard let popup = control as? NSPopUpButton, blocks.indices.contains(popup.indexOfSelectedItem) else { return }
                 let chosen = blocks[popup.indexOfSelectedItem]
-                self?.edit("Replace Block", BlockReference.self) { r in
+                self?.edit("Change Block", BlockReference.self) { r in
                     guard r.definition !== chosen else { return nil }
                     let c = r.clone() as! BlockReference
                     c.definition = chosen
@@ -2983,25 +3001,24 @@ final class PropertiesPanelView: NSView {
             actions.append(action)
             addRow("Block", popup, tip: "Swap for another block – the position, rotation and scale stay")
         }
-        addNumber("X", reference.position.x, tip: "Insertion point") { [weak self] v in
-            self?.edit("Move Block", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.position.x = v; return c }
+        addPointRows("X", "Y", reference.position, tip: "Insertion point") { [weak self] p in
+            self?.edit("Move Block", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.position = p; return c }
         }
-        addNumber("Y", reference.position.y, tip: "Insertion point") { [weak self] v in
-            self?.edit("Move Block", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.position.y = v; return c }
-        }
-        addNumber("Rotation °", Geometry.normalizeAngle(reference.rotation) * 180 / .pi) { [weak self] v in
-            self?.edit("Rotate Block", BlockReference.self) { r in
+        addNumber("Rotation °", shownDegrees(reference.rotation)) { [weak self] v in
+            guard let self = self else { return }
+            let world = self.storedAngle(v)
+            self.edit("Change Rotation", BlockReference.self) { r in
                 let c = r.clone() as! BlockReference
-                c.rotation = Geometry.normalizeAngle(v * .pi / 180)
+                c.rotation = world
                 return c
             }
         }
         addNumber("Scale", reference.scale, tip: "1 = original size") { [weak self] v in
             guard v > 0 else { NSSound.beep(); return }
-            self?.edit("Scale Block", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.scale = v; return c }
+            self?.edit("Change Scale", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.scale = v; return c }
         }
         addCheck("Mirrored", reference.mirrored) { [weak self] value in
-            self?.edit("Mirror Block", BlockReference.self) { r in
+            self?.edit("Change Mirroring", BlockReference.self) { r in
                 guard r.mirrored != value else { return nil }
                 let c = r.clone() as! BlockReference
                 c.mirrored = value
@@ -3102,9 +3119,11 @@ final class PropertiesPanelView: NSView {
             guard v > 0 else { NSSound.beep(); return }
             self?.edit("Change Text Height", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.height = v; return c }
         }
-        addNumber("Rotation °", same({ LineType.format($0.rotation * 180 / .pi) }) ? first.rotation * 180 / .pi : nil) { [weak self] v in
-            self?.edit("Rotate Text", TextEntity.self) { t in
-                let c = t.clone() as! TextEntity; c.rotation = Geometry.normalizeAngle(v * .pi / 180); return c
+        addNumber("Rotation °", same({ LineType.format($0.rotation * 180 / .pi) }) ? shownDegrees(first.rotation) : nil) { [weak self] v in
+            guard let self = self else { return }
+            let world = self.storedAngle(v)
+            self.edit("Change Rotation", TextEntity.self) { t in
+                let c = t.clone() as! TextEntity; c.rotation = world; return c
             }
         }
 
@@ -3115,7 +3134,7 @@ final class PropertiesPanelView: NSView {
         let justifyAction = ControlAction { [weak self] control in
             guard let segmented = control as? NSSegmentedControl, segmented.selectedSegment >= 0 else { return }
             let value = TextJustify.allCases[segmented.selectedSegment]
-            self?.edit("Align Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.justify = value; return c }
+            self?.edit("Change Text Alignment", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.justify = value; return c }
         }
         justify.target = justifyAction
         justify.action = #selector(ControlAction.run(_:))
@@ -3123,18 +3142,15 @@ final class PropertiesPanelView: NSView {
         addRow("Alignment", justify)
 
         addCheck("Underline", same({ $0.underline ? "1" : "0" }) ? first.underline : nil) { [weak self] on in
-            self?.edit("Underline Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.underline = on; return c }
+            self?.edit("Change Underline", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.underline = on; return c }
         }
         addNumber("Width", same({ $0.boxWidth.map { LineType.format($0) } ?? "-" }) ? (first.boxWidth ?? 0) : nil,
                   tip: "Paragraph width in drawing units – longer lines wrap. 0 = no wrapping") { [weak self] v in
             self?.edit("Change Text Width", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.boxWidth = v > 0 ? v : nil; return c }
         }
         if texts.count == 1 {
-            addNumber("X", first.position.x) { [weak self] v in
-                self?.edit("Move Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.position.x = v; return c }
-            }
-            addNumber("Y", first.position.y) { [weak self] v in
-                self?.edit("Move Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.position.y = v; return c }
+            addPointRows("X", "Y", first.position) { [weak self] p in
+                self?.edit("Move Text", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.position = p; return c }
             }
         }
     }
@@ -3193,7 +3209,7 @@ final class PropertiesPanelView: NSView {
         }
         addNumber("Width mm", viewport.rect.width, tip: "Size on paper – the left edge stays") { [weak self] w in
             guard w > 1 else { NSSound.beep(); return }
-            self?.edit("Resize Viewport", ViewportEntity.self) { o in
+            self?.edit("Change Viewport Size", ViewportEntity.self) { o in
                 let c = o.clone() as! ViewportEntity
                 c.rect.size.width = w
                 c.modelCenter.x += (w - o.rect.width) / 2 / max(o.paperMMPerUnit(), 1e-12)
@@ -3202,7 +3218,7 @@ final class PropertiesPanelView: NSView {
         }
         addNumber("Height mm", viewport.rect.height, tip: "Size on paper – the bottom edge stays") { [weak self] h in
             guard h > 1 else { NSSound.beep(); return }
-            self?.edit("Resize Viewport", ViewportEntity.self) { o in
+            self?.edit("Change Viewport Size", ViewportEntity.self) { o in
                 let c = o.clone() as! ViewportEntity
                 c.rect.size.height = h
                 c.modelCenter.y += (h - o.rect.height) / 2 / max(o.paperMMPerUnit(), 1e-12)
@@ -3210,7 +3226,7 @@ final class PropertiesPanelView: NSView {
             }
         }
         addCheck("Locked", viewport.isLocked) { [weak self] locked in
-            self?.edit(locked ? "Lock Viewport" : "Unlock Viewport", ViewportEntity.self) { o in
+            self?.edit("Change Viewport Lock", ViewportEntity.self) { o in
                 let c = o.clone() as! ViewportEntity; c.isLocked = locked; return c
             }
         }
@@ -3247,7 +3263,7 @@ final class PropertiesPanelView: NSView {
         fit.toolTip = "Center the whole model and pick the largest standard scale that fits"
         let fitAction = ControlAction { [weak self] _ in
             guard let box = self?.modelExtents?() else { NSSound.beep(); return }
-            self?.edit("Fit Viewport", ViewportEntity.self) { o in
+            self?.edit("Change Viewport Scale", ViewportEntity.self) { o in
                 guard !o.isLocked else { return nil }
                 let c = o.clone() as! ViewportEntity
                 c.modelCenter = CGPoint(x: box.midX, y: box.midY)
@@ -3286,8 +3302,7 @@ final class PropertiesPanelView: NSView {
 
         let index = vertexIndex
         let point = points[index]
-        addNumber("\(noun) X", point.x) { v in apply(index, CGPoint(x: v, y: point.y)) }
-        addNumber("\(noun) Y", point.y) { v in apply(index, CGPoint(x: point.x, y: v)) }
+        addPointRows("\(noun) X", "\(noun) Y", point) { p in apply(index, p) }
     }
 
     /// After the selected vertex changes, the panel needs to be rebuilt (the controller calls update).
@@ -3370,7 +3385,7 @@ final class PropertiesPanelView: NSView {
             release.font = NSFont.systemFont(ofSize: 11)
             release.toolTip = "The dimension stops following the objects it is snapped to"
             let releaseAction = ControlAction { [weak self] _ in
-                self?.edit("Disassociate Dimension", DimensionEntity.self) { d in
+                self?.edit("Change Dimension Association", DimensionEntity.self) { d in
                     guard !d.links.isEmpty else { return nil }
                     let c = d.clone() as! DimensionEntity
                     c.links = [:]
@@ -3725,7 +3740,7 @@ final class StatusBarView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
         func add(_ value: CGFloat) {
-            let item = NSMenuItem(title: LineType.format(value) + unit, action: #selector(valueChosen(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: (kind == .grid ? LineType.format(value) : LineType.formatAngle(value)) + unit, action: #selector(valueChosen(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = value
             item.tag = kind == .grid ? 1 : 2
@@ -3776,10 +3791,10 @@ final class StatusBarView: NSView {
     @objc private func customValueChosen(_ sender: NSMenuItem) {
         let isGrid = sender.tag == 1
         let alert = NSAlert()
-        alert.messageText = isGrid ? "Custom Grid Size" : "Custom Polar Angle"
+        alert.messageText = isGrid ? "Grid – Custom Size" : "Polar – Custom Angle"
         alert.informativeText = isGrid
-            ? "Grid step in drawing units (you can type an expression, e.g. 1000/3):"
-            : "Angle step in degrees (e.g. 7.5 or 360/24):"
+            ? "Step of the grid in drawing units (an expression works too, e.g. 1000/3):"
+            : "Step of the polar angles in degrees (from 0 to 180, e.g. 7.5 or 360/24):"
         alert.addButton(withTitle: "Use")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
@@ -3833,7 +3848,7 @@ final class StatusBarView: NSView {
         fkeysButton.toolTip = """
         Function keys as F1–F12 (macOS keyboard setting): \(state)
         Every mode also has a shortcut that always works: ⌥ + number (⌥1 Snap tracking, ⌥3 Snap, ⌥4 CLS, ⌥5 LWT, ⌥6 value box, ⌥7 LNC, ⌥8 Ortho, ⌥9 Grid snap, ⌥0 Polar).
-        Click for how to change the setting.
+        Click for how to change the setting
         """
     }
     @objc private func polarClicked() { onTogglePolar?() }
@@ -3846,7 +3861,7 @@ final class StatusBarView: NSView {
         gridButton.state = gridSnap ? .on : .off
         polarButton.state = polar ? .on : .off
         retitle(gridButton, "Grid", value: LineType.format(gridSize))
-        retitle(polarButton, "Polar", value: LineType.format(polarIncrement) + "°")
+        retitle(polarButton, "Polar", value: LineType.formatAngle(polarIncrement) + "°")
         lastGridSize = gridSize
         lastPolarIncrement = polarIncrement
         lastShowGrid = showGrid
@@ -3906,7 +3921,7 @@ final class StatusBarView: NSView {
         }
         if !DrawingScale.presets.contains(current) && !custom.contains(current) { add(current) }
         menu.addItem(.separator())
-        for (title, tag) in [("Custom…", 1), ("Clear custom scales", 2), ("Thickness fixed on screen", 3)] {
+        for (title, tag) in [("Custom…", 1), ("Clear Custom Scales", 2), ("Lineweights Fixed on Screen", 3)] {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.tag = tag
             if tag == 2 { item.isEnabled = !custom.isEmpty }
@@ -4033,7 +4048,7 @@ enum DocumentSettingsDialog {
                     polar: Bool, polarIncrement: CGFloat) -> Result? {
         let alert = NSAlert()
         alert.messageText = "Document Settings"
-        alert.informativeText = "Units, grid and polar angles of this drawing (saved with the drawing)."
+        alert.informativeText = "Units, grid and polar angles of this drawing. The units, the grid size and the polar step are saved with the drawing."
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
 
@@ -4449,23 +4464,6 @@ final class ValueToggleCell: NSButtonCell {
     var name = ""
     var value = ""
 
-    /// Off: amber (darker orange in light mode).
-    static let offValueColor = NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.3, alpha: 1)
-            : NSColor(calibratedRed: 0.78, green: 0.42, blue: 0.0, alpha: 1)
-    }
-
-    /// On: light yellow on a blue/purple/green background; dark blue for a warm accent color.
-    static func onValueColor() -> NSColor {
-        let accent = NSColor.controlAccentColor.usingColorSpace(.deviceRGB) ?? .systemBlue
-        let hue = accent.hueComponent
-        let warm = accent.saturationComponent > 0.25 && (hue < 0.2 || hue > 0.95)
-        return warm
-            ? NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.35, alpha: 1)
-            : NSColor(calibratedRed: 1.0, green: 0.93, blue: 0.45, alpha: 1)
-    }
-
     /// Is the button shown as on (in the active and inactive window – the background just turns gray).
     private var looksOn: Bool { state == .on }
 
@@ -4474,11 +4472,11 @@ final class ValueToggleCell: NSButtonCell {
         paragraph.alignment = .center
         let result = NSMutableAttributedString(string: name + " ", attributes: [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            .foregroundColor: on ? NSColor.white : NSColor.labelColor,
+            .foregroundColor: on ? Theme.toggleNameOn : Theme.toggleNameOff,
             .paragraphStyle: paragraph])
         result.append(NSAttributedString(string: value, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
-            .foregroundColor: on ? ValueToggleCell.onValueColor() : ValueToggleCell.offValueColor,
+            .foregroundColor: on ? Theme.toggleValueOn : Theme.toggleValueOff,
             .paragraphStyle: paragraph]))
         return result
     }

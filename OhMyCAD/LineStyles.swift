@@ -104,6 +104,13 @@ struct LineType: Equatable {
         return text == "-0" ? "0" : text
     }
 
+    /// An angle in degrees for prompts and messages: at most 2 decimals, without trailing zeros.
+    static func formatAngle(_ degrees: CGFloat) -> String {
+        var text = String(format: "%.2f", Double(degrees))
+        while text.contains(".") && (text.hasSuffix("0") || text.hasSuffix(".")) { text.removeLast() }
+        return text == "-0" ? "0" : text
+    }
+
     // MARK: Text definition
 
     struct ParseError: LocalizedError {
@@ -408,7 +415,7 @@ enum LineWeightDialog {
     static func run() -> CGFloat? {
         let alert = NSAlert()
         alert.messageText = "Custom Lineweight"
-        alert.informativeText = "Lineweight in millimeters (0 – 5 mm), e.g. 0.45 or 1/4."
+        alert.informativeText = "Width of the line in mm (from 0 to 5, e.g. 0.45 or 1/4):"
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
@@ -419,7 +426,7 @@ enum LineWeightDialog {
             if let value = ExpressionEvaluator.evaluate(field.stringValue), value >= 0, value <= 5 {
                 return LineWeights.addCustom(CGFloat(value))
             }
-            alert.informativeText = "“\(field.stringValue)” is not a valid lineweight – enter a number between 0 and 5 mm."
+            alert.informativeText = "“\(field.stringValue)” is not a valid lineweight – enter a number from 0 to 5 mm."
             NSSound.beep()
         }
         return nil

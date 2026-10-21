@@ -58,9 +58,26 @@ class DXFReader {
         }
     }
 
+    /// Older DXF files (before AutoCAD 2007) are written in the code page named in $DWGCODEPAGE (ANSI_1250 for Czech).
+    static func decodeWithCodePage(_ data: Data) -> String? {
+        guard let latin = String(data: data, encoding: .isoLatin1) else { return nil }
+        var encoding = String.Encoding.isoLatin1
+        if let range = latin.range(of: "$DWGCODEPAGE") {
+            // the value follows on the line after group code 3
+            let lines = latin[range.upperBound...].prefix(200).split(whereSeparator: \.isNewline)
+            let value = lines.count >= 2 ? lines[1].trimmingCharacters(in: .whitespaces).uppercased() : ""
+            let windows: [String: String.Encoding] = [
+                "ANSI_1250": .windowsCP1250, "ANSI_1251": .windowsCP1251, "ANSI_1252": .windowsCP1252,
+                "ANSI_1253": .windowsCP1253, "ANSI_1254": .windowsCP1254
+            ]
+            if let code = windows[value] { encoding = code }
+        }
+        return String(data: data, encoding: encoding) ?? latin
+    }
+
     func read(from url: URL) throws -> DXFImportResult {
         let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+        guard let text = String(data: data, encoding: .utf8) ?? DXFReader.decodeWithCodePage(data) else {
             throw EditError(message: "The file could not be read as text.")
         }
         if text.hasPrefix("AutoCAD Binary DXF") {
@@ -99,7 +116,9 @@ class DXFReader {
             } else if code == 101 {
                 skippingEmbedded = true
             } else if !skippingEmbedded {
-                current?.pairs.append((code, value))
+                // names of layers, blocks and line types may contain \U+XXXX (written so by R12 files, also ours)
+                let isName = code == 2 || code == 8 || code == 6
+                current?.pairs.append((code, isName && value.contains("+") ? DXFReader.decodeUnicode(value) : value))
             }
         }
         if let finished = current { records.append(finished) }
@@ -166,6 +185,12 @@ class DXFReader {
         }
 
         func emit(_ entity: CADEntity, inBlocks: Bool, record: Record? = nil) {
+            // these objects lie in object coordinates (OCS); with the extrusion pointing down (230 = −1,
+            // e.g. after mirroring in 3D) OCS X runs against world X – the object is mirrored into place
+            if let record = record, ["CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE", "TEXT", "INSERT", "HATCH"].contains(record.type),
+               (record.double(230) ?? 1) < 0 {
+                entity.applyTransform(CGAffineTransform(scaleX: -1, y: 1))
+            }
             // the object's lineweight (370: hundredths of a mm; negative = ByLayer / ByBlock / default)
             if let weight = record?.int(370), weight >= 0 { entity.lineWeight = CGFloat(weight) / 100 }
             // the object's linetype scale (48)
@@ -303,15 +328,14 @@ class DXFReader {
 
             case ("ENTITIES", "ELLIPSE"):
                 // center, end of the major axis (relative), axis ratio, start and end parameters
-                var center = CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0)
-                var axis = CGPoint(x: record.double(11) ?? 0, y: record.double(21) ?? 0)
+                let center = CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0)
+                let axis = CGPoint(x: record.double(11) ?? 0, y: record.double(21) ?? 0)
                 guard axis.length > 0, let ratio = record.double(40), ratio > 0 else { continue }
                 var start = record.double(41) ?? 0
                 var end = record.double(42) ?? 2 * .pi
-                // an extrusion axis pointing down (z = -1) mirrors the ellipse
+                // center and axis are in world coordinates; an extrusion pointing down (z = -1)
+                // only makes the parameters run clockwise
                 if (record.double(230) ?? 1) < 0 {
-                    center = CGPoint(x: -center.x, y: center.y)
-                    axis = CGPoint(x: -axis.x, y: axis.y)
                     let s = start
                     start = -end
                     end = -s
@@ -1101,7 +1125,23 @@ class DXFWriter {
 
     private func pair(_ code: Int, _ value: String) {
         out.append(String(code))
-        out.append(value)
+        out.append(DXFWriter.asciiOnly(value))
+    }
+
+    /// R12 (AC1009) has no UTF-8 – characters outside ASCII are written as \U+XXXX, which AutoCAD and other programs read.
+    nonisolated static func asciiOnly(_ value: String) -> String {
+        guard value.unicodeScalars.contains(where: { !$0.isASCII }) else { return value }
+        var result = ""
+        for scalar in value.unicodeScalars {
+            if scalar.isASCII {
+                result.unicodeScalars.append(scalar)
+            } else if scalar.value <= 0xFFFF {
+                result += String(format: "\\U+%04X", scalar.value)
+            } else {
+                result += "?"       // \U+ has only four digits
+            }
+        }
+        return result
     }
 
     private func number(_ code: Int, _ value: CGFloat) {
@@ -1340,7 +1380,8 @@ class DXFWriter {
         case .center: horizontal = "1"
         case .right: horizontal = "2"
         }
-        for (index, line) in text.text.components(separatedBy: "\n").enumerated() where !line.isEmpty {
+        // a paragraph is written as the lines it wraps into
+        for (index, line) in text.wrappedLines.enumerated() where !line.trimmingCharacters(in: .whitespaces).isEmpty {
             let base = text.position - up * (CGFloat(index) * step)
             header("TEXT", text, color: text.color)
             point(10, base)

@@ -201,8 +201,8 @@ final class SplashController: NSObject {
         content.addSubview(title)
 
         let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = info?["CFBundleVersion"] as? String ?? "1"
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
         let versionLabel = NSTextField(labelWithString: "Version \(version) (\(build))")
         versionLabel.font = NSFont.systemFont(ofSize: 12)
         versionLabel.textColor = Theme.splashVersion

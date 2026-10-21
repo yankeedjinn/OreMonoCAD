@@ -81,6 +81,8 @@ final class MenuRowView: NSView {
         let height = max(22, textHeight + 6, iconHeight + 4)
         super.init(frame: NSRect(x: 0, y: 0, width: layout.rowWidth, height: height))
         autoresizingMask = [.width]
+        // a row with its own view does not show the item's tooltip by itself
+        toolTip = item.toolTip
     }
 
     required init?(coder: NSCoder) {

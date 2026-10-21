@@ -81,7 +81,7 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             Row(key: "⌥1  F11", action: "Snap tracking – hold the cursor on a snap point to line up with it"),
             Row(key: "⌥4", action: "Ask to close polylines and splines (CLS)"),
             Row(key: "⌥5", action: "Show lineweights (LWT)"),
-            Row(key: "⌥6  F12", action: "Value box always at the cursor"),
+            Row(key: "⌥6  F12", action: "Value box always visible"),
             Row(key: "⌥7", action: "Continuous lines (LNC)"),
             Row(key: "F7", action: "Show grid"),
             Row(key: "⌥8  F8", action: "Ortho"),

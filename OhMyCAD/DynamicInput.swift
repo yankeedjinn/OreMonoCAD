@@ -185,6 +185,12 @@ final class DynamicInputView: NSView, NSTextFieldDelegate {
     var hasLockedValue: Bool { return lockedValues.contains { $0 != nil } }
     var hasInvalidField: Bool { return !invalid.isEmpty }
 
+    /// The text of the first field with an invalid value (for the message).
+    var invalidFieldText: String? {
+        guard let index = invalid.min(), index < fields.count else { return nil }
+        return fields[index].stringValue.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Is any field currently being edited?
     var isEditing: Bool {
         guard let responder = window?.firstResponder as? NSTextView else { return false }
@@ -382,7 +388,7 @@ final class ClosePromptView: NSView {
         layer?.backgroundColor = Theme.confirmBackground.cgColor
         layer?.cornerRadius = 6
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.7).cgColor
+        layer?.borderColor = Theme.confirmBorder.cgColor
 
         label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .white
