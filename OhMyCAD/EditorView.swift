@@ -107,7 +107,7 @@ enum DrawingTool: Int, CaseIterable {
     static let help: [DrawingTool: (summary: String, usage: String)] = [
         .select: (
             summary: "Selects objects so you can edit, move or delete them.",
-            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position)."),
+            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position)."),
         .line: (
             summary: "A straight line between two points.",
             usage: "Click the start and the end (or drag). Type length and angle in the box at the cursor. With LNC on (⌥7, or the Line key again while drawing), lines continue from the last end – ↩/Esc ends, C closes."),
@@ -179,10 +179,10 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select the objects and press ↩ – or select them first and then pick Join. Pieces whose ends meet are chained; a loop becomes a closed polyline."),
         .editPoints: (
             summary: "Selects single points (vertices, ends, centers) of any objects and moves them together.",
-            usage: "Click a point or drag a box around points · Shift-click adds or removes · drag a selected point (or click it, then click the target) to move all selected points · snap, ortho and typed distance work."),
+            usage: "Click a point or drag a box around points (or click its two corners) · Shift-click adds or removes · drag a selected point (or click it, then click the target) to move all selected points · snap, ortho and typed distance work."),
         .powerTrim: (
-            summary: "Trims many parts quickly.",
-            usage: "Click a part to remove it, or drag a freehand line across several parts. Construction lines work too – trimmed on both sides they become ordinary lines."),
+            summary: "Trims many parts with one stroke; a click extends an object like Extend.",
+            usage: "Drag a freehand line across the parts to remove. A part ends at the nearest intersection or polyline corner, so one side of a polyline can be removed; an object that crosses nothing is removed whole. Construction lines work too – trimmed on both sides they become ordinary lines. Click near the end of a line, arc or open polyline to extend it to the nearest object."),
         .breakObject: (
             summary: "Removes the part of a line, arc, circle, ellipse, polyline or spline between two points – opens a gap.",
             usage: "Click the object at the first break point, then the second point (snaps work; the point is taken on the object). On a circle, an ellipse or a closed polyline the part counter-clockwise from the first to the second point is removed. Clicking the same point twice splits the object without a gap."),
@@ -365,7 +365,7 @@ enum DrawingTool: Int, CaseIterable {
 
     /// Tools combined into one button on the panel – holding it (or right-clicking) picks the kind.
     /// The button shows the most recently used tool; shortcuts and the Tools menu work for each one separately.
-    static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.trim, .extend, .powerTrim, .breakObject, .breakAtPoint],
+    static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.powerTrim, .trim, .extend, .breakObject, .breakAtPoint],
                                                     [.fillet, .chamfer], [.dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter],
                                                     [.revisionCloud, .wipeout], [.scaleBar, .northArrow]]
 
@@ -1373,8 +1373,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private var activeSnap: SnapPoint?
     private var shiftHeld = false
 
-    private var selectionBoxStart: CGPoint?     // screen
+    private var selectionBoxStart: CGPoint? {   // screen
+        didSet { if selectionBoxStart == nil { selectionBoxAwaitsCorner = false } }
+    }
     private var selectionBoxEnd: CGPoint?
+    /// The window was started with a click (not a drag) – the next click sets the opposite corner.
+    private var selectionBoxAwaitsCorner = false
     private var selectionBoxAdditive = false
 
     private var fence: [CGPoint] = []           // screen (PowerTrim)
@@ -1653,6 +1657,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if pendingMirror != nil {
             return "Mirror: delete the original objects?  Y = yes · N, ↩, click or right-click = no (keep them) · Esc = cancel"
         }
+        if selectionBoxAwaitsCorner {
+            return "Click the opposite corner · Esc = cancel"
+        }
         var text: String
         switch currentTool {
         case .select:
@@ -1777,7 +1784,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 ? "Extend: click near the end of a line, arc or open polyline (extends to the nearest object) · Shift-click = choose boundaries"
                 : "Extend: click near the end of a line, arc or open polyline · boundaries: \(edges.count) (Shift-click to change, Esc to clear)"
         case .powerTrim:
-            text = "PowerTrim: click a part to remove, or drag across several parts"
+            text = "PowerTrim: drag across the parts to remove · click near an end to extend it"
         case .breakObject:
             text = picked.isEmpty
                 ? "Break: click the object at the first break point (snaps work)"
@@ -2617,12 +2624,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         if fence.isEmpty, selectionBoxStart == nil {
             switch currentTool {
-            case .trim, .powerTrim:
+            case .trim:
                 if let target = entity(at: worldPoint, where: { EditOperations.isTrimmable($0) }),
                    let detail = EditOperations.trimAny(target, at: worldPoint, edges: cuttingEdges) {
                     hoverRemoved = detail.removed
                 }
-            case .extend:
+            case .extend, .powerTrim:
                 if let target = entity(at: worldPoint, where: { CADEditorView.isExtendable($0) }),
                    let extended = EditOperations.extend(target, near: worldPoint, boundaries: cuttingEdges) {
                     hoverAdded = [extended]
@@ -5490,6 +5497,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // a window started with a click: this click is its opposite corner
+        if selectionBoxAwaitsCorner, let start = selectionBoxStart {
+            finishBox(from: start, to: screenPoint)
+            ignoreNextMouseUp = true
+            return
+        }
+
         // pasted objects: the click places them
         if pasteRequest != nil {
             finishPaste(at: resolvedWorldPoint(for: event))
@@ -5681,6 +5695,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .powerTrim:
             fence = [screenPoint]
             hoverRemoved = nil
+            hoverAdded.removeAll()
 
         case .fillet:
             filletClick(at: worldPoint)
@@ -5849,18 +5864,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         if let start = selectionBoxStart, let end = selectionBoxEnd {
-            if currentTool == .editPoints {
-                finishPointBox(from: start, to: end)
-            } else if currentTool == .matchProperties {
-                if abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 {
-                    applyMatch(to: entitiesInBox(from: start, to: end))
-                }
-            } else {
-                finishSelectionBox(from: start, to: end)
+            // drag = finished window; just a click = waiting for the opposite corner
+            if Geometry.distance(start, screenPoint) <= 4 {
+                selectionBoxAwaitsCorner = true
+                onPromptChanged?(prompt)
+                needsDisplay = true
+                return
             }
-            selectionBoxStart = nil
-            selectionBoxEnd = nil
-            needsDisplay = true
+            finishBox(from: start, to: end)
             return
         }
 
@@ -5871,7 +5882,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if dragged {
                 powerTrimFence(path)
             } else {
-                trimClick(at: viewport.screenToWorld(screenPoint))
+                // a click (no stroke) extends, like Extend
+                extendClick(at: viewport.screenToWorld(screenPoint))
             }
             updateHover(at: viewport.screenToWorld(screenPoint))
             needsDisplay = true
@@ -5915,7 +5927,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             needsDisplay = true
             return
         }
-        if currentTool == .stretch, stage == .window, selectionBoxStart != nil {
+        if selectionBoxStart != nil, selectionBoxAwaitsCorner || (currentTool == .stretch && stage == .window) {
             selectionBoxEnd = convert(event.locationInWindow, from: nil)
             needsDisplay = true
         }
@@ -6148,6 +6160,23 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     /// Left to right = only whole objects inside (window), right to left = also crossed ones (crossing).
+    /// Closes the window (dragged or clicked) and applies it according to the tool.
+    private func finishBox(from start: CGPoint, to end: CGPoint) {
+        selectionBoxStart = nil
+        selectionBoxEnd = nil
+        if currentTool == .editPoints {
+            finishPointBox(from: start, to: end)
+        } else if currentTool == .matchProperties {
+            if abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 {
+                applyMatch(to: entitiesInBox(from: start, to: end))
+            }
+        } else {
+            finishSelectionBox(from: start, to: end)
+        }
+        onPromptChanged?(prompt)
+        needsDisplay = true
+    }
+
     private func finishSelectionBox(from start: CGPoint, to end: CGPoint) {
         guard let selectionManager = selectionManager,
               abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 else { return }
@@ -6288,7 +6317,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
         switch event.keyCode {
         case 53: // Escape
-            if dynamicInput.hasLockedValue {
+            if selectionBoxAwaitsCorner {
+                // only the window started with a click is dropped, the tool goes on
+                selectionBoxStart = nil
+                selectionBoxEnd = nil
+                onPromptChanged?(prompt)
+                needsDisplay = true
+            } else if dynamicInput.hasLockedValue {
                 cancelDynamicInput()
             } else if [.polyline, .spline].contains(currentTool) && points.count >= 2 {
                 requestFinishOpenEnded()

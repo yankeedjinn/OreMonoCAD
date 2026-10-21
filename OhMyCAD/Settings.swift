@@ -47,6 +47,16 @@ enum AppSettings {
         set { defaults.set(newValue, forKey: "OhMyCAD.askToClose") }
     }
 
+    /// Last Show Grid / Show Axes state – used by new drawings and by drawings that do not store it.
+    static var showGrid: Bool {
+        get { return bool("OhMyCAD.showGrid", true) }
+        set { defaults.set(newValue, forKey: "OhMyCAD.showGrid") }
+    }
+    static var showAxes: Bool {
+        get { return bool("OhMyCAD.showAxes", true) }
+        set { defaults.set(newValue, forKey: "OhMyCAD.showAxes") }
+    }
+
     /// Units of a new drawing.
     static var newDrawingUnits: DrawingUnits {
         get { return (defaults.string(forKey: "OhMyCAD.newUnits")).flatMap { DrawingUnits(rawValue: $0) } ?? .mm }

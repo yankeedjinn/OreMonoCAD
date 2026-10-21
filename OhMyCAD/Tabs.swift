@@ -48,8 +48,8 @@ final class DrawingTab {
     var hatchScale: CGFloat?
     var units: DrawingUnits = .mm
     var gridSize: CGFloat = 10
-    var showGrid = true
-    var showAxes = true
+    var showGrid = AppSettings.showGrid
+    var showAxes = AppSettings.showAxes
     /// Rotation of the model view and the drawing coordinates (UCS).
     var viewRotation: CGFloat = 0
     var ucsAngle: CGFloat = 0

@@ -28,6 +28,14 @@ enum EditOperations {
                 }
             }
         }
+        // a polyline or spline that crosses itself is cut there too (neighbouring segments only share a vertex)
+        let count = own.count
+        for i in 0..<count {
+            for j in (i + 2)..<max(count, i + 2) where !(curve.isClosedCurve && i == 0 && j == count - 1) {
+                params.append(contentsOf: own[i].intersections(with: own[j]).map { $0.param })
+                params.append(contentsOf: own[j].intersections(with: own[i]).map { $0.param })
+            }
+        }
         params.sort()
         let tolerance = max(curve.curveLength, 1) * 1e-9
         var unique: [CGFloat] = []
@@ -46,9 +54,10 @@ enum EditOperations {
     }
 
     /// Like `trim`, but also returns the piece being removed (for the preview under the cursor).
-    static func trimDetail(_ curve: CurveEntity, at click: CGPoint,
-                           edges: [CADEntity]) -> (kept: [CADEntity], removed: CADEntity?)? {
-        guard let result = trimDetailRaw(curve, at: click, edges: edges) else { return nil }
+    /// `extraCuts` are additional cut parameters (PowerTrim passes the polyline's own vertices).
+    static func trimDetail(_ curve: CurveEntity, at click: CGPoint, edges: [CADEntity],
+                           extraCuts: [CGFloat] = []) -> (kept: [CADEntity], removed: CADEntity?)? {
+        guard let result = trimDetailRaw(curve, at: click, edges: edges, extraCuts: extraCuts) else { return nil }
         // the pieces keep the lineweight of the original object
         for piece in result.kept { piece.lineWeight = curve.lineWeight; piece.lineTypeScale = curve.lineTypeScale }
         result.removed?.lineWeight = curve.lineWeight
@@ -56,13 +65,18 @@ enum EditOperations {
         return result
     }
 
-    private static func trimDetailRaw(_ curve: CurveEntity, at click: CGPoint,
-                                      edges: [CADEntity]) -> (kept: [CADEntity], removed: CADEntity?)? {
+    private static func trimDetailRaw(_ curve: CurveEntity, at click: CGPoint, edges: [CADEntity],
+                                      extraCuts: [CGFloat]) -> (kept: [CADEntity], removed: CADEntity?)? {
         let length = curve.curveLength
         guard length > 0 else { return nil }
         let tolerance = length * 1e-9 + 1e-12
         let clickParam = curve.parameter(of: click)
         var cuts = cutParameters(of: curve, edges: edges)
+        if !extraCuts.isEmpty {
+            var unique: [CGFloat] = []
+            for c in (cuts + extraCuts).sorted() where unique.last.map({ c - $0 > tolerance }) ?? true { unique.append(c) }
+            cuts = unique
+        }
 
         if curve.isClosedCurve {
             // parameter L is the same as 0
@@ -114,9 +128,13 @@ enum EditOperations {
                      tolerance: CGFloat) -> [CADEntity]? {
         var pieces: [CADEntity] = [entity]
         var changed = false
+        // the original object is not an edge for its own pieces (it lies right on them);
+        // its other pieces are, so a curve crossing itself still cuts there
+        let others = edges.filter { $0 !== entity }
         for point in points {
-            guard let index = pieces.firstIndex(where: { $0.distance(to: point) <= tolerance }),
-                  let result = trimAny(pieces[index], at: point, edges: edges)?.kept else { continue }
+            guard let index = pieces.firstIndex(where: { $0.distance(to: point) <= tolerance }) else { continue }
+            let piece = pieces[index]
+            guard let result = powerTrimAny(piece, at: point, edges: others + pieces.filter { $0 !== piece })?.kept else { continue }
             pieces.replaceSubrange(index...index, with: result)
             changed = true
         }
@@ -136,6 +154,45 @@ enum EditOperations {
         if let xline = entity as? ConstructionLine { return trimConstruction(xline, at: click, edges: edges) }
         if let curve = entity as? CurveEntity { return trimDetail(curve, at: click, edges: edges) }
         return nil
+    }
+
+    /// PowerTrim for one click: a polyline is also cut at its corners (one side of a U can be removed,
+    /// leaving an L), and an object that crosses nothing is removed whole.
+    static func powerTrimAny(_ entity: CADEntity, at click: CGPoint,
+                             edges: [CADEntity]) -> (kept: [CADEntity], removed: CADEntity?)? {
+        if let polyline = entity as? Polyline {
+            let pieces = polyline.primitives()
+            var corners: [CGFloat] = []
+            for i in pieces.indices where i > 0 || polyline.isClosedCurve {
+                let previous = pieces[i > 0 ? i - 1 : pieces.count - 1]
+                if isCorner(previous, pieces[i]) { corners.append(startParameter(of: pieces[i])) }
+            }
+            if let result = trimDetail(polyline, at: click, edges: edges, extraCuts: corners) { return result }
+        } else if let result = trimAny(entity, at: click, edges: edges) {
+            return result
+        }
+        guard isTrimmable(entity) else { return nil }
+        return ([], entity)
+    }
+
+    /// A vertex between two straight segments that turns by less than this is not a corner – a trimmed spline
+    /// is stored as a dense polyline and must be trimmed as one smooth curve, like an arc.
+    private static let smoothTurn: CGFloat = 15 * .pi / 180
+
+    /// Does the polyline turn at the vertex between these two segments? A vertex next to an arc always counts.
+    private static func isCorner(_ before: Primitive, _ after: Primitive) -> Bool {
+        guard case let .segment(a0, a1, _) = before, case let .segment(b0, b1, _) = after else { return true }
+        let u = a1 - a0, v = b1 - b0
+        let lengths = hypot(u.x, u.y) * hypot(v.x, v.y)
+        guard lengths > 0 else { return true }
+        return u.dot(v) / lengths < cos(smoothTurn)
+    }
+
+    private static func startParameter(of primitive: Primitive) -> CGFloat {
+        switch primitive {
+        case let .segment(_, _, p): return p
+        case let .arc(_, _, _, _, p): return p
+        }
     }
 
     /// Trimming a construction line (XLINE) or ray (RAY) between the adjacent intersections that were clicked.
@@ -278,8 +335,8 @@ enum EditOperations {
     }
 
     private static func extendRaw(_ entity: CADEntity, near click: CGPoint, boundaries: [CADEntity]) -> CADEntity? {
-        let edges = boundaries.filter { $0 !== entity }.flatMap { $0.primitives() }
-        guard !edges.isEmpty else { return nil }
+        var edges = boundaries.filter { $0 !== entity }.flatMap { $0.primitives() }
+        guard !edges.isEmpty || entity is Polyline else { return nil }
 
         var extent = entity.boundingBox()
         for edge in boundaries { extent = extent.union(edge.boundingBox()) }
@@ -311,6 +368,9 @@ enum EditOperations {
             let neighbourIndex = extendEnd ? n - 2 : 1
             // an end arc segment is not extended
             guard polyline.bulge(at: extendEnd ? n - 2 : 0) == 0 else { return nil }
+            // the polyline's other segments are boundaries too (it can be extended to itself)
+            let own = polyline.primitives()
+            edges += own.indices.filter { $0 != (extendEnd ? own.count - 1 : 0) }.map { own[$0] }
             let direction = (vertices[movingIndex] - vertices[neighbourIndex]).normalized
             guard direction != .zero, let hit = rayHit(from: vertices[movingIndex], direction: direction) else { return nil }
             vertices[movingIndex] = hit

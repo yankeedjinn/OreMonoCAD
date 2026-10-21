@@ -1287,8 +1287,6 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let tab = DrawingTab(untitledNumber: freeUntitledNumber())
         tab.drawingScale = current.drawingScale
         tab.showLineWeights = current.showLineWeights
-        tab.showGrid = current.showGrid
-        tab.showAxes = current.showAxes
         tab.lineWeightOnScreen = current.lineWeightOnScreen
         tab.hatchPattern = current.hatchPattern
         tab.hatchAngle = current.hatchAngle
@@ -2402,6 +2400,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             let units: DrawingUnits?
             let skipped: [String: Int]
             var isSurvey = false
+            var unitsMissing = false
             let ext = url.pathExtension.lowercased()
             if ext == "txt" || ext == "csv" {
                 // a coordinate list from a surveyor: points in S-JTSK (DXF coordinates = −Y, −X, meters)
@@ -2428,6 +2427,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 blocks = result.blocks
                 units = result.units
                 skipped = result.skippedEntityTypes
+                unitsMissing = result.units == nil
             }
             guard !entities.isEmpty else {
                 statusBar.showMessage("\(url.lastPathComponent) has no objects to import.")
@@ -2474,6 +2474,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 let transform = CGAffineTransform(scaleX: factor, y: factor)
                 for entity in entities { entity.applyTransform(transform) }
                 note = " · scaled from \(units.suffix) to \(editorView.drawingUnits.suffix)"
+            } else if unitsMissing {
+                note = " · no known units in the file – read as \(editorView.drawingUnits.suffix)"
             }
 
             if currentTool != .select { selectTool(.select) }
@@ -2690,6 +2692,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             replaceDocument(with: result.entities, layers: result.layers, url: url)
             activeTab.blocks = result.blocks
             connectManagers()
+            var unitsNote = ""
             if let units = result.units {
                 editorView.drawingUnits = units
                 activeTab.units = units
@@ -2700,10 +2703,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 activeTab.units = .m
                 updateModes()
                 showsJTSK = true
+            } else {
+                unitsNote = " · no known units in the file – read as \(editorView.drawingUnits.suffix)"
             }
             editorView.viewport.zoomToFit(entities: document.getAllEntities())
 
-            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object\(result.entities.count == 1 ? "" : "s")"
+            var message = "Opened \(url.lastPathComponent): \(result.entities.count) object\(result.entities.count == 1 ? "" : "s")" + unitsNote
             if !result.skippedEntityTypes.isEmpty {
                 let skipped = result.skippedEntityTypes.keys.sorted()
                     .map { "\($0) ×\(result.skippedEntityTypes[$0]!)" }
@@ -2806,9 +2811,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     }
 
     private func applySettings(_ settings: DrawingSettingsRecord?) {
-        // older drawings and drawings without settings show the grid and the axes
-        editorView.showGrid = settings?.showGrid ?? true
-        editorView.showAxes = settings?.showAxes ?? true
+        // older drawings and drawings without settings follow the app setting
+        editorView.showGrid = settings?.showGrid ?? AppSettings.showGrid
+        editorView.showAxes = settings?.showAxes ?? AppSettings.showAxes
         guard let settings = settings else { return }
         if let paper = settings.scalePaper, let model = settings.scaleModel, paper > 0, model > 0 {
             editorView.drawingScale = DrawingScale(paper: paper, model: model)
@@ -2821,7 +2826,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         if let angle = settings.hatchAngle { editorView.hatchAngle = angle }
         editorView.hatchScale = settings.hatchScale
-        if let raw = settings.units, let units = DrawingUnits(rawValue: raw) { editorView.drawingUnits = units }
+        if let raw = settings.units, let units = DrawingUnits(rawValue: raw) {
+            editorView.drawingUnits = units
+            activeTab.units = units
+        }
         if let size = settings.gridSize, size > 0 { editorView.gridSize = size }
         if let step = settings.polarIncrement, step > 0 { editorView.polarIncrement = step }
         if let y = settings.geoY, let x = settings.geoX {
@@ -3908,10 +3916,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             editorView.viewport.viewState = (zoom: editorView.viewport.getCurrentZoom() / factor,
                                              pan: scaled(editorView.viewport.viewState.pan))
             editorView.drawingUnits = newUnits
+            // the grid and a fixed hatch scale are lengths in model units too
+            editorView.gridSize *= factor
+            if let scale = editorView.hatchScale { editorView.hatchScale = scale * factor }
         } else {
             if let view = tab.viewState { tab.viewState = (zoom: view.zoom / factor, pan: scaled(view.pan)) }
-            tab.units = newUnits
+            tab.gridSize *= factor
+            if let scale = tab.hatchScale { tab.hatchScale = scale * factor }
         }
+        tab.units = newUnits
         syncViewportUnits(tab, mmPerUnit: newUnits.mmPerUnit)
         tab.activeUndoer.registerUndo(withTarget: self) { target in
             target.convertUnitSettings(from: newUnits, to: oldUnits, factor: 1 / factor)
@@ -3931,42 +3944,56 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                                       gridSnap: editorView.gridSnapEnabled, showGrid: editorView.showGrid,
                                                       polar: editorView.polarEnabled, polarIncrement: editorView.polarIncrement) else { return }
         let oldUnits = editorView.drawingUnits
+        let oldGridSize = editorView.gridSize
+        var gridSize = result.gridSize
         if result.units != oldUnits && result.convertDrawing {
             // convert the coordinates so the drawing stays the same real size
             let factor = oldUnits.mmPerUnit / result.units.mmPerUnit
             let t = CGAffineTransform(scaleX: factor, y: factor)
             let originals = document.getAllEntities()
+            // dimensions keep their real precision (mm with 0 decimals → m with 3)
+            let extraDecimals = Int((-log10(factor)).rounded())
             // applyTransform already scales dimension text and arrows
             let scaled = originals.map { entity -> CADEntity in
                 let copy = entity.clone()
                 copy.applyTransform(t)
+                if let dimension = copy as? DimensionEntity {
+                    dimension.precision = max(0, min(dimension.precision + extraDecimals, 6))
+                }
                 return copy
             }
+            // an untouched grid size keeps its real size
+            if gridSize == oldGridSize { gridSize = oldGridSize * factor }
             applyChange(removed: originals, added: scaled, actionName: "Convert Units")
             // the settings tied to model coordinates are converted in the same undo step
             convertUnitSettings(from: oldUnits, to: result.units, factor: factor)
         }
         editorView.drawingUnits = result.units
+        activeTab.units = result.units
         syncViewportUnits(activeTab, mmPerUnit: result.units.mmPerUnit)
-        editorView.gridSize = result.gridSize
+        editorView.gridSize = gridSize
         editorView.gridSnapEnabled = result.gridSnap
         editorView.showGrid = result.showGrid
+        AppSettings.showGrid = result.showGrid
         editorView.polarIncrement = result.polarIncrement
         editorView.polarEnabled = result.polar
         markSettingsChanged()
         editorView.needsDisplay = true
-        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(result.gridSize)) · polar \(LineType.formatAngle(result.polarIncrement))°")
+        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(gridSize)) · polar \(LineType.formatAngle(result.polarIncrement))°")
     }
 
     /// Show Grid and Show Axes are saved in the drawing, so switching them is a change of the drawing.
+    /// The app remembers the last state too, for new drawings.
     @objc func toggleGrid() {
         editorView.showGrid.toggle()
+        AppSettings.showGrid = editorView.showGrid
         hasUnsavedChanges = true
         statusBar.showMessage(editorView.showGrid ? "Show grid ON" : "Show grid OFF")
     }
 
     @objc func toggleAxes() {
         editorView.showAxes.toggle()
+        AppSettings.showAxes = editorView.showAxes
         hasUnsavedChanges = true
         statusBar.showMessage(editorView.showAxes ? "Show axes ON" : "Show axes OFF")
     }

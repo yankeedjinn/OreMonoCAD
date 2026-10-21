@@ -96,7 +96,8 @@ enum ToolPanelLayout {
         get {
             var result: [DrawingTool] = []
             for title in UserDefaults.standard.stringArray(forKey: favoritesKey) ?? [] {
-                if let tool = DrawingTool.availableTools.first(where: { $0.title == title && $0.paletteLeader == $0 }),
+                // a tool that is no longer first of its combined button stands for that button
+                if let tool = DrawingTool.availableTools.first(where: { $0.title == title })?.paletteLeader,
                    !result.contains(tool) {
                     result.append(tool)
                 }
@@ -394,17 +395,23 @@ final class ToolbarView: NSView, NSMenuDelegate {
 
     private func toolMenu(_ tool: DrawingTool) -> NSMenu? {
         if tool.paletteFamily != nil { return makeFamilyMenu(tool) }
+        let menu: NSMenu?
         switch tool {
-        case .arc: return makeArcMenu()
-        case .hatch: return makeHatchMenu()
-        case .text: return makeTextMenu()
-        case .xline: return makeXLineMenu()
-        case .matchProperties: return makeMatchMenu()
-        case .measure: return makeMeasureMenu()
-        case .array: return makeArrayMenu()
-        case .blockInsert: return makeBlockMenu()
-        default: return nil
+        case .arc: menu = makeArcMenu()
+        case .hatch: menu = makeHatchMenu()
+        case .text: menu = makeTextMenu()
+        case .xline: menu = makeXLineMenu()
+        case .matchProperties: menu = makeMatchMenu()
+        case .measure: menu = makeMeasureMenu()
+        case .array: menu = makeArrayMenu()
+        case .blockInsert: menu = makeBlockMenu()
+        default: menu = nil
         }
+        // the choices of the tool show its HOW TO USE (the “…” settings items do not)
+        if let menu = menu as? ToolMenu {
+            for item in menu.items where !item.title.hasSuffix("…") { menu.setUsage(tool.usage, for: item) }
+        }
+        return menu
     }
 
     /// The tool's own menu (if it has one) followed by Add to / Remove from Favorites.
@@ -604,16 +611,13 @@ final class ToolbarView: NSView, NSMenuDelegate {
     // MARK: Combined buttons (Circle / Ellipse / Polygon, Fillet / Chamfer)
 
     private func makeFamilyMenu(_ leader: DrawingTool) -> NSMenu {
-        let menu = NSMenu(title: leader.title)
+        let menu = ToolMenu(title: leader.title)
         guard let family = leader.paletteFamily else { return menu }
-        let header = NSMenuItem(title: family.contains(.dimLinear) ? "Dimension – which kind"
-                                : family.map { $0.title }.joined(separator: " · "), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
         let current = familyChoice[leader] ?? leader
         for tool in family {
-            let item = NSMenuItem(title: tool.menuTitle, action: #selector(familyToolChosen(_:)), keyEquivalent: "")
+            let item = ToolMenuItem(title: tool.menuTitle, action: #selector(familyToolChosen(_:)), keyEquivalent: "")
             item.target = self
+            item.usage = tool.usage
             item.tag = tool.rawValue
             item.image = ToolIcons.image(for: tool, size: 22)
             item.subtitle = tool.summary
@@ -623,9 +627,6 @@ final class ToolbarView: NSView, NSMenuDelegate {
         if family.contains(.polygon) {
             let settings = delegate?.toolbarPolygonSettings() ?? (method: PolygonMethod.inscribed, sides: 6)
             menu.addItem(.separator())
-            let polygonHeader = NSMenuItem(title: "Polygon – how to draw it", action: nil, keyEquivalent: "")
-            polygonHeader.isEnabled = false
-            menu.addItem(polygonHeader)
             for method in PolygonMethod.allCases {
                 let item = NSMenuItem(title: method.title, action: #selector(polygonMethodChosen(_:)), keyEquivalent: "")
                 item.target = self
@@ -634,6 +635,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
                 item.subtitle = method.detail
                 item.state = method == settings.method ? .on : .off
                 menu.addItem(item)
+                menu.setUsage(DrawingTool.polygon.usage, for: item)
             }
             let sides = NSMenuItem(title: "Number of Sides: \(settings.sides)…", action: #selector(polygonSidesChosen(_:)),
                                    keyEquivalent: "")
@@ -745,7 +747,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeHatchMenu() -> NSMenu {
-        let menu = NSMenu(title: "Hatch")
+        let menu = ToolMenu(title: "Hatch")
         let summary = delegate?.toolbarHatchSettingsSummary() ?? (angle: 0, scaleText: "1")
         HatchMenuBuilder.populate(menu, current: hatchPattern, angle: summary.angle, scaleText: summary.scaleText,
                                   actions: .init(target: self,
@@ -753,7 +755,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
                                                  newCustom: #selector(customHatchPattern(_:)),
                                                  settings: #selector(hatchSettings(_:)),
                                                  removeCustom: #selector(removeCustomHatchPattern(_:))),
-                                  imageSize: 22, header: "Hatch – pattern")
+                                  imageSize: 22, header: nil)
         menu.addItem(.separator())
         menu.addItem(toolItem(.hatchRebuild))
         menu.addItem(toolItem(.hatchCut))
@@ -762,9 +764,10 @@ final class ToolbarView: NSView, NSMenuDelegate {
 
     /// A menu item that starts a tool which has no button of its own in the panel.
     private func toolItem(_ tool: DrawingTool, imageSize: CGFloat = 22) -> NSMenuItem {
-        let item = NSMenuItem(title: tool.menuTitle, action: #selector(menuToolChosen(_:)), keyEquivalent: "")
+        let item = ToolMenuItem(title: tool.menuTitle, action: #selector(menuToolChosen(_:)), keyEquivalent: "")
         item.target = self
         item.tag = tool.rawValue
+        item.usage = tool.usage
         item.image = ToolIcons.image(for: tool, size: imageSize)
         // the tool has no button of its own, so its help is shown here
         item.subtitle = tool.summary
@@ -795,10 +798,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeArcMenu() -> NSMenu {
-        let menu = NSMenu(title: "Arc")
-        let header = NSMenuItem(title: "Arc – how to draw it", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Arc")
         for method in ArcMethod.allCases {
             let item = NSMenuItem(title: method.title, action: #selector(arcMethodChosen(_:)), keyEquivalent: "")
             item.target = self
@@ -826,10 +826,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeTextMenu() -> NSMenu {
-        let menu = NSMenu(title: "Text")
-        let header = NSMenuItem(title: "Text – what kind", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Text")
         for kind in TextKind.allCases {
             let item = NSMenuItem(title: kind.title, action: #selector(textKindChosen(_:)), keyEquivalent: "")
             item.target = self
@@ -860,9 +857,6 @@ final class ToolbarView: NSView, NSMenuDelegate {
     // MARK: Dimensions – terminators
 
     private func addDimensionItems(to menu: NSMenu) {
-        let header = NSMenuItem(title: "Dimension – ends", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
         let current = AppSettings.dimArrowStyle
         for style in DimArrowStyle.allCases {
             let item = NSMenuItem(title: style.title, action: #selector(dimArrowChosen(_:)), keyEquivalent: "")
@@ -895,13 +889,15 @@ final class ToolbarView: NSView, NSMenuDelegate {
     private var blockMenuItems: [ObjectIdentifier: BlockDefinition] = [:]
 
     private func makeBlockMenu() -> NSMenu {
-        let menu = NSMenu(title: "Insert Block")
+        let menu = ToolMenu(title: "Insert Block")
         blockMenuItems.removeAll()
         let definitions = delegate?.toolbarBlockDefinitions() ?? []
         let current = delegate?.toolbarCurrentBlock()
-        let header = NSMenuItem(title: definitions.isEmpty ? "No blocks in this drawing yet" : "Insert Block – which block", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        if definitions.isEmpty {
+            let none = NSMenuItem(title: "No blocks in this drawing yet", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
         for (index, definition) in definitions.enumerated() {
             if index > 0, definition.isExternal, !definitions[index - 1].isExternal { menu.addItem(.separator()) }
             let item = NSMenuItem(title: definition.name, action: #selector(blockChosen(_:)), keyEquivalent: "")
@@ -914,8 +910,9 @@ final class ToolbarView: NSView, NSMenuDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let create = NSMenuItem(title: "Create Block", action: #selector(createBlockChosen(_:)), keyEquivalent: "")
+        let create = ToolMenuItem(title: "Create Block", action: #selector(createBlockChosen(_:)), keyEquivalent: "")
         create.target = self
+        create.usage = DrawingTool.blockCreate.usage
         create.image = ToolIcons.image(for: DrawingTool.blockCreate, size: 18)
         create.subtitle = DrawingTool.blockCreate.summary
         menu.addItem(create)
@@ -924,8 +921,9 @@ final class ToolbarView: NSView, NSMenuDelegate {
         manager.subtitle = "Rename, delete, reload or bind external references"
         manager.image = ToolIcons.settingsImage(size: 18)
         menu.addItem(manager)
-        let xref = NSMenuItem(title: "Attach External Reference…", action: #selector(attachXrefChosen(_:)), keyEquivalent: "")
+        let xref = ToolMenuItem(title: "Attach External Reference…", action: #selector(attachXrefChosen(_:)), keyEquivalent: "")
         xref.target = self
+        xref.usage = DrawingTool.xref.usage
         xref.image = ToolIcons.image(for: DrawingTool.xref, size: 18)
         xref.subtitle = DrawingTool.xref.summary
         menu.addItem(xref)
@@ -960,10 +958,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeArrayMenu() -> NSMenu {
-        let menu = NSMenu(title: "Array")
-        let header = NSMenuItem(title: "Array – what kind", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Array")
         for kind in ArrayKind.allCases {
             let item = NSMenuItem(title: kind.title, action: #selector(arrayKindChosen(_:)), keyEquivalent: "")
             item.target = self
@@ -991,10 +986,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeXLineMenu() -> NSMenu {
-        let menu = NSMenu(title: "Construction Line")
-        let header = NSMenuItem(title: "Construction Line – direction", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Construction Line")
         for kind in XLineKind.allCases {
             let item = NSMenuItem(title: kind.title, action: #selector(xlineKindChosen(_:)), keyEquivalent: "")
             item.target = self
@@ -1015,10 +1007,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     // MARK: Match properties – what to transfer
 
     private func makeMatchMenu() -> NSMenu {
-        let menu = NSMenu(title: "Match Properties")
-        let header = NSMenuItem(title: "Match Properties – what to copy", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Match Properties")
         let chosen = AppSettings.matchProperties
         for (index, property) in MatchProperty.allCases.enumerated() {
             if property == .style { menu.addItem(.separator()) }
@@ -1053,10 +1042,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     private func makeMeasureMenu() -> NSMenu {
-        let menu = NSMenu(title: "Measure")
-        let header = NSMenuItem(title: "Measure – what to measure", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let menu = ToolMenu(title: "Measure")
         for kind in MeasureKind.allCases {
             if kind == .areaPoints || kind == .point { menu.addItem(.separator()) }
             let item = NSMenuItem(title: kind.title, action: #selector(measureKindChosen(_:)), keyEquivalent: "")
