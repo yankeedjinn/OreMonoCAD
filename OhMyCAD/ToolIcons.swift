@@ -207,6 +207,19 @@ enum ToolIcons {
             p.rect(3, 4.5, 18, 15)
             p.polyline([(3, 8), (9, 14), (13, 10), (15.5, 12.5), (21, 7)], accent: true)
             p.dot(16, 15.5, accent: true)
+        case .blockManager:
+            // a list of blocks: a small block frame and a line on each row
+            for y in [CGFloat(17.5), 12, 6.5] {
+                p.rect(3, y - 2, 4, 4, accent: true)
+                p.line(10, y, 21, y)
+            }
+        case .pdfReference:
+            // a page with a folded corner and lines of text
+            p.polyline([(5, 3), (5, 21), (15, 21), (19, 17), (19, 3)], closed: true)
+            p.polyline([(15, 21), (15, 17), (19, 17)])
+            p.line(8, 14, 16, 14, accent: true)
+            p.line(8, 10.5, 16, 10.5, accent: true)
+            p.line(8, 7, 13, 7, accent: true)
         case .xref:
             // sheet with a folded corner and a paper clip (reference to another drawing)
             p.polyline([(5, 3), (5, 21), (15, 21), (19, 17), (19, 3)], closed: true)

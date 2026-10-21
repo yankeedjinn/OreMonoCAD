@@ -974,8 +974,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         // the Model | layouts bar at the bottom
         frame.origin.y += LayoutBarView.height
         frame.size.height -= LayoutBarView.height
+        // block editing: the bar gets its own strip above the drawing, so it never covers the place you click
+        let barStrip = blockEditStripHeight
+        frame.size.height -= barStrip
         editorView.frame = frame
-        tabBar?.frame = NSRect(x: frame.minX, y: frame.maxY, width: frame.width, height: DrawingTabBarView.height)
+        tabBar?.frame = NSRect(x: frame.minX, y: frame.maxY + barStrip, width: frame.width, height: DrawingTabBarView.height)
         layoutBar?.frame = NSRect(x: frame.minX, y: frame.minY - LayoutBarView.height, width: frame.width, height: LayoutBarView.height)
         positionBlockEditBar()
     }
@@ -1486,6 +1489,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case .zoomWindow: zoomWindow(nil); return
         // Filter is a dialog – it ends in the Select tool with the found objects selected
         case .filter: filterObjects(nil); return
+        // Block Manager is a window of its own – the tool does not change
+        case .blockManager: showBlockManager(nil); return
         default: break
         }
         // External Reference: first the file, then the insertion point
@@ -1494,12 +1499,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         xrefReady = false
-        // Image or PDF: first the file, then the corner
-        if tool == .image && editorView.pendingImage == nil {
-            attachImage(nil)
+        // Image or PDF Reference: first the file, then the corner
+        if tool.placesUnderlay && editorView.pendingImage?.isPDF != (tool == .pdfReference) {
+            if tool == .pdfReference { attachPDF(nil) } else { attachImage(nil) }
             return
         }
-        if tool != .image { editorView.pendingImage = nil }
+        if !tool.placesUnderlay { editorView.pendingImage = nil }
         if tool != currentTool { Log.info("Tool: \(tool.title)") }
         currentTool = tool
         editorView.currentTool = tool
@@ -1836,14 +1841,6 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         insertBlock(definition)
     }
 
-    func toolbarDidRequestBlockManager() {
-        showBlockManager(nil)
-    }
-
-    func toolbarDidRequestAttachXref() {
-        attachXref(nil)
-    }
-
     /// Inserting a block (or reference) by clicking.
     private func insertBlock(_ definition: BlockDefinition) {
         editorView.insertDefinition = definition
@@ -1950,26 +1947,37 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     // MARK: Image or PDF underlay (ImageUnderlay.swift)
 
-    /// Insert › Attach Image or PDF…: a scan, photo, map or PDF page to trace over (stored inside the drawing).
+    /// Insert › Attach Image Reference…: a scan, photo or map to trace over (stored inside the drawing).
     @objc func attachImage(_ sender: Any?) {
+        chooseUnderlay(for: .image)
+    }
+
+    /// Insert › Attach PDF Reference…: a PDF page to trace over (stored inside the drawing).
+    @objc func attachPDF(_ sender: Any?) {
+        chooseUnderlay(for: .pdfReference)
+    }
+
+    /// The file dialog of Image Reference or PDF Reference.
+    private func chooseUnderlay(for tool: DrawingTool) {
         guard let window = view.window, window.attachedSheet == nil else { return }
         editorView.cancelCurrentOperation()
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image, .pdf]
-        panel.message = "Choose a scan, photo, map or PDF to trace over – it is stored inside the drawing"
+        panel.allowedContentTypes = tool == .pdfReference ? [.pdf] : [.image]
+        panel.message = tool == .pdfReference ? "Choose a PDF to trace over – it is stored inside the drawing"
+                                              : "Choose a scan, photo or map to trace over – it is stored inside the drawing"
         panel.prompt = "Attach"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self = self else { return }
             guard response == .OK, let url = panel.url else {
-                if self.currentTool == .image { self.selectTool(.select) }
+                if self.currentTool.placesUnderlay { self.selectTool(.select) }
                 return
             }
-            self.prepareImage(from: url)
+            self.prepareImage(from: url, tool: tool)
         }
     }
 
     /// Reads the chosen file, asks for its scale (and the page of a PDF) and lets the user click where it goes.
-    private func prepareImage(from url: URL) {
+    private func prepareImage(from url: URL, tool: DrawingTool) {
         let name = url.lastPathComponent
         guard let data = try? Data(contentsOf: url), !data.isEmpty else {
             showImageProblem("“\(name)” could not be read.")
@@ -1982,7 +1990,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
         let pages = ImageSource.pageCount(of: data)
         guard let options = askImageOptions(fileName: name, pages: pages) else {
-            if currentTool == .image { selectTool(.select) }
+            if currentTool.placesUnderlay { selectTool(.select) }
             return
         }
         guard let source = ImageSource.load(data: data, fileName: name, page: options.page, scale: options.scale) else {
@@ -1990,7 +1998,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         editorView.pendingImage = source
-        selectTool(.image)
+        selectTool(tool)
         view.window?.makeFirstResponder(editorView)
         statusBar.setPrompt(editorView.prompt)
     }
@@ -2025,7 +2033,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     }
 
     private func showImageProblem(_ text: String) {
-        if currentTool == .image { selectTool(.select) }
+        if currentTool.placesUnderlay { selectTool(.select) }
         Log.error("Error Attaching Image or PDF: \(text)")
         let alert = NSAlert()
         alert.messageText = "Error Attaching Image or PDF"
@@ -4597,8 +4605,10 @@ extension MainViewController {
         attach.image = DrawingTool.xref.icon(pointSize: 13)
         item(insertMenu, "Reload External References", #selector(reloadXrefs(_:)), modifiers: [], target: self).image = symbol("arrow.clockwise")
         insertMenu.addItem(.separator())
-        let attachPicture = item(insertMenu, "Attach Image or PDF…", #selector(attachImage(_:)), modifiers: [], target: self)
+        let attachPicture = item(insertMenu, "Attach Image Reference…", #selector(attachImage(_:)), modifiers: [], target: self)
         attachPicture.image = DrawingTool.image.icon(pointSize: 13)
+        let attachPDFPage = item(insertMenu, "Attach PDF Reference…", #selector(attachPDF(_:)), modifiers: [], target: self)
+        attachPDFPage.image = DrawingTool.pdfReference.icon(pointSize: 13)
 
         // Format – drawing, style and tool settings (as in AutoCAD)
         let formatMenu = submenu("Format")
@@ -5229,7 +5239,7 @@ extension MainViewController {
         connectManagers()
         setupCallbacks()
         editorView.blockEditContext = CADEditorView.BlockEditContext(name: definition.name, background: background,
-                                                                     basePoint: reference?.position ?? definition.basePoint)
+                                                                     basePoint: session.basePointInDrawing)
         if reference == nil {
             // standalone: the whole block including its base point on screen
             var items = session.document.getAllEntities()
@@ -5289,7 +5299,11 @@ extension MainViewController {
         restoreActiveTabState()
 
         if store {
-            applyBlockChange(BlockContentChange(definition: session.definition, entities: entities))
+            // Set Base Point with “Keep Copies in Place”: the insertion points of all copies move along
+            let lists = activeTab.allDocuments.map { (entities: $0.getAllEntities(), owner: BlockDefinition?.none) }
+                + activeTab.blocks.definitions.filter { $0 !== session.definition }.map { (entities: $0.entities, owner: Optional($0)) }
+            applyBlockChange(BlockContentChange(definition: session.definition, entities: entities, basePoint: session.basePoint,
+                                                placements: session.copyPositions(in: lists)))
             undoer.setActionName("Edit Block \u{201C}\(name)\u{201D}")
             let copies = blockUseCount(session.definition)
             statusBar.showMessage("Block \u{201C}\(name)\u{201D} saved \u{2013} \(copies == 1 ? "1 copy" : "\(copies) copies") updated (\u{2318}Z undoes it)")
@@ -5328,11 +5342,82 @@ extension MainViewController {
 
     /// New content of a block definition – as a step of the main Undo (Undo restores the previous content).
     @objc private func applyBlockChange(_ change: BlockContentChange) {
-        let previous = BlockContentChange(definition: change.definition, entities: change.definition.entities)
+        let previous = BlockContentChange(definition: change.definition, entities: change.definition.entities,
+                                          basePoint: change.definition.basePoint,
+                                          placements: change.placements.map { .init(reference: $0.reference, position: $0.reference.position,
+                                                                                    owner: $0.owner) })
         change.definition.entities = change.entities
+        if change.definition.basePoint != change.basePoint { change.definition.basePoint = change.basePoint }
+        for placement in change.placements {
+            placement.reference.position = placement.position
+            // copies inside another block: its copies recompute their content
+            placement.owner?.contentDidChange()
+        }
         undoer.registerUndo(withTarget: self, selector: #selector(applyBlockChange(_:)), object: previous)
         hasUnsavedChanges = true
-        editorView.needsDisplay = true
+        if change.placements.isEmpty {
+            editorView.needsDisplay = true
+        } else {
+            editorView.invalidateRenderCache()
+        }
+        refreshProperties()
+    }
+
+    // MARK: Block base point
+
+    /// Set Base Point (block edit bar): click the new base point, then (when the block has copies) choose
+    /// whether the copies stay where they are or keep their insertion points.
+    private func setBlockBasePoint() {
+        guard let session = activeTab.blockEdit else { return }
+        if currentTool != .select { selectTool(.select) }
+        editorView.pickAxis(byObject: false, prompt: "Set Base Point: click the new base point of the block",
+                            singlePoint: true) { [weak self] result in
+            guard let self = self, let point = result?.origin else { return }
+            DispatchQueue.main.async { self.finishBlockBasePoint(session: session, at: point) }
+        }
+        statusBar.setPrompt(editorView.prompt)
+    }
+
+    private func finishBlockBasePoint(session: BlockEditSession, at point: CGPoint) {
+        guard activeTab.blockEdit === session else { return }
+        guard Geometry.distance(point, session.basePointInDrawing) > 1e-9 else {
+            statusBar.showMessage("That is the base point already")
+            return
+        }
+        var moveCopies = false
+        let copies = blockUseCount(session.definition)
+        if copies > 0 {
+            let alert = NSAlert()
+            alert.messageText = "Set Base Point \u{2013} Copies in the Drawing"
+            alert.informativeText = "Keep Copies in Place: the drawing does not move, only the point the block is held and "
+                + "inserted by changes.\n\nMove Copies: \(copies == 1 ? "the copy keeps its" : "all \(copies) copies keep their") "
+                + "insertion point, so the drawing of the block shifts by the distance between the old and the new base point."
+                + "\n\nEither way it is written into the block with Save Block Changes."
+            alert.addButton(withTitle: "Keep Copies in Place")
+            alert.addButton(withTitle: "Move Copies")
+            alert.addButton(withTitle: "Cancel")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: moveCopies = false
+            case .alertSecondButtonReturn: moveCopies = true
+            default: return
+            }
+        }
+        applyBlockBasePoint(session.basePointChange(to: point, moveCopies: moveCopies))
+        statusBar.showMessage(moveCopies
+            ? "Base point moved \u{2013} the copies will shift when you save the block (\u{2318}Z undoes it)"
+            : "Base point moved \u{2013} the copies stay where they are (\u{2318}Z undoes it)")
+        Log.info("Block base point: \(session.definition.name) (\(moveCopies ? "copies move" : "copies stay"))")
+    }
+
+    /// One Set Base Point step of the block edit – undoable within the edit.
+    private func applyBlockBasePoint(_ change: BlockEditSession.BasePointChange) {
+        guard let session = activeTab.blockEdit else { return }
+        session.apply(change)
+        undoer.registerUndo(withTarget: self) { target in target.applyBlockBasePoint(change.reversed) }
+        undoer.setActionName("Set Base Point")
+        editorView.blockEditContext?.basePoint = session.basePointInDrawing
+        editorView.invalidateRenderCache()
+        hasUnsavedChanges = true
         refreshProperties()
     }
 
@@ -5343,24 +5428,32 @@ extension MainViewController {
         if blockEditBar == nil {
             bar.onSave = { [weak self] in self?.finishBlockEdit(save: true) }
             bar.onDiscard = { [weak self] in self?.discardBlockEdit(nil) }
+            bar.onSetBasePoint = { [weak self] in self?.setBlockBasePoint() }
             blockEditBar = bar
         }
         bar.configure(blockName: session.definition.name, copies: blockUseCount(session.definition),
                       inPlace: session.reference != nil)
         if bar.superview == nil { view.addSubview(bar, positioned: .above, relativeTo: editorView) }
         bar.isHidden = false
-        positionBlockEditBar()
+        updateEditorViewFrame()
     }
 
     private func hideBlockEditBar() {
         blockEditBar?.isHidden = true
+        updateEditorViewFrame()
+    }
+
+    /// The strip above the drawing area that holds the block edit bar (0 when no block is being edited).
+    private var blockEditStripHeight: CGFloat {
+        guard let bar = blockEditBar, !bar.isHidden else { return 0 }
+        return BlockEditBar.height + 8
     }
 
     private func positionBlockEditBar() {
         guard let bar = blockEditBar, !bar.isHidden, let editor = editorView else { return }
         let frame = editor.frame
         let width = bar.preferredWidth(maximum: max(200, frame.width - 24))
-        bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY - BlockEditBar.height - 10,
+        bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY + (blockEditStripHeight - BlockEditBar.height) / 2,
                            width: width, height: BlockEditBar.height)
         bar.needsLayout = true
     }

@@ -3,9 +3,9 @@
 //  OhMyCAD
 //
 //  Reading and writing ASCII DXF (R12).
-//  Reads: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, POLYLINE, SPLINE, TEXT, MTEXT, blocks (BLOCK + INSERT) and the layer table.
+//  Reads: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, POLYLINE, SPLINE, SOLID, TEXT, MTEXT, blocks (BLOCK + INSERT) and the layer table.
 //  Writes: LINE, CIRCLE, ARC, POLYLINE; splines as a dense polyline,
-//  dimensions as exploded lines, arcs, arrows (SOLID) and TEXT.
+//  dimensions as exploded lines, arcs, arrows (SOLID) and TEXT, hatch dots as zero-length lines.
 //
 
 import Cocoa
@@ -432,6 +432,23 @@ class DXFReader {
                 if sx < 0 { rotation += .pi }      // mirroring across Y = rotation by 180° and mirroring across X
                 reference.rotation = Geometry.normalizeAngle(rotation)
                 emit(reference, inBlocks: inBlocks, record: record)
+
+            case ("ENTITIES", "SOLID"), ("ENTITIES", "TRACE"):
+                // filled triangle or quad (e.g. a dimension arrow); corners 10, 11, 13, 12 in drawing order
+                let raw = [10, 11, 13, 12].compactMap { code -> CGPoint? in
+                    guard let x = record.double(code), let y = record.double(code + 10) else { return nil }
+                    return CGPoint(x: x, y: y)
+                }
+                // a triangle repeats its third corner
+                var corners: [CGPoint] = []
+                for p in raw where corners.last.map({ hypot(p.x - $0.x, p.y - $0.y) > 1e-9 }) ?? true {
+                    corners.append(p)
+                }
+                if let first = corners.first, let last = corners.last, corners.count > 3,
+                   hypot(first.x - last.x, first.y - last.y) < 1e-9 { corners.removeLast() }
+                guard corners.count >= 3 else { continue }
+                emit(HatchEntity(loops: [corners], pattern: .solid, angle: 0, scale: 1,
+                                 layer: record.string(8) ?? "0", color: entityColor(record)), inBlocks: inBlocks, record: record)
 
             case ("ENTITIES", "HATCH"):
                 guard let hatch = DXFReader.hatch(from: record, color: entityColor(record)) else { continue }
@@ -1121,11 +1138,13 @@ extension DXFReader {
 // MARK: - Writer
 
 class DXFWriter {
-    private var out: [String] = []
+    private var out = ""
 
     private func pair(_ code: Int, _ value: String) {
-        out.append(String(code))
-        out.append(DXFWriter.asciiOnly(value))
+        out += String(code)
+        out += "\n"
+        out += DXFWriter.asciiOnly(value)
+        out += "\n"
     }
 
     /// R12 (AC1009) has no UTF-8 – characters outside ASCII are written as \U+XXXX, which AutoCAD and other programs read.
@@ -1145,7 +1164,15 @@ class DXFWriter {
     }
 
     private func number(_ code: Int, _ value: CGFloat) {
-        pair(code, String(format: "%.6f", Double(value)))
+        pair(code, DXFWriter.fixed6(Double(value)))
+    }
+
+    /// The same text as String(format: "%.6f"), but much faster (the export writes millions of numbers).
+    nonisolated static func fixed6(_ value: Double) -> String {
+        withUnsafeTemporaryAllocation(of: CChar.self, capacity: 64) { buffer in
+            _ = withVaList([value]) { vsnprintf(buffer.baseAddress!, 64, "%.6f", $0) }
+            return String(cString: buffer.baseAddress!)
+        }
     }
 
     private func point(_ xCode: Int, _ p: CGPoint) {
@@ -1176,7 +1203,8 @@ class DXFWriter {
     }
 
     func write(document: CADDocument, layerManager: LayerManager, units: DrawingUnits = .mm, to url: URL) throws {
-        out = []
+        out = ""
+        out.reserveCapacity(32 << 20)
 
         // HEADER
         pair(0, "SECTION"); pair(2, "HEADER")
@@ -1224,7 +1252,8 @@ class DXFWriter {
         pair(0, "ENDSEC")
         pair(0, "EOF")
 
-        try (out.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try out.write(to: url, atomically: true, encoding: .utf8)
+        out = ""
     }
 
     /// A single object into the ENTITIES section.
@@ -1282,9 +1311,12 @@ class DXFWriter {
                 point(10, a)
                 point(11, b)
             }
+            // a dot as a zero-length LINE: CAD programs draw it as a dot, while a POINT would come back
+            // as a survey point when the file is opened again
             for dot in geometry.dots {
-                header("POINT", hatch, color: hatch.color)
+                header("LINE", hatch, color: hatch.color)
                 point(10, dot)
+                point(11, dot)
             }
 
         case let reference as BlockReference:

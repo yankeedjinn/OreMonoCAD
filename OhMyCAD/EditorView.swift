@@ -10,7 +10,7 @@ import Cocoa
 // MARK: - Drawing Tools
 
 enum ToolGroup: Int, CaseIterable {
-    case draw, architecture, modify, transform, dimension, insert, view
+    case draw, architecture, modify, transform, dimension, block, reference, view
 
     var title: String {
         switch self {
@@ -19,7 +19,8 @@ enum ToolGroup: Int, CaseIterable {
         case .modify: return "Modify"
         case .transform: return "Transform"
         case .dimension: return "Annotate"
-        case .insert: return "Insert"
+        case .block: return "Block"
+        case .reference: return "Reference"
         case .view: return "Zoom"
         }
     }
@@ -31,7 +32,7 @@ enum DrawingTool: Int, CaseIterable {
     case move, copy, rotate, scale, mirror, stretch, array
     case dimLinear, dimAligned, dimContinue, dimAngular, dimRadius, dimDiameter, leader
     case text, roomLabel, measure, revisionCloud, wipeout, scaleBar, northArrow
-    case blockCreate, blockInsert, xref, image
+    case blockCreate, blockInsert, blockManager, xref, image, pdfReference
     case zoomIn, zoomOut, zoomExtents, zoomSelected, zoomWindow
 
     var title: String {
@@ -87,8 +88,10 @@ enum DrawingTool: Int, CaseIterable {
         case .northArrow: return "North Arrow"
         case .blockCreate: return "Create Block"
         case .blockInsert: return "Insert Block"
-        case .xref: return "Attach External Reference"
-        case .image: return "Attach Image or PDF"
+        case .blockManager: return "Block Manager"
+        case .xref: return "External Reference"
+        case .image: return "Image Reference"
+        case .pdfReference: return "PDF Reference"
         case .zoomIn: return "Zoom In"
         case .zoomOut: return "Zoom Out"
         case .zoomExtents: return "Zoom Extents"
@@ -239,13 +242,19 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select the objects (↩), click the base point (you will insert the block by it) and type the name. The objects become one block. Using the same name again redefines the block – every copy in the drawing changes. Explode turns a block back into objects."),
         .blockInsert: (
             summary: "Places a block of this drawing – as many times as you like.",
-            usage: "Hold the button (or right-click it) to choose the block, create one, open the Block Manager, attach an external reference or attach an image or PDF. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
+            usage: "Hold the button (or right-click it) to choose the block. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
+        .blockManager: (
+            summary: "Lists the blocks and external references of this drawing – rename, delete, reload or bind them.",
+            usage: "Click it (or Insert › Block Manager…, ⌥⌘B). Pick a block in the list and use the buttons below it. An external reference can be reloaded, pointed to a moved file or bound into the drawing as an ordinary block."),
         .xref: (
             summary: "Attaches another drawing (.ohmycad or .dxf) as an external reference – it updates by itself when that file is saved.",
             usage: "Choose the file, then click where its origin (0,0) should go. The reference cannot be edited here; Block Manager reloads it, finds a moved file or binds it into the drawing as an ordinary block."),
         .image: (
-            summary: "Places a scan, photo, map or PDF page into the drawing to trace over – it is stored inside the drawing.",
-            usage: "Choose the file and the scale it is drawn at (a 1:1000 map → 1:1000, a page of drawings → its scale), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
+            summary: "Places a scan, photo or map into the drawing to trace over – it is stored inside the drawing.",
+            usage: "Choose the picture and the scale it is drawn at (a 1:1000 map → 1:1000), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
+        .pdfReference: (
+            summary: "Places a page of a PDF into the drawing to trace over – it is stored inside the drawing.",
+            usage: "Choose the PDF, the page (if it has more) and the scale it is drawn at (a page of drawings → its scale), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
         .zoomIn: (
             summary: "Shows the drawing larger (closer).",
             usage: "Click it – the view zooms in around its center. Also ⌘= , the mouse wheel or pinching on the trackpad (zooms to the cursor). The current tool keeps working."),
@@ -355,7 +364,8 @@ enum DrawingTool: Int, CaseIterable {
         case .trim, .extend, .fillet, .chamfer, .powerTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter: return .modify
         case .move, .copy, .rotate, .scale, .mirror, .stretch, .array: return .transform
         case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud, .wipeout, .scaleBar, .northArrow: return .dimension
-        case .blockCreate, .blockInsert, .xref, .image: return .insert
+        case .blockCreate, .blockInsert, .blockManager: return .block
+        case .xref, .image, .pdfReference: return .reference
         case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow: return .view
         }
     }
@@ -378,6 +388,11 @@ enum DrawingTool: Int, CaseIterable {
         return paletteFamily?.first ?? self
     }
 
+    /// Image Reference and PDF Reference: both place an underlay chosen in a file dialog first.
+    var placesUnderlay: Bool {
+        return self == .image || self == .pdfReference
+    }
+
     /// Tools offered to the user.
     static var availableTools: [DrawingTool] {
         return allCases.filter { !hiddenTools.contains($0) }
@@ -389,7 +404,7 @@ enum DrawingTool: Int, CaseIterable {
 
     /// Title for menus: “…” for a tool that opens a dialog first, then the shortcut.
     var menuTitle: String {
-        let name = [.filter, .xref, .image].contains(self) ? title + "…" : title
+        let name = [.filter, .blockManager, .xref, .image, .pdfReference].contains(self) ? title + "…" : title
         if let shortcut = shortcut { return "\(name)  (\(shortcut))" }
         return name
     }
@@ -403,7 +418,7 @@ enum DrawingTool: Int, CaseIterable {
         case .move, .copy, .rotate, .mirror, .stretch: return 2
         case .scale: return 3      // base point, grip, new grip position
         case .array: return 1      // center (for a polar array)
-        case .blockCreate, .blockInsert, .xref, .scaleBar, .northArrow, .image: return 1      // base / insertion point
+        case .blockCreate, .blockInsert, .xref, .scaleBar, .northArrow, .image, .pdfReference: return 1      // base / insertion point
         case .polyline, .spline, .wall, .leader, .xline, .revisionCloud, .wipeout: return nil
         default: return 0
         }
@@ -1146,7 +1161,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         /// Surrounding objects (in drawing coordinates) – only for display and snapping.
         let background: [CADEntity]
         /// The block's base point (in the drawing).
-        let basePoint: CGPoint
+        var basePoint: CGPoint
     }
 
     var blockEditContext: BlockEditContext? {
@@ -1724,7 +1739,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             } else {
                 text = "Stretch: second point (or distance and angle + ↩)"
             }
-        case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow, .filter:
+        case .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow, .filter, .blockManager:
             text = currentTool.title
         case .blockCreate:
             text = stage == .selectObjects
@@ -1893,12 +1908,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
         case .northArrow:
             text = "North Arrow: click where to place it – it points north (up in the drawing)"
-        case .image:
+        case .image, .pdfReference:
             if let source = pendingImage {
-                text = "Attach \(source.isPDF ? "PDF" : "Image") “\(source.fileName)” (\(source.scale.title)): click where its lower-left corner goes"
+                text = "\(source.isPDF ? "PDF" : "Image") Reference “\(source.fileName)” (\(source.scale.title)): click where its lower-left corner goes"
                     + " · then fit it with Move, Rotate and Scale · Esc = cancel"
             } else {
-                text = "Attach Image or PDF: choose the file first"
+                text = "\(currentTool.title): choose the file first"
             }
         case .roomLabel:
             if let outline = roomHover {
@@ -2807,7 +2822,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .scaleBar, .northArrow:
             return symbolReference(at: end).map { [$0] } ?? []
 
-        case .image:
+        case .image, .pdfReference:
             return pendingImage.map { [placedImage($0, at: end)] } ?? []
 
         case .xline:
@@ -2940,7 +2955,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     private func previewEntities(cursor: CGPoint) -> [CADEntity] {
         if awaitingCloseAnswer { return [] }
-        guard expectsPoint, !points.isEmpty || [.dimRadius, .dimDiameter, .blockInsert, .xref, .dimContinue, .xline, .scaleBar, .northArrow, .image].contains(currentTool) else { return [] }
+        guard expectsPoint, !points.isEmpty || [.dimRadius, .dimDiameter, .blockInsert, .xref, .dimContinue, .xline, .scaleBar, .northArrow, .image, .pdfReference].contains(currentTool) else { return [] }
         return makeEntities(with: cursor, final: false)
     }
 
@@ -3202,7 +3217,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .scaleBar, .northArrow:
             finishSymbol(at: end)
             return
-        case .image:
+        case .image, .pdfReference:
             finishImage(at: end)
             return
         default:
@@ -4422,7 +4437,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     /// The chosen file waiting to be placed (set by the main window after the file dialog).
     var pendingImage: ImageSource? {
-        didSet { if currentTool == .image { stateChanged() } }
+        didSet { if currentTool.placesUnderlay { stateChanged() } }
     }
 
     /// The image at its size in the drawing: paper size × its scale, in drawing units.
@@ -4434,7 +4449,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func finishImage(at point: CGPoint) {
         points.removeAll()
         guard let source = pendingImage else {
-            onMessage?("Choose the image or PDF first (Insert › Attach Image or PDF…).")
+            onMessage?("Choose the file first (Insert › Attach Image Reference… or Attach PDF Reference…).")
             NSSound.beep()
             stateChanged()
             return

@@ -27,8 +27,6 @@ protocol ToolbarViewDelegate: AnyObject {
     func toolbarBlockDefinitions() -> [BlockDefinition]
     func toolbarCurrentBlock() -> BlockDefinition?
     func toolbarDidChooseBlock(_ definition: BlockDefinition)
-    func toolbarDidRequestBlockManager()
-    func toolbarDidRequestAttachXref()
     /// Terminator of new dimensions and the dimension style dialog.
     func toolbarDidSelectDimArrowStyle(_ style: DimArrowStyle)
     func toolbarDidRequestDimensionStyle()
@@ -55,6 +53,8 @@ enum ToolPanelSection: Hashable {
 
     init?(title: String) {
         if title == "Favorites" { self = .favorites; return }
+        // layouts saved before Insert was split into Block and Reference
+        if title == "Insert" { self = .group(.block); return }
         guard let group = ToolGroup.allCases.first(where: { $0.title == title }) else { return nil }
         self = .group(group)
     }
@@ -341,6 +341,10 @@ final class ToolbarView: NSView, NSMenuDelegate {
         }
         // holding opens the tool's own menu; right-click opens it too, with Add to / Remove from Favorites
         button.hasMenu = combined || Self.toolsWithMenu.contains(tool)
+        // Insert Block has nothing to choose until the drawing has a block
+        if tool == .blockInsert && !combined {
+            button.menuCondition = { [weak self] in !(self?.delegate?.toolbarBlockDefinitions().isEmpty ?? true) }
+        }
         button.menuProvider = { [weak self] in self?.makeButtonMenu(tool, combined: combined) }
         return button
     }
@@ -390,8 +394,8 @@ final class ToolbarView: NSView, NSMenuDelegate {
     /// Tools (besides combined buttons) that have their own menu.
     private static let toolsWithMenu: Set<DrawingTool> = [.arc, .hatch, .text, .xline, .matchProperties, .measure, .array, .blockInsert]
 
-    /// Tools without a button of their own in the panel – they are in the menu of Hatch or Insert Block.
-    private static let menuOnlyTools: Set<DrawingTool> = [.hatchRebuild, .hatchCut, .blockCreate, .xref, .image]
+    /// Tools without a button of their own in the panel – they are in the menu of Hatch.
+    private static let menuOnlyTools: Set<DrawingTool> = [.hatchRebuild, .hatchCut]
 
     private func toolMenu(_ tool: DrawingTool) -> NSMenu? {
         if tool.paletteFamily != nil { return makeFamilyMenu(tool) }
@@ -909,43 +913,12 @@ final class ToolbarView: NSView, NSMenuDelegate {
             blockMenuItems[ObjectIdentifier(item)] = definition
             menu.addItem(item)
         }
-        menu.addItem(.separator())
-        let create = ToolMenuItem(title: "Create Block", action: #selector(createBlockChosen(_:)), keyEquivalent: "")
-        create.target = self
-        create.usage = DrawingTool.blockCreate.usage
-        create.image = ToolIcons.image(for: DrawingTool.blockCreate, size: 18)
-        create.subtitle = DrawingTool.blockCreate.summary
-        menu.addItem(create)
-        let manager = NSMenuItem(title: "Block Manager…", action: #selector(blockManagerChosen(_:)), keyEquivalent: "")
-        manager.target = self
-        manager.subtitle = "Rename, delete, reload or bind external references"
-        manager.image = ToolIcons.settingsImage(size: 18)
-        menu.addItem(manager)
-        let xref = ToolMenuItem(title: "Attach External Reference…", action: #selector(attachXrefChosen(_:)), keyEquivalent: "")
-        xref.target = self
-        xref.usage = DrawingTool.xref.usage
-        xref.image = ToolIcons.image(for: DrawingTool.xref, size: 18)
-        xref.subtitle = DrawingTool.xref.summary
-        menu.addItem(xref)
-        menu.addItem(toolItem(.image, imageSize: 18))
         return menu
     }
 
     @objc private func blockChosen(_ sender: NSMenuItem) {
         guard let definition = blockMenuItems[ObjectIdentifier(sender)] else { return }
         delegate?.toolbarDidChooseBlock(definition)
-    }
-
-    @objc private func createBlockChosen(_ sender: NSMenuItem) {
-        delegate?.toolbarDidSelectTool(.blockCreate)
-    }
-
-    @objc private func blockManagerChosen(_ sender: NSMenuItem) {
-        delegate?.toolbarDidRequestBlockManager()
-    }
-
-    @objc private func attachXrefChosen(_ sender: NSMenuItem) {
-        delegate?.toolbarDidRequestAttachXref()
     }
 
     // MARK: Array – kind
@@ -1071,6 +1044,9 @@ final class ToolButtonView: NSView {
     /// Dragging the button: the panel shows where it goes and places it on release.
     var onDrag: ((ToolDragPhase, NSEvent) -> Void)?
     var hasMenu = false { didSet { needsDisplay = true } }
+    /// When set, the menu (and its triangle) is offered only while this returns true.
+    var menuCondition: (() -> Bool)?
+    private var offersMenu: Bool { hasMenu && menuCondition?() != false }
     var isSelected = false { didSet { updateAppearance() } }
     var image: NSImage? {
         didSet { updateAppearance() }
@@ -1120,7 +1096,7 @@ final class ToolButtonView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard hasMenu else { return }
+        guard offersMenu else { return }
         // small triangle at the bottom right = hold to open a menu
         let path = NSBezierPath()
         path.move(to: NSPoint(x: bounds.maxX - 3, y: 3))
@@ -1159,7 +1135,7 @@ final class ToolButtonView: NSView {
         mouseDownPoint = event.locationInWindow
         isDragging = false
         updateAppearance()
-        if hasMenu {
+        if offersMenu {
             perform(#selector(showMenu), with: nil, afterDelay: longPressDelay)
         }
     }
