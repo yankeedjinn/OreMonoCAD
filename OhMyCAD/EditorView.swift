@@ -107,7 +107,7 @@ enum DrawingTool: Int, CaseIterable {
     static let help: [DrawingTool: (summary: String, usage: String)] = [
         .select: (
             summary: "Selects objects so you can edit, move or delete them.",
-            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position)."),
+            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position) · hold the right button (or Control-click) for the context menu."),
         .line: (
             summary: "A straight line between two points.",
             usage: "Click the start and the end (or drag). Type length and angle in the box at the cursor. With LNC on (⌥7, or the Line key again while drawing), lines continue from the last end – ↩/Esc ends, C closes."),
@@ -128,7 +128,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Inscribed: click the center, then a corner. Circumscribed: the center, then the middle of a side. By one side: the two corners of one side (the polygon grows to the left). Press I, C or E while drawing to switch, S for the number of sides – or type radius, angle and sides at the cursor (Tab = next field)."),
         .rectangle: (
             summary: "A rectangle, stored as a closed polyline.",
-            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field). Hold Shift for a square while you hold it. C = from the center or from a corner, S = square on/off – both switch any time, also while drawing. From the center the typed width and height are the whole rectangle; for a square one side is enough."),
+            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field). Hold Shift for a square. C = from the center or from a corner, S = square on/off – both switch any time, also while drawing. From the center the typed width and height are the whole rectangle; for a square one side is enough."),
         .polyline: (
             summary: "Connected straight segments forming a single object.",
             usage: "Click the points · ↩, Esc, right-click or double-click finishes (with CLS on it asks whether to close) · C or clicking the first point closes · ⌫ removes the last point."),
@@ -161,7 +161,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Type the distance (or 0 = through a point), click the object, then click the side. Repeats until Esc. Without a distance the copy goes through the clicked point. An ellipse or a spline gives a polyline that follows it closely."),
         .matchProperties: (
             summary: "Copies the look of one object – layer, color, lineweight, and for texts, dimensions and hatches their style – onto other objects.",
-            usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
+            usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (or click its two corners; left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
         .filter: (
             summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name or a piece of text.",
             usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Whole drawing = its visible objects on unlocked layers, Current selection = all selected objects; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
@@ -1377,8 +1377,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private var activeSnap: SnapPoint?
     private var shiftHeld = false
 
+    /// The first corner of the selection window is kept in the drawing, so zooming or panning
+    /// between two clicks does not move it; `selectionBoxStart` gives it on the screen.
+    private var selectionBoxStartWorld: CGPoint? {
+        didSet { if selectionBoxStartWorld == nil { selectionBoxAwaitsCorner = false } }
+    }
     private var selectionBoxStart: CGPoint? {   // screen
-        didSet { if selectionBoxStart == nil { selectionBoxAwaitsCorner = false } }
+        get { return selectionBoxStartWorld.map { viewport.worldToScreen($0) } }
+        set { selectionBoxStartWorld = newValue.map { viewport.screenToWorld($0) } }
     }
     private var selectionBoxEnd: CGPoint?
     /// The window was started with a click (not a drag) – the next click sets the opposite corner.
@@ -1705,7 +1711,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .ellipse:
             switch points.count {
             case 0: text = "Ellipse: center"
-            case 1: text = "Ellipse: end of the first axis (or length and angle + ↩) · hold Shift = ortho"
+            case 1: text = "Ellipse: end of the first axis (or length and angle + ↩)"
             default: text = "Ellipse: width of the other axis – click or type the half-axis + ↩"
             }
         case .stretch:
@@ -3953,9 +3959,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         let edgeList = visibleEntities
+        let fenceBox = fencePrimitives.reduce(CGRect.null) { $0.union($1.bounds) }
         var removed: [CADEntity] = []
         var added: [CADEntity] = []
-        for curve in editableEntities where EditOperations.isTrimmable(curve) {
+        // only objects near the stroke are tried (a big drawing has a hundred thousand of them)
+        for curve in editableEntities where EditOperations.isTrimmable(curve)
+            && EditOperations.mayMeet(curve.boundingBox(), fenceBox) {
             var crossings: [CGPoint] = []
             for a in curve.primitives() {
                 for f in fencePrimitives {
@@ -6010,16 +6019,21 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         updateDynamicInput()
     }
 
-    /// Shift pressed or released: a rectangle preview switches between a square and a free rectangle
-    /// right away, without waiting for the mouse to move.
+    /// Shift pressed or released: the preview follows right away, without waiting for the mouse to move
+    /// (square rectangle, 15° steps in Rotate and Arc, ortho).
     override func flagsChanged(with event: NSEvent) {
         super.flagsChanged(with: event)
         let shift = event.modifierFlags.contains(.shift)
         guard shift != shiftHeld else { return }
         shiftHeld = shift
-        let sizesRectangle = (currentTool == .rectangle && !rectangleSquare) || (drawsOutline && outlineShape == .rectangle)
-        guard sizesRectangle, !points.isEmpty else { return }
-        updateDynamicInput()
+        // only while the tool waits for a point and no mouse button is down (a drag has its own handling)
+        guard expectsPoint, NSEvent.pressedMouseButtons == 0, let window = window,
+              let move = NSEvent.mouseEvent(with: .mouseMoved, location: window.mouseLocationOutsideOfEventStream,
+                                            modifierFlags: event.modifierFlags, timestamp: event.timestamp,
+                                            windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                            clickCount: 0, pressure: 0),
+              bounds.contains(convert(move.locationInWindow, from: nil)) else { return }
+        mouseMoved(with: move)
         onPromptChanged?(prompt)
         needsDisplay = true
     }
@@ -6248,7 +6262,6 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Left to right = only whole objects inside (window), right to left = also crossed ones (crossing).
     /// Closes the window (dragged or clicked) and applies it according to the tool.
     private func finishBox(from start: CGPoint, to end: CGPoint) {
         selectionBoxStart = nil
@@ -6266,6 +6279,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    /// Left to right = only whole objects inside (window), right to left = also crossed ones (crossing).
     private func finishSelectionBox(from start: CGPoint, to end: CGPoint) {
         guard let selectionManager = selectionManager,
               abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 else { return }

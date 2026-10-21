@@ -4,26 +4,28 @@ A small 2D CAD editor for macOS – a fancy drawing board somewhere between a cl
 
 It is a personal project: built for one architect's everyday drawing, kept deliberately simple.
 
-Current version: 1.11 (build 12).
+Current version: 1.14 (build 15).
 
 ## Features
 
 - Lines, polylines, rectangles, arcs, circles, ellipses, polygons, splines, construction lines
 - Move, Copy, Rotate, Scale, Mirror, Array, Edit Points, Match Properties
-- Trim, PowerTrim, Extend, Break, Fillet, Chamfer, Offset, Join, Explode
+- Trim, Power Trim (click to extend, drag a fence to trim), Extend, Break, Fillet, Chamfer, Offset, Join, Explode
 - Dimensions (linear, aligned, continue, angular, radius, diameter), text, leaders
 - Hatches with a pick-inside-area fill, Rebuild Hatch and Cut Out of Hatch
 - Walls and Wall from Curve, room labels with floor area, revision clouds, wipeouts, scale bar and north arrow
 - Image and PDF underlays, external references, groups, Filter, Select Similar
-- Copy and paste between drawings, Draw Order
+- Copy and paste between drawings, Draw Order (kept in DXF export)
 - Plot / print, PDF and image export, plot style tables (.ctb)
 - Layers, blocks with in-place editing, layouts with viewports, named views
 - DXF import and export, native `.ohmycad` format
+- Drawing units: mm, cm, m, inches and feet, with conversion of an existing drawing; text, dimension and lineweight sizes in paper millimeters
 - Survey support: geodetic base point (S-JTSK), point list import, rotated view / UCS
 - Snaps, Snap Tracking, ortho, polar angles, grid, the value box next to the cursor, Find and Replace
+- Shift modifiers (square rectangles, 15° steps for Rotate and Arc), a context menu on a held right mouse button, selection window by dragging or by two clicks
 - A customizable tool panel: Favorites, groups that can be moved or hidden, floating palettes
 - Auto-save, crash recovery and backups of previous versions
-- Help for every tool: a short summary at once on hover, usage instructions after a moment (tools inside a button's menu show their summary in the menu)
+- Help for every tool: a short summary at once on hover, usage instructions after a moment (tools inside a button's menu show their summary in the menu and a HOW TO USE tip after a moment)
 
 ## Requirements
 

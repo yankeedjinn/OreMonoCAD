@@ -1217,7 +1217,8 @@ class DXFWriter {
 
         // ENTITIES
         pair(0, "SECTION"); pair(2, "ENTITIES")
-        for entity in document.getAllEntities() {
+        // sorted by draw order: other CAD programs draw later objects on top
+        for entity in DrawOrder.sorted(document.getAllEntities()) {
             writeEntity(entity, layerManager: layerManager)
         }
         pair(0, "ENDSEC")

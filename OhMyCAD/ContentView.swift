@@ -1632,7 +1632,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                                  newCustom: #selector(newCustomHatchPattern(_:)),
                                                  settings: #selector(hatchSettings(_:)),
                                                  removeCustom: #selector(removeCustomHatchPatternFromMenu(_:))),
-                                  imageSize: 18, header: nil)
+                                  imageSize: 18)
     }
 
     // MARK: Text
@@ -2108,11 +2108,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// commands of the Edit menu – the same actions, enabled the same way (validateMenuItem).
     private func drawingContextMenu() -> NSMenu {
         let menu = NSMenu()
+        @discardableResult
         func add(_ title: String, _ action: Selector, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command,
-                 in parent: NSMenu? = nil) {
+                 in parent: NSMenu? = nil) -> NSMenuItem {
             let menuItem = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: key)
             menuItem.keyEquivalentModifierMask = modifiers
             menuItem.target = self
+            return menuItem
         }
         add("Cut", #selector(cut(_:)), "x")
         add("Copy", #selector(copy(_:)), "c")
@@ -2131,8 +2133,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         add("Select All", #selector(selectAllEntities(_:)), "a")
         add("Select Similar", #selector(selectSimilar(_:)), "a", [.command, .shift])
         menu.addItem(.separator())
+        // the same descriptions as in the Edit menu
         add("Group", #selector(groupSelection(_:)), "g", [.command, .option])
+            .toolTip = "The selected objects become one group – a click on one of them selects them all"
         add("Ungroup", #selector(ungroupSelection(_:)), "g", [.command, .option, .shift])
+            .toolTip = "The selected groups fall apart into separate objects"
         return menu
     }
 
@@ -2839,8 +2844,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                      geoY: tab.geoReference?.y,
                                      geoX: tab.geoReference?.x,
                                      geoHeightZero: tab.geoReference?.heightZero,
-                                     showGrid: tab.showGrid ? nil : false,
-                                     showAxes: tab.showAxes ? nil : false)
+                                     showGrid: tab.showGrid,
+                                     showAxes: tab.showAxes)
     }
 
     private func applySettings(_ settings: DrawingSettingsRecord?) {
@@ -3949,12 +3954,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             editorView.viewport.viewState = (zoom: editorView.viewport.getCurrentZoom() / factor,
                                              pan: scaled(editorView.viewport.viewState.pan))
             editorView.drawingUnits = newUnits
-            // the grid and a fixed hatch scale are lengths in model units too
-            editorView.gridSize *= factor
+            // a fixed hatch scale is a length in model units too (the grid size has its own undo step)
             if let scale = editorView.hatchScale { editorView.hatchScale = scale * factor }
         } else {
             if let view = tab.viewState { tab.viewState = (zoom: view.zoom / factor, pan: scaled(view.pan)) }
-            tab.gridSize *= factor
             if let scale = tab.hatchScale { tab.hatchScale = scale * factor }
         }
         tab.units = newUnits
@@ -3962,6 +3965,47 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         tab.activeUndoer.registerUndo(withTarget: self) { target in
             target.convertUnitSettings(from: newUnits, to: oldUnits, factor: 1 / factor)
             target.markSettingsChanged()
+            target.editorView.needsDisplay = true
+        }
+    }
+
+    /// The model's grid size, undoable (Undo puts back exactly the previous size).
+    private func setModelGridSize(_ size: CGFloat, undoTo previous: CGFloat) {
+        if activeTab.activeLayout == nil { editorView.gridSize = size } else { activeTab.gridSize = size }
+        activeTab.activeUndoer.registerUndo(withTarget: self) { target in
+            target.setModelGridSize(previous, undoTo: size)
+            target.markSettingsChanged()
+            target.editorView.needsDisplay = true
+        }
+    }
+
+    /// Block definitions converted with the model's units: the ones used only in the model.
+    /// Blocks placed on a layout (a title block in paper mm) and external references keep their size.
+    private func convertedBlocks(factor: CGFloat) -> [BlockDefinition] {
+        var onLayouts: [BlockDefinition] = []
+        func collect(_ entities: [CADEntity]) {
+            for case let reference as BlockReference in entities
+                where !onLayouts.contains(where: { $0 === reference.definition }) {
+                onLayouts.append(reference.definition)
+                collect(reference.definition.entities)
+            }
+        }
+        for layout in activeTab.layouts { collect(layout.document.getAllEntities()) }
+        return activeTab.blocks.definitions.filter { definition in
+            !definition.isExternal && !onLayouts.contains { $0 === definition }
+        }
+    }
+
+    /// Replaces the base point and the objects of block definitions, undoable (Convert Units).
+    private func setBlockContents(_ contents: [(BlockDefinition, CGPoint, [CADEntity])]) {
+        guard !contents.isEmpty else { return }
+        let previous = contents.map { ($0.0, $0.0.basePoint, $0.0.entities) }
+        for (definition, base, entities) in contents {
+            definition.basePoint = base
+            definition.entities = entities
+        }
+        activeTab.activeUndoer.registerUndo(withTarget: self) { target in
+            target.setBlockContents(previous)
             target.editorView.needsDisplay = true
         }
     }
@@ -3984,27 +4028,32 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             let factor = oldUnits.mmPerUnit / result.units.mmPerUnit
             let t = CGAffineTransform(scaleX: factor, y: factor)
             let originals = document.getAllEntities()
-            // dimensions keep their real precision (mm with 0 decimals → m with 3)
-            let extraDecimals = Int((-log10(factor)).rounded())
-            // applyTransform already scales dimension text and arrows
+            // block definitions are converted too, so their references keep their scale and new insertions fit
+            let converted = convertedBlocks(factor: factor)
             let scaled = originals.map { entity -> CADEntity in
-                let copy = entity.clone()
-                copy.applyTransform(t)
-                if let dimension = copy as? DimensionEntity {
-                    dimension.precision = max(0, min(dimension.precision + extraDecimals, 6))
-                }
-                return copy
+                return EditorUnitConversion.converted(entity, transform: t, factor: factor, convertedBlocks: converted)
             }
             // an untouched grid size keeps its real size
             if gridSize == oldGridSize { gridSize = oldGridSize * factor }
+            setBlockContents(converted.map { definition in
+                (definition, definition.basePoint.applying(t), definition.entities.map {
+                    EditorUnitConversion.converted($0, transform: t, factor: factor, convertedBlocks: converted)
+                })
+            })
             applyChange(removed: originals, added: scaled, actionName: "Convert Units")
             // the settings tied to model coordinates are converted in the same undo step
             convertUnitSettings(from: oldUnits, to: result.units, factor: factor)
         }
+        if result.units != oldUnits && result.convertDrawing {
+            // in the conversion's undo step the grid size is set (and undone) on its own –
+            // the user may have changed it in the same dialog
+            if gridSize != oldGridSize { setModelGridSize(gridSize, undoTo: oldGridSize) }
+        } else {
+            editorView.gridSize = gridSize
+        }
         editorView.drawingUnits = result.units
         activeTab.units = result.units
         syncViewportUnits(activeTab, mmPerUnit: result.units.mmPerUnit)
-        editorView.gridSize = gridSize
         editorView.gridSnapEnabled = result.gridSnap
         editorView.showGrid = result.showGrid
         AppSettings.showGrid = result.showGrid
@@ -4500,7 +4549,12 @@ extension MainViewController {
             let header = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
             header.isEnabled = false
             toolsMenu.addItem(header)
-            for tool in DrawingTool.tools(in: group) {
+            var tools = DrawingTool.tools(in: group)
+            // PowerTrim before Trim, as on their combined button
+            if let power = tools.firstIndex(of: .powerTrim), let trim = tools.firstIndex(of: .trim), power > trim {
+                tools.insert(tools.remove(at: power), at: trim)
+            }
+            for tool in tools {
                 let menuItem = item(toolsMenu, tool.menuTitle, #selector(selectToolFromMenu(_:)),
                                     modifiers: [], target: self)
                 menuItem.tag = tool.rawValue
@@ -5309,5 +5363,26 @@ extension MainViewController {
         bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY - BlockEditBar.height - 10,
                            width: width, height: BlockEditBar.height)
         bar.needsLayout = true
+    }
+}
+
+/// One object converted to other drawing units (Document Settings › Units with “convert the drawing”).
+enum EditorUnitConversion {
+    static func converted(_ entity: CADEntity, transform: CGAffineTransform, factor: CGFloat,
+                          convertedBlocks: [BlockDefinition]) -> CADEntity {
+        let copy = entity.clone()
+        // applyTransform already scales dimension text and arrows
+        copy.applyTransform(transform)
+        if let dimension = copy as? DimensionEntity {
+            // dimensions keep their real precision (mm with 0 decimals → m with 3)
+            let extraDecimals = Int((-log10(factor)).rounded())
+            dimension.precision = max(0, min(dimension.precision + extraDecimals, 6))
+        }
+        // a converted block already has the new size – its reference keeps its scale
+        if let reference = copy as? BlockReference, let original = entity as? BlockReference,
+           convertedBlocks.contains(where: { $0 === reference.definition }) {
+            reference.scale = original.scale
+        }
+        return copy
     }
 }

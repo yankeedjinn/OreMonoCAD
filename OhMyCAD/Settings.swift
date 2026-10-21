@@ -495,7 +495,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             let value = pow(2, speedSlider.doubleValue)
             speedLabel.stringValue = String(format: "%.2g×", value) + (abs(value - 1) < 0.01 ? " (default)" : "")
             let hold = (holdSlider.doubleValue * 20).rounded() / 20
-            holdLabel.stringValue = String(format: "%.2f s", hold) + (abs(hold - 0.4) < 0.01 ? " (default)" : "")
+            holdLabel.stringValue = String(format: "%g s", hold) + (abs(hold - 0.4) < 0.01 ? " (default)" : "")
         }
         updateSpeed()
         let mouseAction = MenuAction { [weak self] in
@@ -526,8 +526,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             mouseRow("Zoom speed:", [speedSlider, speedLabel]),
             mouseRow("", [toCursor]),
             mouseRow("", [trackpad]),
-            mouseRow("Menu hold time:", [holdSlider, holdLabel]),
-            note("Hold the right button this long in the drawing (with the Select tool) for the context menu – Cut, Copy, Paste, Draw Order and more; Control-click opens it at once. A shorter right click finishes or repeats commands as before."),
+            mouseRow("Context menu hold time:", [holdSlider, holdLabel]),
+            note("Hold the right button this long in the drawing (with the Select tool) for the context menu – Cut, Copy, Paste, Draw Order and more; Control-click opens it at once. A shorter right-click finishes or repeats commands as before."),
             note("While zooming with the wheel: hold Shift for fine steps (¼ speed), Option for fast zoom (3×). With a trackpad, ⌘ + two-finger scroll always zooms and pinching zooms too. If the wheel zooms the wrong way, choose Reversed. Double-click the middle button for Zoom Extents.")
         ])
 

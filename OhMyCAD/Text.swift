@@ -495,6 +495,7 @@ final class TextEntity: CADEntity {
         let copy = TextEntity(position: position, text: text, height: height, layer: layer, color: color)
         copy.copyFormat(from: self)
         copy.isRoomLabel = isRoomLabel
+        copy.roomBounds = roomBounds
         return copyStyle(to: copy)
     }
 

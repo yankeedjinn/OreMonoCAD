@@ -755,7 +755,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
                                                  newCustom: #selector(customHatchPattern(_:)),
                                                  settings: #selector(hatchSettings(_:)),
                                                  removeCustom: #selector(removeCustomHatchPattern(_:))),
-                                  imageSize: 22, header: nil)
+                                  imageSize: 22)
         menu.addItem(.separator())
         menu.addItem(toolItem(.hatchRebuild))
         menu.addItem(toolItem(.hatchCut))

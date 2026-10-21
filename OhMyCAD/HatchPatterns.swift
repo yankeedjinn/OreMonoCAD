@@ -538,14 +538,9 @@ enum HatchMenuBuilder {
     }
 
     static func populate(_ menu: NSMenu, current: HatchPattern, angle: CGFloat, scaleText: String,
-                         actions: Actions, imageSize: CGFloat, header: String?) {
+                         actions: Actions, imageSize: CGFloat) {
         menu.removeAllItems()
         menu.autoenablesItems = false
-        if let header = header {
-            let item = NSMenuItem(title: header, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
         let custom = HatchPatternLibrary.custom
         for pattern in HatchPatternLibrary.all {
             if !pattern.isBuiltIn && pattern.name == custom.first?.name { menu.addItem(.separator()) }

@@ -44,7 +44,15 @@ nonisolated struct FloatingPaletteRecord: Codable {
 
 extension FloatingPaletteRecord {
     @MainActor var drawingTools: [DrawingTool] {
-        return tools.compactMap { title in DrawingTool.availableTools.first { $0.title == title } }
+        var result: [DrawingTool] = []
+        for title in tools {
+            // a tool that is no longer first of its combined button stands for that button (as in Favorites)
+            if let tool = DrawingTool.availableTools.first(where: { $0.title == title })?.paletteLeader,
+               !result.contains(tool) {
+                result.append(tool)
+            }
+        }
+        return result
     }
 }
 

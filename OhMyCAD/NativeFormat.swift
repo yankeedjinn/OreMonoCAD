@@ -228,7 +228,7 @@ nonisolated struct DrawingSettingsRecord: Codable {
     var geoY: Double?
     var geoX: Double?
     var geoHeightZero: Double?
-    /// display of the background grid and the X/Y axes (nil = shown)
+    /// display of the background grid and the X/Y axes (always written; nil in older files = the app setting)
     var showGrid: Bool?
     var showAxes: Bool?
 }

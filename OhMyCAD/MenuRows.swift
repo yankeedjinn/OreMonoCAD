@@ -143,7 +143,8 @@ final class MenuRowView: NSView {
     private func highlightChanged(_ highlighted: Bool) {
         guard highlighted != wasHighlighted else { return }
         wasHighlighted = highlighted
-        if highlighted, let usage = usage {
+        // a row with a submenu gets none – the submenu opens where the help would cover it
+        if highlighted, item?.hasSubmenu == false, let usage = usage {
             MenuUsageTip.shared.schedule(usage, for: self)
         } else if !highlighted {
             MenuUsageTip.shared.cancel(for: self)

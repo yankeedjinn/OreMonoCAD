@@ -20,10 +20,14 @@ enum EditOperations {
     /// Parameters (length from the start) of the curve's intersections with the edges – sorted and without duplicates.
     static func cutParameters(of curve: CurveEntity, edges: [CADEntity]) -> [CGFloat] {
         let own = curve.primitives()
+        // bounding boxes skip pairs that cannot meet (dense polylines have thousands of segments)
+        let ownBoxes = own.map { $0.bounds }
+        let curveBox = ownBoxes.reduce(CGRect.null) { $0.union($1) }
         var params: [CGFloat] = []
-        for edge in edges where edge !== curve {
+        for edge in edges where edge !== curve && mayMeet(edge.boundingBox(), curveBox) {
             for b in edge.primitives() {
-                for a in own {
+                let box = b.bounds
+                for (a, aBox) in zip(own, ownBoxes) where mayMeet(aBox, box) {
                     params.append(contentsOf: a.intersections(with: b).map { $0.param })
                 }
             }
@@ -32,6 +36,7 @@ enum EditOperations {
         let count = own.count
         for i in 0..<count {
             for j in (i + 2)..<max(count, i + 2) where !(curve.isClosedCurve && i == 0 && j == count - 1) {
+                guard mayMeet(ownBoxes[i], ownBoxes[j]) else { continue }
                 params.append(contentsOf: own[i].intersections(with: own[j]).map { $0.param })
                 params.append(contentsOf: own[j].intersections(with: own[i]).map { $0.param })
             }
@@ -43,6 +48,14 @@ enum EditOperations {
             unique.append(p)
         }
         return unique
+    }
+
+    /// Can two objects with these bounding boxes touch? Boxes that are not finite (construction lines) always can.
+    static func mayMeet(_ a: CGRect, _ b: CGRect) -> Bool {
+        guard DrawingSafety.isDrawable(a), DrawingSafety.isDrawable(b) else { return true }
+        let margin = max(a.width, a.height, b.width, b.height, 1) * 1e-9
+        // compared by hand: CGRect.intersects is false for a flat box (a horizontal or vertical segment)
+        return a.minX <= b.maxX + margin && b.minX <= a.maxX + margin && a.minY <= b.maxY + margin && b.minY <= a.maxY + margin
     }
 
     // MARK: Trim
@@ -1651,5 +1664,17 @@ enum SelectSimilar {
         guard let rgb = color.usingColorSpace(.sRGB) else { return color.description }
         let parts = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
         return parts.map { String(Int(($0 * 255).rounded())) }.joined(separator: ",")
+    }
+}
+
+extension Primitive {
+    /// Bounding box (an arc is given the box of its whole circle – enough for skipping far-away pieces).
+    var bounds: CGRect {
+        switch self {
+        case let .segment(a, b, _):
+            return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+        case let .arc(c, r, _, _, _):
+            return CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
+        }
     }
 }

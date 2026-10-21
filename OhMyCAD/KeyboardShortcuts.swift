@@ -73,7 +73,7 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             Row(key: DrawingTool.line.shortcut ?? "–", action: "In the Line tool: continuous lines (LNC) on / off"),
             Row(key: "Letters", action: "Options of the current tool, shown in the bottom line (I / C / E, H / V / A / B, T, J…) – without Shift; ⇧ + letter switches the tool"),
             Row(key: "Y / N", action: "Answer a question (Mirror, Close?)"),
-            Row(key: "Shift (hold)", action: "Ortho while moving the mouse")
+            Row(key: "Shift (hold)", action: "Ortho while moving the mouse; a square in Rectangle, Wipeout and Revision Cloud; 15° steps in Rotate and Arc")
         ]))
 
         sections.append(("Drawing aids (always work)", [
@@ -91,6 +91,7 @@ final class KeyboardShortcutsWindowController: NSWindowController {
 
         sections.append(("Mouse", [
             Row(key: "Right-click", action: "Confirm / finish; with nothing in progress end or repeat the tool"),
+            Row(key: "Right button held", action: "Context menu in Select with nothing in progress (also Control-click)"),
             Row(key: "Middle drag", action: "Pan (also ⌘ + drag)"),
             Row(key: "Middle double-click", action: "Zoom Extents"),
             Row(key: "Wheel", action: "Zoom; Shift = fine, ⌥ = fast"),
