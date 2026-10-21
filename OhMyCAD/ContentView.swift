@@ -1067,6 +1067,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.onDeleteRequested = { [weak self] in self?.deleteSelection() }
         editorView.onZoomExtentsRequested = { [weak self] in self?.zoomExtents() }
         editorView.onToolChangeRequested = { [weak self] tool in self?.selectTool(tool) }
+        editorView.onContextMenuRequested = { [weak self] in self?.drawingContextMenu() }
         editorView.onCommit = { [weak self] removed, added, name in
             self?.applyChange(removed: removed, added: added, actionName: name)
         }
@@ -2102,6 +2103,38 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func sendToBack(_ sender: Any?) { changeDrawOrder("Send to Back") { _, low, _ in low - 1 } }
     @objc func bringForward(_ sender: Any?) { changeDrawOrder("Bring Forward") { order, _, _ in order + 1 } }
     @objc func sendBackward(_ sender: Any?) { changeDrawOrder("Send Backward") { order, _, _ in order - 1 } }
+
+    /// The drawing's context menu (right button held, or Control-click): clipboard, Draw Order and selection
+    /// commands of the Edit menu – the same actions, enabled the same way (validateMenuItem).
+    private func drawingContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        func add(_ title: String, _ action: Selector, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command,
+                 in parent: NSMenu? = nil) {
+            let menuItem = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: key)
+            menuItem.keyEquivalentModifierMask = modifiers
+            menuItem.target = self
+        }
+        add("Cut", #selector(cut(_:)), "x")
+        add("Copy", #selector(copy(_:)), "c")
+        add("Paste", #selector(paste(_:)), "v")
+        add("Paste at Original Coordinates", #selector(pasteAtOriginalCoordinates(_:)), "v", [.command, .shift])
+        menu.addItem(.separator())
+        add("Delete", #selector(deleteSelection), "\u{8}")
+        menu.addItem(.separator())
+        let orderMenu = NSMenu()
+        menu.addItem(withTitle: "Draw Order", action: nil, keyEquivalent: "").submenu = orderMenu
+        add("Bring to Front", #selector(bringToFront(_:)), "f", [.command, .shift], in: orderMenu)
+        add("Bring Forward", #selector(bringForward(_:)), "f", [.command, .shift, .option], in: orderMenu)
+        add("Send Backward", #selector(sendBackward(_:)), "b", [.command, .shift, .option], in: orderMenu)
+        add("Send to Back", #selector(sendToBack(_:)), "b", [.command, .shift], in: orderMenu)
+        menu.addItem(.separator())
+        add("Select All", #selector(selectAllEntities(_:)), "a")
+        add("Select Similar", #selector(selectSimilar(_:)), "a", [.command, .shift])
+        menu.addItem(.separator())
+        add("Group", #selector(groupSelection(_:)), "g", [.command, .option])
+        add("Ungroup", #selector(ungroupSelection(_:)), "g", [.command, .option, .shift])
+        return menu
+    }
 
     // MARK: Groups (Groups.swift)
 

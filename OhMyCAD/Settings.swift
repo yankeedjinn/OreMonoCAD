@@ -161,6 +161,13 @@ enum AppSettings {
         set { defaults.set(newValue, forKey: "OhMyCAD.trackpadScrollZooms") }
     }
 
+    /// How long the right button must be held in the drawing for the context menu, in seconds (0.25–1.5, default 0.4).
+    /// The lower limit keeps an ordinary right click (finish / repeat a command) from opening the menu.
+    static var contextMenuHoldTime: Double {
+        get { return defaults.object(forKey: "OhMyCAD.contextMenuHoldTime") as? Double ?? 0.4 }
+        set { defaults.set(max(0.25, min(newValue, 1.5)), forKey: "OhMyCAD.contextMenuHoldTime") }
+    }
+
     // MARK: Object snap (SNAP)
 
     /// After the set of snap points changes (SNAP popup, Settings, menu View › Drawing Aids › Snap Points).
@@ -480,9 +487,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         toCursor.state = AppSettings.zoomToCursor ? .on : .off
         let trackpad = NSButton(checkboxWithTitle: "Trackpad and Magic Mouse: two-finger scrolling zooms (otherwise it pans)", target: nil, action: nil)
         trackpad.state = AppSettings.trackpadScrollZooms ? .on : .off
+        let holdSlider = NSSlider(value: AppSettings.contextMenuHoldTime, minValue: 0.25, maxValue: 1.5, target: nil, action: nil)
+        holdSlider.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        holdSlider.isContinuous = true
+        let holdLabel = NSTextField(labelWithString: "")
         let updateSpeed = {
             let value = pow(2, speedSlider.doubleValue)
             speedLabel.stringValue = String(format: "%.2g×", value) + (abs(value - 1) < 0.01 ? " (default)" : "")
+            let hold = (holdSlider.doubleValue * 20).rounded() / 20
+            holdLabel.stringValue = String(format: "%.2f s", hold) + (abs(hold - 0.4) < 0.01 ? " (default)" : "")
         }
         updateSpeed()
         let mouseAction = MenuAction { [weak self] in
@@ -490,11 +503,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             AppSettings.zoomSpeed = CGFloat(pow(2, speedSlider.doubleValue))
             AppSettings.zoomToCursor = toCursor.state == .on
             AppSettings.trackpadScrollZooms = trackpad.state == .on
+            AppSettings.contextMenuHoldTime = (holdSlider.doubleValue * 20).rounded() / 20
             updateSpeed()
             self?.onChange?()
         }
         actions.append(mouseAction)
-        for control in [direction, speedSlider, toCursor, trackpad] as [NSControl] {
+        for control in [direction, speedSlider, toCursor, trackpad, holdSlider] as [NSControl] {
             control.target = mouseAction
             control.action = #selector(MenuAction.run(_:))
         }
@@ -512,6 +526,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             mouseRow("Zoom speed:", [speedSlider, speedLabel]),
             mouseRow("", [toCursor]),
             mouseRow("", [trackpad]),
+            mouseRow("Menu hold time:", [holdSlider, holdLabel]),
+            note("Hold the right button this long in the drawing (with the Select tool) for the context menu – Cut, Copy, Paste, Draw Order and more; Control-click opens it at once. A shorter right click finishes or repeats commands as before."),
             note("While zooming with the wheel: hold Shift for fine steps (¼ speed), Option for fast zoom (3×). With a trackpad, ⌘ + two-finger scroll always zooms and pinching zooms too. If the wheel zooms the wrong way, choose Reversed. Double-click the middle button for Zoom Extents.")
         ])
 

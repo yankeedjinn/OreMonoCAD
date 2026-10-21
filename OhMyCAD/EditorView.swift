@@ -119,16 +119,16 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the center, then a point on the circle – or type the radius."),
         .arc: (
             summary: "A circular arc – seven ways to construct it.",
-            usage: "Hold the button (or right-click it) to choose the method. The ring in the icon marks the first point. Values can be typed at the cursor."),
+            usage: "Hold the button (or right-click it) to choose the method. The ring in the icon marks the first point. Values can be typed at the cursor. When the center is known, hold Shift for the end in 15° steps."),
         .ellipse: (
             summary: "An ellipse given by its center and both half-axes – trim it to get an elliptical arc.",
-            usage: "Click the center, then the end of the first axis (sets its direction and length), then the width of the other axis – or type the values at the cursor. Grips change the axes; Trim makes an elliptical arc."),
+            usage: "Click the center, then the end of the first axis (sets its direction and length), then the width of the other axis – or type the values at the cursor. Hold Shift (ortho) for a horizontal or vertical first axis. Grips change the axes; Trim makes an elliptical arc."),
         .polygon: (
             summary: "A regular polygon (equal sides and angles) – stored as a closed polyline.",
             usage: "Inscribed: click the center, then a corner. Circumscribed: the center, then the middle of a side. By one side: the two corners of one side (the polygon grows to the left). Press I, C or E while drawing to switch, S for the number of sides – or type radius, angle and sides at the cursor (Tab = next field)."),
         .rectangle: (
             summary: "A rectangle, stored as a closed polyline.",
-            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field). C = from the center or from a corner, S = square on/off – both switch any time, also while drawing. From the center the typed width and height are the whole rectangle; for a square one side is enough."),
+            usage: "Click one corner, then the opposite one – or type width and height (Tab = next field). Hold Shift for a square while you hold it. C = from the center or from a corner, S = square on/off – both switch any time, also while drawing. From the center the typed width and height are the whole rectangle; for a square one side is enough."),
         .polyline: (
             summary: "Connected straight segments forming a single object.",
             usage: "Click the points · ↩, Esc, right-click or double-click finishes (with CLS on it asks whether to close) · C or clicking the first point closes · ⌫ removes the last point."),
@@ -197,7 +197,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Select objects (↩), click a base point, then click every place for a copy. Esc ends."),
         .rotate: (
             summary: "Rotates the selected objects around a point.",
-            usage: "Select objects (↩), click the center of rotation, then click or type the angle (°)."),
+            usage: "Select objects (↩), click the center of rotation, then click or type the angle (°). Hold Shift for 15° steps."),
         .scale: (
             summary: "Enlarges or shrinks the selected objects.",
             usage: "Select objects (↩), click the base point (it stays put), then click a grip point on the objects and pull it: at the dashed circle = 1×, closer = smaller (down to 0.01), farther = larger, past the base point = negative (turned 180°). Or type any factor – 0.01, 10, -1, 1/3 – and press ↩."),
@@ -272,10 +272,10 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click where to place it. Its size is set on paper, so it suits any drawing scale, and it keeps pointing north when the view or the drawing coordinates are rotated. It is one block (“North Arrow”) – edit that block to change its look, e.g. the letter."),
         .revisionCloud: (
             summary: "A revision cloud – scalloped arcs around a changed part of the drawing (one closed polyline).",
-            usage: "Click the corners of the outline · ↩, right-click, double-click, C or a click on the first corner closes it · ⌫ removes the last corner · R = rectangle from two corners, P = back to corners · A = arc size in mm on paper (remembered). The arcs of a drawn cloud change in Properties › Scale (1 = 8 mm on paper)."),
+            usage: "Click the corners of the outline · ↩, right-click, double-click, C or a click on the first corner closes it · ⌫ removes the last corner · R = rectangle from two corners (hold Shift for a square), P = back to corners · A = arc size in mm on paper (remembered). The arcs of a drawn cloud change in Properties › Scale (1 = 8 mm on paper)."),
         .wipeout: (
             summary: "A wipeout – an area that covers what lies below it with the background color, so a text or a dimension over a hatch or lines stays readable.",
-            usage: "Click two opposite corners of a rectangle (or type width and height) · P = outline by corners (↩, right-click, double-click, C or a click on the first corner closes it, ⌫ removes the last corner) · R = back to the rectangle. It covers lines and hatches but stays below texts and dimensions, so draw it around a text that is already there (Edit › Draw Order puts it above or below other objects). Its frame shows on screen only and is not printed; wipeouts are not exported to DXF."),
+            usage: "Click two opposite corners of a rectangle (or type width and height; hold Shift for a square) · P = outline by corners (↩, right-click, double-click, C or a click on the first corner closes it, ⌫ removes the last corner) · R = back to the rectangle. It covers lines and hatches but stays below texts and dimensions, so draw it around a text that is already there (Edit › Draw Order puts it above or below other objects). Its frame shows on screen only and is not printed; wipeouts are not exported to DXF."),
         .leader: (
             summary: "An arrow with a note.",
             usage: "Click the arrow point, then one or more bend points · ⌫ removes the last point · ↩, right-click or double-click asks for the text."),
@@ -472,6 +472,8 @@ enum ArcMethod: Int, CaseIterable {
 
     /// Is the second given point the center (and the first one the start)?
     var startFirst: Bool { return self == .startCenterEnd || self == .startCenterAngle }
+    /// The center is clicked before the end (so Shift can step the end around it).
+    var knowsCenter: Bool { return [.startCenterEnd, .startCenterAngle, .centerStartEnd, .centerStartAngle].contains(self) }
     /// Is the third point a point on the arc (three-point arc)?
     var usesThirdPointOnArc: Bool { return self == .threePoint || self == .startEndRadius || self == .startEndAngle }
 }
@@ -743,6 +745,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     var onToolChangeRequested: ((DrawingTool) -> Void)?
     var onPromptChanged: ((String) -> Void)?
     var onMessage: ((String) -> Void)?
+    /// The drawing's context menu (Cut, Copy, Paste, Draw Order…) – right button held, or Control-click.
+    var onContextMenuRequested: (() -> NSMenu?)?
     /// Snap / Ortho / dynamic input change (for the status line).
     var onModesChanged: (() -> Void)?
     // MARK: Text
@@ -1688,6 +1692,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             text = points.isEmpty ? "Circle: center point" : "Circle: point on circle (or type radius + ↩)"
         case .arc:
             text = "Arc (\(arcMethod.title)): " + arcMethod.prompts[min(points.count, 2)]
+            if points.count == 2 && arcMethod.knowsCenter { text += " · hold Shift = 15° steps" }
         case .polygon:
             let what = "Polygon (\(polygonSides) sides, \(polygonMethod.shortTitle))"
             switch (polygonMethod, points.isEmpty) {
@@ -1700,7 +1705,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .ellipse:
             switch points.count {
             case 0: text = "Ellipse: center"
-            case 1: text = "Ellipse: end of the first axis (or length and angle + ↩)"
+            case 1: text = "Ellipse: end of the first axis (or length and angle + ↩) · hold Shift = ortho"
             default: text = "Ellipse: width of the other axis – click or type the half-axis + ↩"
             }
         case .stretch:
@@ -1751,7 +1756,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             text += " · hold the Measure button for other measurements"
         case .rectangle:
-            let modes = [rectangleFromCenter ? "from center" : nil, rectangleSquare ? "square" : nil].compactMap { $0 }
+            let modes = [rectangleFromCenter ? "from center" : nil, rectangleIsSquare ? "square" : nil].compactMap { $0 }
             text = modes.isEmpty ? "Rectangle" : "Rectangle (" + modes.joined(separator: ", ") + ")"
             if points.isEmpty {
                 text += rectangleFromCenter ? ": center" : ": first corner"
@@ -1759,6 +1764,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 text += rectangleFromCenter ? ": corner" : ": opposite corner"
             }
             text += " · C = " + (rectangleFromCenter ? "from a corner" : "from the center") + " · S = square " + (rectangleSquare ? "off" : "on")
+            if !rectangleSquare { text += " · hold Shift = square" }
         case .polyline:
             text = points.isEmpty ? "Polyline: first point"
                 : "Polyline: next point (or length + ↩) · ↩ or right-click = finish · click the first point = close · ⌫ = undo point"
@@ -1828,7 +1834,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 switch currentTool {
                 case .move: text = "Move: second point (or distance + ↩)"
                 case .copy: text = "Copy: second point (or distance + ↩) · Esc = done"
-                case .rotate: text = "Rotate: angle point (or angle in ° + ↩)"
+                case .rotate: text = "Rotate: angle point (or angle in ° + ↩) · hold Shift = 15° steps"
                 case .scale:
                     text = points.count < 2
                         ? "Scale: click the grip point – a point of the objects you will pull (or type a factor + ↩)"
@@ -1901,12 +1907,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             case (.polygon, false):
                 text = what + ": next corner · ↩, right-click, double-click, C or the first corner = close · ⌫ = undo corner"
             case (.rectangle, true): text = what + ": first corner of the rectangle · P = by corners · A = arc size"
-            case (.rectangle, false): text = what + ": opposite corner (or type width and height + ↩)"
+            case (.rectangle, false): text = what + ": opposite corner (or type width and height + ↩) · hold Shift = square"
             }
         case .wipeout:
             switch (wipeoutShape, points.isEmpty) {
             case (.rectangle, true): text = "Wipeout: first corner of the rectangle · P = by corners"
-            case (.rectangle, false): text = "Wipeout: opposite corner (or type width and height + ↩)"
+            case (.rectangle, false): text = "Wipeout: opposite corner (or type width and height + ↩) · hold Shift = square"
             case (.polygon, true): text = "Wipeout: first corner of the outline · R = rectangle"
             case (.polygon, false):
                 text = "Wipeout: next corner · ↩, right-click, double-click, C or the first corner = close · ⌫ = undo corner"
@@ -3047,7 +3053,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 worldPoint = snappedToGrid(worldPoint)
             }
             let drawsRectangle = currentTool == .rectangle || (drawsOutline && outlineShape == .rectangle)
-            if orthoEnabled != shiftHeld, !drawsRectangle, currentTool != .circle, let reference = reference {
+            var angleStepped = false
+            if shiftHeld, let pivot = shiftAngleStepPivot {
+                // SHIFT in Rotate and at the end of an arc: the angle around the pivot in 15° steps (instead of ortho)
+                let d = worldPoint - pivot.center
+                let length = hypot(d.x, d.y)
+                if length > 0 {
+                    let step = 15 * CGFloat.pi / 180
+                    let angle = ((atan2(d.y, d.x) - pivot.from) / step).rounded() * step + pivot.from
+                    worldPoint = Geometry.pointOnCircle(pivot.center, length, angle)
+                    angleStepped = true
+                }
+            } else if orthoEnabled != shiftHeld, !drawsRectangle, currentTool != .circle, let reference = reference {
                 // ORTHO: along the axes of the drawing coordinates
                 let d = toUCSVector(worldPoint - reference)
                 worldPoint = reference + fromUCSVector(abs(d.x) >= abs(d.y) ? CGPoint(x: d.x, y: 0) : CGPoint(x: 0, y: d.y))
@@ -3066,13 +3083,31 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             // SNAP TRACKING: line up with the tracked points (horizontally, vertically, at polar angles)
             let directions = SnapTracker.directions(ucsAngle: ucsAngle, polarIncrement: polarEnabled ? polarIncrement : nil)
-            if let aligned = snapTracker.align(cursor: cursorPoint, point: worldPoint, reference: reference,
+            if !angleStepped, let aligned = snapTracker.align(cursor: cursorPoint, point: worldPoint, reference: reference,
                                                constraint: constraint, directions: directions, tolerance: tolerance) {
                 worldPoint = aligned
             }
         }
         lastRawPoint = worldPoint
         return applyInputLocks(worldPoint)
+    }
+
+    /// Shift steps the angle by 15° around this point: the center of rotation in Rotate, the center of an arc
+    /// whose end is being placed. `from` is the angle the steps count from (the X axis of the drawing
+    /// coordinates, or the start of the arc).
+    private var shiftAngleStepPivot: (center: CGPoint, from: CGFloat)? {
+        switch currentTool {
+        case .rotate:
+            guard stage == .points, points.count == 1 else { return nil }
+            return (points[0], ucsAngle)
+        case .arc:
+            guard points.count == 2, arcMethod.knowsCenter else { return nil }
+            let center = arcMethod.startFirst ? points[1] : points[0]
+            let start = arcMethod.startFirst ? points[0] : points[1]
+            return (center, Geometry.angle(from: center, to: start))
+        default:
+            return nil
+        }
     }
 
     /// The nearest editable entity within tolerance, optionally with a filter.
@@ -3449,7 +3484,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             var w = first.map { ($0 < 0 ? $0 : $0 * (d.x < 0 ? -1 : 1)) * part } ?? d.x
             var h = second.map { ($0 < 0 ? $0 : $0 * (d.y < 0 ? -1 : 1)) * part } ?? d.y
             // a square: one entered side gives the other
-            if currentTool == .rectangle && rectangleSquare {
+            if currentTool == .rectangle && rectangleIsSquare {
                 if first != nil && second == nil { h = abs(w) * (d.y < 0 ? -1 : 1) }
                 if second != nil && first == nil { w = abs(h) * (d.x < 0 ? -1 : 1) }
             }
@@ -3505,7 +3540,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return [Geometry.ccwDelta(from: start, to: Geometry.angle(from: arc.center, to: p)) * 180 / .pi]
         case .widthHeight:
             guard let corner = points.first else { return [] }
-            let d = currentTool == .rectangle ? rectangleDiagonal(from: corner, to: p).diagonal : toUCSVector(p - corner)
+            var d = currentTool == .rectangle ? rectangleDiagonal(from: corner, to: p).diagonal : toUCSVector(p - corner)
+            if drawsOutline && squareByShift { d = CADEditorView.squared(d) }
             return [abs(d.x), abs(d.y)]
         case .angle:
             guard let base = points.first else { return [] }
@@ -3561,7 +3597,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return "I / C / E = method · S = sides"
         }
         if currentTool == .rectangle {
-            return "C = from center · S = square"
+            return "C = from center · S or Shift = square"
         }
         if [.polyline, .spline].contains(currentTool) && points.count >= 3 {
             return "C = close the \(currentTool == .spline ? "spline" : "polyline")"
@@ -4262,15 +4298,29 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         didSet { stateChanged() }
     }
 
+    /// The rectangle is a square right now: S is on, or Shift is held (only while the mouse decides the size –
+    /// typed values keep their own sides).
+    private var rectangleIsSquare: Bool {
+        rectangleSquare || squareByShift
+    }
+
+    /// Shift held while the mouse sizes a rectangle (Rectangle, the rectangle of Wipeout and Revision Cloud).
+    private var squareByShift: Bool {
+        shiftHeld && !dynamicInput.hasLockedValue
+    }
+
+    /// The diagonal `d` (in the drawing coordinates) made square: the longer side, toward the cursor.
+    private static func squared(_ d: CGPoint) -> CGPoint {
+        let side = max(abs(d.x), abs(d.y))
+        return CGPoint(x: d.x < 0 ? -side : side, y: d.y < 0 ? -side : side)
+    }
+
     /// The rectangle from the first click to `point`: its first corner and its diagonal along the axes
     /// of the drawing coordinates. Square = equal sides (the longer one, toward the cursor);
     /// from the center = the first click is the center and the cursor a corner.
     private func rectangleDiagonal(from first: CGPoint, to point: CGPoint) -> (corner: CGPoint, diagonal: CGPoint) {
         var d = toUCSVector(point - first)
-        if rectangleSquare {
-            let side = max(abs(d.x), abs(d.y))
-            d = CGPoint(x: d.x < 0 ? -side : side, y: d.y < 0 ? -side : side)
-        }
+        if rectangleIsSquare { d = CADEditorView.squared(d) }
         if rectangleFromCenter { return (first - fromUCSVector(d), d * 2) }
         return (first, d)
     }
@@ -4569,8 +4619,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func outlineCorners(_ corners: [CGPoint]) -> [CGPoint] {
         guard outlineShape == .rectangle else { return corners }
         guard corners.count >= 2 else { return [] }
-        let a = corners[0], b = corners[1]
-        let d = toUCSVector(b - a)
+        let a = corners[0]
+        var d = toUCSVector(corners[1] - a)
+        if squareByShift { d = CADEditorView.squared(d) }
+        let b = a + fromUCSVector(d)
         return [a, a + fromUCSVector(CGPoint(x: d.x, y: 0)), b, a + fromUCSVector(CGPoint(x: 0, y: d.y))]
     }
 
@@ -5489,6 +5541,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             ignoreNextMouseUp = true
             return
         }
+        // Control-click = the context menu (like holding the right button – for a trackpad)
+        if event.modifierFlags.contains(.control) && currentTool == .select && !isBusy {
+            showContextMenu(for: event)
+            return
+        }
 
         if event.modifierFlags.contains(.command) {
             isPanning = true
@@ -5953,6 +6010,20 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         updateDynamicInput()
     }
 
+    /// Shift pressed or released: a rectangle preview switches between a square and a free rectangle
+    /// right away, without waiting for the mouse to move.
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        let shift = event.modifierFlags.contains(.shift)
+        guard shift != shiftHeld else { return }
+        shiftHeld = shift
+        let sizesRectangle = (currentTool == .rectangle && !rectangleSquare) || (drawsOutline && outlineShape == .rectangle)
+        guard sizesRectangle, !points.isEmpty else { return }
+        updateDynamicInput()
+        onPromptChanged?(prompt)
+        needsDisplay = true
+    }
+
     override func mouseExited(with event: NSEvent) {
         crosshair.point = nil
         snapTracker.hover(over: nil)
@@ -5974,6 +6045,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         if awaitingCloseAnswer {
             answerClosePrompt(false)
+            return
+        }
+        // Select with nothing in progress: holding the button opens the context menu, a short click keeps its usual job
+        if currentTool == .select && !isBusy && isRightButtonHeld() {
+            showContextMenu(for: event)
             return
         }
         // right click: confirm / cancel the step in progress; when the tool isn't waiting for anything, it ends it
@@ -6017,6 +6093,19 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 super.rightMouseDown(with: event)
             }
         }
+    }
+
+    /// Waits until the right button is released or the hold time (Settings › Cursor & Mouse) has passed;
+    /// true = it is still held. A shorter click finishes or repeats commands.
+    private func isRightButtonHeld() -> Bool {
+        let release = window?.nextEvent(matching: .rightMouseUp, until: Date(timeIntervalSinceNow: AppSettings.contextMenuHoldTime),
+                                        inMode: .eventTracking, dequeue: false)
+        return release == nil
+    }
+
+    private func showContextMenu(for event: NSEvent) {
+        guard let menu = onContextMenuRequested?() else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
     /// Ends the tool (back to Select); a right click or ↩ while idle then repeats it.
