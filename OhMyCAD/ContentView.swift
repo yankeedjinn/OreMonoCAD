@@ -1338,7 +1338,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         if tab.blockEdit != nil, tab === activeTab { guard ensureNoBlockEdit() else { return } }
         if tab.isEdited {
             activateTab(index)          // show the drawing we are asking about
-            guard confirmCloseActiveTab() else { return }
+            // the switch was refused (Cancel in the block edit question) – the question would be about another drawing
+            guard activeTab === tab, confirmCloseActiveTab() else { return }
         }
         guard let position = tabs.firstIndex(where: { $0 === tab }) else { return }
         // closed (saved or discarded) → the auto-save is removed
@@ -2334,7 +2335,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     /// Objects in the model, on layouts and inside blocks change their layer name (Rename Layer).
     private func moveObjects(fromLayer oldName: String, toLayer newName: String) {
+        // the objects of a block being edited too – they are written back into the block on Save Block Changes
         let contents = activeTab.allDocuments.map { $0.getAllEntities() } + activeTab.blocks.definitions.map { $0.entities }
+            + (activeTab.blockEdit.map { [$0.document.getAllEntities()] } ?? [])
         for entities in contents {
             for entity in entities {
                 if entity.layer == oldName { entity.layer = newName }
@@ -2363,7 +2366,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             statusBar.showMessage("Layer 0 cannot be deleted.")
             return
         }
-        let count = activeTab.allDocuments.reduce(0) { $0 + $1.getAllEntities().filter { $0.layer == name }.count }
+        let documents = activeTab.allDocuments + (activeTab.blockEdit.map { [$0.document] } ?? [])
+        let count = documents.reduce(0) { $0 + $1.getAllEntities().filter { $0.layer == name }.count }
         if count > 0 {
             statusBar.showMessage("Layer \(name) contains \(count) object\(count == 1 ? "" : "s") – move or delete them first.")
             return
@@ -3408,8 +3412,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let wasActive = tab.activeLayoutIndex == index
-        if wasActive { activateSpace(nil) }
+        if tab.activeLayoutIndex == index {
+            activateSpace(nil)
+            // the switch to the model was refused (Cancel in the block edit question) – the sheet stays
+            guard tab.activeLayoutIndex == nil else { return }
+        }
         tab.layouts.remove(at: index)
         if let active = tab.activeLayoutIndex, active > index { tab.activeLayoutIndex = active - 1 }
         hasUnsavedChanges = true
