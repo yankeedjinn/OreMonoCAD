@@ -2112,6 +2112,26 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func sendToBack(_ sender: Any?) { changeDrawOrder("Send to Back") { _, low, _ in low - 1 } }
     @objc func bringForward(_ sender: Any?) { changeDrawOrder("Bring Forward") { order, _, _ in order + 1 } }
     @objc func sendBackward(_ sender: Any?) { changeDrawOrder("Send Backward") { order, _, _ in order - 1 } }
+    @objc func bringAboveObject(_ sender: Any?) { changeDrawOrder(relativeTo: true) }
+    @objc func sendUnderObject(_ sender: Any?) { changeDrawOrder(relativeTo: false) }
+
+    /// Above / Under Object: the selection gets the draw order of a clicked object + 1 (above) or − 1 (under).
+    private func changeDrawOrder(relativeTo above: Bool) {
+        let name = above ? "Bring Above Object" : "Send Under Object"
+        let selected = selectionManager.getSelectedEntities(from: document.getAllEntities())
+        guard !selected.isEmpty else {
+            statusBar.showMessage("Select at least one object first.")
+            NSSound.beep()
+            return
+        }
+        let prompt = above ? "Above Object: click the object the selection goes above"
+                           : "Under Object: click the object the selection goes under"
+        editorView.pickObject(prompt: prompt, excluding: Set(selected.map { $0.id })) { [weak self] target in
+            guard let target = target else { return }
+            let value = target.drawOrder + (above ? 1 : -1)
+            self?.changeDrawOrder(name) { _, _, _ in value }
+        }
+    }
 
     /// The drawing's context menu (right button held, or Control-click): clipboard, Draw Order and selection
     /// commands of the Edit menu – the same actions, enabled the same way (validateMenuItem).
@@ -2138,6 +2158,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         add("Bring Forward", #selector(bringForward(_:)), "f", [.command, .shift, .option], in: orderMenu)
         add("Send Backward", #selector(sendBackward(_:)), "b", [.command, .shift, .option], in: orderMenu)
         add("Send to Back", #selector(sendToBack(_:)), "b", [.command, .shift], in: orderMenu)
+        orderMenu.addItem(.separator())
+        add("Above Object", #selector(bringAboveObject(_:)), in: orderMenu)
+        add("Under Object", #selector(sendUnderObject(_:)), in: orderMenu)
         menu.addItem(.separator())
         add("Select All", #selector(selectAllEntities(_:)), "a")
         add("Select Similar", #selector(selectSimilar(_:)), "a", [.command, .shift])
@@ -4187,9 +4210,52 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             updateModes()
             return
         }
+        let previous = editorView.drawingScale
         editorView.drawingScale = scale
         markSettingsChanged()
         statusBar.showMessage("Scale \(scale.title)")
+        offerHatchRescale(from: previous, to: scale)
+    }
+
+    /// After a change of the drawing scale: offers to resize the patterns of the existing hatches too, so they keep
+    /// their size on paper (line types follow the drawing scale by themselves, a hatch keeps its own scale).
+    private func offerHatchRescale(from old: DrawingScale, to new: DrawingScale) {
+        let ratio = new.factor / old.factor
+        guard ratio.isFinite, ratio > 0, abs(ratio - 1) > 1e-9 else { return }
+        // objects on locked layers stay as they are (like in changeSelection)
+        let hatches = document.getAllEntities().compactMap { $0 as? HatchEntity }.filter { !layerManager.isLayerLocked($0.layer) }
+        guard !hatches.isEmpty else { return }
+        switch AppSettings.hatchRescale {
+        case .never:
+            return
+        case .always:
+            break
+        case .ask:
+            let noun = hatches.count == 1 ? "hatch" : "\(hatches.count) hatches"
+            let alert = NSAlert()
+            alert.messageText = "Rescale the existing hatches too?"
+            alert.informativeText = "The scale changed from \(old.title) to \(new.title). The patterns of the \(noun) can follow it "
+                + "so they keep their size on paper (pattern scale × \(LineType.format(ratio))). Line types follow the scale by themselves."
+            alert.addButton(withTitle: "Rescale Hatches")
+            alert.addButton(withTitle: "Keep As They Are")
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Don't ask again (change it in Settings › Styles)"
+            let rescale = alert.runModal() == .alertFirstButtonReturn
+            if alert.suppressionButton?.state == .on {
+                AppSettings.hatchRescale = rescale ? .always : .never
+                settingsController?.refresh()
+            }
+            guard rescale else { return }
+        }
+        let rescaled = hatches.map { hatch -> CADEntity in
+            let copy = hatch.clone()
+            if let copy = copy as? HatchEntity { copy.scale = hatch.scale * ratio }
+            return copy
+        }
+        applyChange(removed: hatches, added: rescaled, actionName: "Rescale Hatches")
+        editorView.needsDisplay = true
+        refreshPanels()
+        statusBar.showMessage("Scale \(new.title) · \(hatches.count == 1 ? "1 hatch" : "\(hatches.count) hatches") rescaled")
     }
 
     /// A new custom scale (remembered for the next launch too).
@@ -4403,7 +4469,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case #selector(selectMeasureKind(_:)):
             menuItem.state = currentTool == .measure && menuItem.tag == editorView.measureKind.rawValue ? .on : .off
             return true
-        case #selector(bringToFront(_:)), #selector(sendToBack(_:)), #selector(bringForward(_:)), #selector(sendBackward(_:)):
+        case #selector(bringToFront(_:)), #selector(sendToBack(_:)), #selector(bringForward(_:)), #selector(sendBackward(_:)),
+             #selector(bringAboveObject(_:)), #selector(sendUnderObject(_:)):
             return !selectionManager.isEmpty
         case #selector(groupSelection(_:)):
             return selectionManager.count >= 2
@@ -4550,6 +4617,13 @@ extension MainViewController {
         item(orderMenu, "Bring Forward", #selector(bringForward(_:)), "f", modifiers: [.command, .shift, .option], target: self).image = symbol("square.2.layers.3d.top.filled")
         item(orderMenu, "Send Backward", #selector(sendBackward(_:)), "b", modifiers: [.command, .shift, .option], target: self).image = symbol("square.2.layers.3d.bottom.filled")
         item(orderMenu, "Send to Back", #selector(sendToBack(_:)), "b", modifiers: [.command, .shift], target: self).image = symbol("square.3.layers.3d.bottom.filled")
+        orderMenu.addItem(.separator())
+        let aboveObject = item(orderMenu, "Above Object", #selector(bringAboveObject(_:)), "", target: self)
+        aboveObject.toolTip = "Puts the selection just above an object you click"
+        aboveObject.image = symbol("arrow.up.square")
+        let underObject = item(orderMenu, "Under Object", #selector(sendUnderObject(_:)), "", target: self)
+        underObject.toolTip = "Puts the selection just under an object you click"
+        underObject.image = symbol("arrow.down.square")
         editMenu.addItem(.separator())
         let group = item(editMenu, "Group", #selector(groupSelection(_:)), "g", modifiers: [.command, .option], target: self)
         group.toolTip = "The selected objects become one group – a click on one of them selects them all"

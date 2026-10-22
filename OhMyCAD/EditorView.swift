@@ -1554,7 +1554,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     var isBusy: Bool {
         return !points.isEmpty || !picked.isEmpty || selectionBoxStart != nil || !fence.isEmpty || dragMoveBase != nil
             || activeGrip != nil || pendingMirror != nil || axisPick != nil || pasteRequest != nil
-            || dynamicInput.hasLockedValue || !edges.isEmpty
+            || objectPick != nil || dynamicInput.hasLockedValue || !edges.isEmpty
     }
 
     private var worldTolerance: CGFloat {
@@ -1649,6 +1649,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     func cancelCurrentOperation() {
         cancelPick()
+        if let request = objectPick {
+            objectPick = nil
+            request.completion(nil)
+        }
         if let request = axisPick {
             axisPick = nil
             request.completion(nil)
@@ -1668,6 +1672,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     var prompt: String {
         if let pick = pickRequest {
             return pick.first == nil ? pick.prompt + " · Esc = cancel" : "Click the opposite corner · Esc = cancel"
+        }
+        if let pick = objectPick {
+            return pick.prompt + " · Esc = cancel"
         }
         if let pick = axisPick {
             if pick.byObject { return pick.prompt + " · Esc = cancel" }
@@ -2302,6 +2309,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         cancelCurrentOperation()
         singlePointPick = singlePoint
         axisPick = (prompt, nil, byObject, completion)
+        window?.makeFirstResponder(self)
+        stateChanged()
+    }
+
+    // MARK: Picking one object (Draw Order › Above / Under Object)
+
+    private var objectPick: (prompt: String, excluded: Set<UUID>, completion: (CADEntity?) -> Void)?
+
+    /// Waits for a click on one object (not one of `excluded`, not on a locked layer). Esc = completion(nil).
+    func pickObject(prompt: String, excluding excluded: Set<UUID> = [], completion: @escaping (CADEntity?) -> Void) {
+        cancelCurrentOperation()
+        objectPick = (prompt, excluded, completion)
         window?.makeFirstResponder(self)
         stateChanged()
     }
@@ -5611,6 +5630,21 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // Above / Under Object: the click chooses the object
+        if let request = objectPick {
+            let world = viewport.screenToWorld(screenPoint)
+            guard let target = entity(at: world, where: { !request.excluded.contains($0.id) }) else {
+                onMessage?("Click an object that is not selected.")
+                NSSound.beep()
+                return
+            }
+            objectPick = nil
+            ignoreNextMouseUp = true
+            stateChanged()
+            request.completion(target)
+            return
+        }
+
         // rotating the drawing coordinates: an object, or two points
         if let request = axisPick {
             if request.byObject {
@@ -6380,6 +6414,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 answerMirror(deleteOriginals: true)
             } else if key == "n" || CADEditorView.isConfirmKey(event) {
                 answerMirror(deleteOriginals: false)
+            } else {
+                NSSound.beep()
+            }
+            return
+        }
+
+        if objectPick != nil {
+            if event.keyCode == 53 {
+                let request = objectPick
+                objectPick = nil
+                stateChanged()
+                request?.completion(nil)
             } else {
                 NSSound.beep()
             }

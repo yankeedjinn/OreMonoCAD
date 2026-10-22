@@ -194,6 +194,24 @@ enum AppSettings {
         }
     }
 
+    /// What happens to the existing hatches when the drawing scale changes.
+    enum HatchRescale: String, CaseIterable {
+        case ask, always, never
+
+        var title: String {
+            switch self {
+            case .ask: return "Ask"
+            case .always: return "Always rescale them"
+            case .never: return "Keep them as they are"
+            }
+        }
+    }
+
+    static var hatchRescale: HatchRescale {
+        get { return defaults.string(forKey: "OhMyCAD.hatchRescale").flatMap { HatchRescale(rawValue: $0) } ?? .ask }
+        set { defaults.set(newValue.rawValue, forKey: "OhMyCAD.hatchRescale") }
+    }
+
     /// Delete custom values (grid, angles, scales) and the saved panel layout.
     static func resetRememberedValues() {
         for key in ["OhMyCAD.customGridSizes", "OhMyCAD.customPolarSteps", "OhMyCAD.trayWidth", "OhMyCAD.traySplit",
@@ -222,6 +240,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let dimStyleLabel = NSTextField(labelWithString: "")
     /// The value box option – also changed by a key (⌥6, F12), so it is refreshed when shown.
     private var valueBoxCheck: NSButton?
+    private let hatchRescalePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private var actions: [MenuAction] = []
 
     init() {
@@ -246,6 +265,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func refresh() {
         valueBoxCheck?.state = AppSettings.valueBoxAlways ? .on : .off
+        hatchRescalePopup.selectItem(at: AppSettings.HatchRescale.allCases.firstIndex(of: AppSettings.hatchRescale) ?? 0)
         textStyleLabel.stringValue = textStyleSummary?() ?? ""
         dimStyleLabel.stringValue = "\(AppSettings.dimArrowStyle.title) · text \(LineType.format(AppSettings.dimTextHeightMM)) mm"
             + " · ends \(LineType.format(AppSettings.dimArrowSizeMM)) mm on paper · \(AppSettings.dimDecimals) decimal\(AppSettings.dimDecimals == 1 ? "" : "s")"
@@ -381,7 +401,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             note("Removes your custom grid sizes and polar steps, the size of the right panel and the last export settings. Drawings are not affected.")
         ])
 
-        // Styles (text and dimensions)
+        // Styles (text, dimensions and hatches)
         let editStyle = NSButton(title: "Text Style…", target: nil, action: nil)
         let styleAction = MenuAction { [weak self] in
             self?.onEditTextStyle?()
@@ -400,6 +420,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         editDimStyle.target = dimStyleAction
         editDimStyle.action = #selector(MenuAction.run(_:))
         dimStyleLabel.font = NSFont.systemFont(ofSize: 12)
+        // hatches: what to do with the existing ones when the drawing scale changes
+        hatchRescalePopup.removeAllItems()
+        hatchRescalePopup.addItems(withTitles: AppSettings.HatchRescale.allCases.map { $0.title })
+        hatchRescalePopup.selectItem(at: AppSettings.HatchRescale.allCases.firstIndex(of: AppSettings.hatchRescale) ?? 0)
+        hatchRescalePopup.toolTip = "Rescaling keeps the size of the patterns on paper; it can be undone (⌘Z)"
+        let hatchRescaleAction = MenuAction { [weak self] in
+            guard let popup = self?.hatchRescalePopup else { return }
+            let choices = AppSettings.HatchRescale.allCases
+            AppSettings.hatchRescale = choices[max(0, min(popup.indexOfSelectedItem, choices.count - 1))]
+        }
+        actions.append(hatchRescaleAction)
+        hatchRescalePopup.target = hatchRescaleAction
+        hatchRescalePopup.action = #selector(MenuAction.run(_:))
+        let hatchRescaleRow = NSStackView(views: [NSTextField(labelWithString: "Existing hatches when the drawing scale changes:"),
+                                                  hatchRescalePopup])
+        hatchRescaleRow.spacing = 8
         let styles = pane([
             NSTextField(labelWithString: "Default style of new text:"),
             textStyleLabel,
@@ -409,7 +445,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             NSTextField(labelWithString: "Default style of new dimensions:"),
             dimStyleLabel,
             editDimStyle,
-            note("Used by all dimension tools. Sizes are on paper and follow the drawing scale. Both styles are also in the Format menu.")
+            note("Used by all dimension tools. Sizes are on paper and follow the drawing scale. Both styles are also in the Format menu."),
+            separator(),
+            hatchRescaleRow,
+            note("A new hatch takes the drawing scale (or the scale set in Hatch › Angle & Scale…). Line types follow a change of the drawing scale by themselves; hatches keep their own scale unless they are rescaled.")
         ])
 
         // Cursor
