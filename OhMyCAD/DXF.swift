@@ -33,7 +33,8 @@ class DXFReader {
         }
 
         func double(_ code: Int) -> CGFloat? {
-            guard let s = string(code), let d = Double(s) else { return nil }
+            // “nan”, “inf” or an overflowing number (a damaged file) count as missing
+            guard let s = string(code), let d = Double(s), d.isFinite else { return nil }
             return CGFloat(d)
         }
 
@@ -48,8 +49,8 @@ class DXFReader {
             var pendingX: CGFloat?
             for pair in pairs {
                 if pair.code == xCode {
-                    pendingX = Double(pair.value).map { CGFloat($0) }
-                } else if pair.code == yCode, let x = pendingX, let y = Double(pair.value) {
+                    pendingX = Double(pair.value).flatMap { $0.isFinite ? CGFloat($0) : nil }
+                } else if pair.code == yCode, let x = pendingX, let y = Double(pair.value), y.isFinite {
                     result.append(CGPoint(x: x, y: CGFloat(y)))
                     pendingX = nil
                 }
@@ -333,6 +334,7 @@ class DXFReader {
                 guard axis.length > 0, let ratio = record.double(40), ratio > 0 else { continue }
                 var start = record.double(41) ?? 0
                 var end = record.double(42) ?? 2 * .pi
+                guard start.isFinite, end.isFinite else { continue }
                 // center and axis are in world coordinates; an extrusion pointing down (z = -1)
                 // only makes the parameters run clockwise
                 if (record.double(230) ?? 1) < 0 {
@@ -425,7 +427,8 @@ class DXFReader {
                                                position: CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0),
                                                layer: record.string(8) ?? "0", color: entityColor(record))
                 let sx = record.double(41) ?? 1
-                let sy = record.double(42) ?? sx
+                // a missing 42 is 1 (DXF default), not the X scale: “41 = −1” alone mirrors the block in X
+                let sy = record.double(42) ?? 1
                 reference.scale = abs(sx) > 0 ? abs(sx) : 1
                 reference.mirrored = sx * sy < 0
                 var rotation = (record.double(50) ?? 0) * .pi / 180
@@ -694,13 +697,15 @@ extension DXFReader {
         var i: Int
 
         mutating func take(_ code: Int) -> CGFloat? {
-            guard i < pairs.count, pairs[i].code == code, let d = Double(pairs[i].value) else { return nil }
+            guard i < pairs.count, pairs[i].code == code, let d = Double(pairs[i].value), d.isFinite else { return nil }
             i += 1
             return CGFloat(d)
         }
 
         mutating func takeInt(_ code: Int) -> Int? {
-            return take(code).map { Int($0) }
+            // a count from a damaged file can be any number – Int() of a huge one or of “nan” would stop the app,
+            // and no count can be larger than the number of values in the record
+            return take(code).flatMap { $0.isFinite && abs($0) <= CGFloat(pairs.count) ? Int($0) : nil }
         }
 
         mutating func point(_ x: Int, _ y: Int) -> CGPoint? {
@@ -713,6 +718,7 @@ extension DXFReader {
 
     /// Arc points from the start angle with the given sweep (negative = clockwise).
     private static func arcPoints(_ c: CGPoint, _ r: CGFloat, _ start: CGFloat, _ sweep: CGFloat) -> [CGPoint] {
+        guard start.isFinite, sweep.isFinite, abs(sweep) <= 4 * .pi else { return [] }
         let steps = max(2, Int(abs(sweep) / (.pi / 36)))
         return (0...steps).map { k in
             let a = start + sweep * CGFloat(k) / CGFloat(steps)

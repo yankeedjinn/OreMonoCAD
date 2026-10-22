@@ -4020,6 +4020,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     /// Document settings: units, grid and angle snapping.
     @objc func documentSettings(_ sender: Any?) {
+        // Convert Units changes the model and the blocks – not while a block is being edited
+        // (only the edited block would be converted, and its own Undo ends with the edit)
+        guard ensureNoBlockEdit() else { return }
         // units and grid belong to the model – from a layout it first switches to the model
         if activeTab.activeLayout != nil {
             activateSpace(nil)

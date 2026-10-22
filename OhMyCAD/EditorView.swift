@@ -1283,7 +1283,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         guard paste.entities.count > limit else { return }
         var box = CGRect.null
-        for entity in paste.entities where DrawingSafety.isDrawable(entity.boundingBox()) { box = box.union(entity.boundingBox()) }
+        for entity in paste.entities where DrawingSafety.isValidWorld(entity.boundingBox()) { box = box.union(entity.boundingBox()) }
         let outline = box.applying(shifted)
         guard DrawingSafety.isDrawable(outline) else { return }
         context.saveGState()
@@ -2233,6 +2233,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         drawBlockEditBackground(in: context, transform: transform, visibleWorld: visibleWorld)
         let editingText = inlineText?.editing
         let selection = selectionManager
+        // objects inside blocks on their own layers: that layer's look, hidden layers left out
+        BlockReference.innerStyle = { [unowned self] entity in
+            if let layers = self.layerManager, !layers.isLayerVisible(entity.layer) { return nil }
+            return self.style(for: entity)
+        }
+        defer { BlockReference.innerStyle = nil }
         for index in renderList.indices {
             let box = renderBoxes[index]
             guard CADEditorView.overlaps(box, visibleWorld) else { continue }
@@ -2653,7 +2659,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             switch currentTool {
             case .trim:
                 if let target = entity(at: worldPoint, where: { EditOperations.isTrimmable($0) }),
-                   let detail = EditOperations.trimAny(target, at: worldPoint, edges: cuttingEdges) {
+                   let detail = EditOperations.trimAny(target, at: worldPoint, edges: trimEdges(for: target)) {
                     hoverRemoved = detail.removed
                 }
             case .extend, .powerTrim:
@@ -3933,6 +3939,19 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         return edges.isEmpty ? visibleEntities : edges
     }
 
+    /// The cutting edges that can cross the object being trimmed: without chosen edges only the visible objects
+    /// whose (remembered) bounds touch its bounds – Trim then stays quick under the cursor in a big drawing.
+    private func trimEdges(for target: CADEntity) -> [CADEntity] {
+        let box = target.boundingBox()
+        guard edges.isEmpty, !box.isNull, box.minX.isFinite, box.maxX.isFinite, box.minY.isFinite, box.maxY.isFinite else {
+            return cuttingEdges
+        }
+        refreshRenderList()
+        let margin = max(box.width, box.height, 1) * 1e-9
+        let area = box.insetBy(dx: -margin, dy: -margin)
+        return renderList.indices.filter { CADEditorView.overlaps(renderBoxes[$0], area) }.map { renderList[$0] }
+    }
+
     /// A trimmed or extended cutting edge stays a cutting edge in its new form.
     private func replaceEdge(_ old: CADEntity, with new: [CADEntity]) {
         guard let index = edges.firstIndex(where: { $0 === old }) else { return }
@@ -3944,7 +3963,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             onMessage?("No object here.")
             return
         }
-        if let pieces = EditOperations.trimAny(target, at: point, edges: cuttingEdges)?.kept {
+        if let pieces = EditOperations.trimAny(target, at: point, edges: trimEdges(for: target))?.kept {
             onCommit?([target], pieces, "Trim")
             replaceEdge(target, with: pieces)
         } else {

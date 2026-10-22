@@ -607,7 +607,7 @@ enum NativeFormat {
         var created: [CADEntity?] = []
         for record in records {
             if let entity = NativeEntityCoder.entity(from: record),
-               entity is ConstructionLine || DrawingSafety.isDrawable(entity.boundingBox()) {
+               entity is ConstructionLine || DrawingSafety.isValidWorld(entity.boundingBox()) {
                 created.append(entity)
             } else {
                 created.append(nil)

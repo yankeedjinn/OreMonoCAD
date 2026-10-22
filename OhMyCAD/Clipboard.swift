@@ -154,7 +154,7 @@ final class DrawingClipboard {
         var box = CGRect.null
         for entity in entities {
             let bounds = entity.boundingBox()
-            guard DrawingSafety.isDrawable(bounds) else { continue }
+            guard DrawingSafety.isValidWorld(bounds) else { continue }
             box = box.union(bounds)
         }
         if !box.isNull { return CGPoint(x: box.minX, y: box.minY) }

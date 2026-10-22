@@ -2082,4 +2082,15 @@ enum DrawingSafety {
     static func isFinite(_ p: CGPoint) -> Bool {
         return p.x.isFinite && p.y.isFinite && abs(p.x) < maxCoordinate && abs(p.y) < maxCoordinate
     }
+
+    /// The largest coordinate a drawing can hold. `maxCoordinate` is a limit for the screen only – drawing coordinates
+    /// are much larger in S-JTSK kept in mm or cm (about −1.3e9 mm), so they are checked against this one.
+    static let maxWorldCoordinate: CGFloat = 1e13
+
+    /// Valid bounds of an object in the drawing: finite numbers within `maxWorldCoordinate`.
+    static func isValidWorld(_ box: CGRect) -> Bool {
+        guard !box.isNull, box.minX.isFinite, box.minY.isFinite, box.maxX.isFinite, box.maxY.isFinite else { return false }
+        return abs(box.minX) < maxWorldCoordinate && abs(box.maxX) < maxWorldCoordinate
+            && abs(box.minY) < maxWorldCoordinate && abs(box.maxY) < maxWorldCoordinate
+    }
 }

@@ -32,11 +32,23 @@ enum EditOperations {
                 }
             }
         }
-        // a polyline or spline that crosses itself is cut there too (neighbouring segments only share a vertex)
-        let count = own.count
-        for i in 0..<count {
-            for j in (i + 2)..<max(count, i + 2) where !(curve.isClosedCurve && i == 0 && j == count - 1) {
-                guard mayMeet(ownBoxes[i], ownBoxes[j]) else { continue }
+        // a polyline or spline that crosses itself is cut there too (neighbouring segments only share a vertex;
+        // zero-length segments of repeated vertices are left out, so the segments around them count as neighbours)
+        let tiny = max(curve.curveLength, 1) * 1e-12
+        let live = own.indices.filter { own[$0].length > tiny }
+        let count = live.count
+        var position: [Int: Int] = [:]
+        for (x, i) in live.enumerated() { position[i] = x }
+        // the segments sorted by their left edge: each one is compared only with those that reach into it in X
+        // (a dense polyline of thousands of segments, checked on every mouse move)
+        let byLeft = live.sorted { ownBoxes[$0].minX < ownBoxes[$1].minX }
+        let margin = max(curveBox.width, curveBox.height, 1) * 1e-9
+        for (index, i) in byLeft.enumerated() {
+            for j in byLeft[(index + 1)...] {
+                if ownBoxes[j].minX > ownBoxes[i].maxX + margin { break }
+                guard let x = position[i], let y = position[j], abs(x - y) >= 2,
+                      !(curve.isClosedCurve && min(x, y) == 0 && max(x, y) == count - 1),
+                      mayMeet(ownBoxes[i], ownBoxes[j]) else { continue }
                 params.append(contentsOf: own[i].intersections(with: own[j]).map { $0.param })
                 params.append(contentsOf: own[j].intersections(with: own[i]).map { $0.param })
             }
@@ -52,7 +64,7 @@ enum EditOperations {
 
     /// Can two objects with these bounding boxes touch? Boxes that are not finite (construction lines) always can.
     static func mayMeet(_ a: CGRect, _ b: CGRect) -> Bool {
-        guard DrawingSafety.isDrawable(a), DrawingSafety.isDrawable(b) else { return true }
+        guard DrawingSafety.isValidWorld(a), DrawingSafety.isValidWorld(b) else { return true }
         let margin = max(a.width, a.height, b.width, b.height, 1) * 1e-9
         // compared by hand: CGRect.intersects is false for a flat box (a horizontal or vertical segment)
         return a.minX <= b.maxX + margin && b.minX <= a.maxX + margin && a.minY <= b.maxY + margin && b.minY <= a.maxY + margin
@@ -216,21 +228,22 @@ enum EditOperations {
         let reach = ConstructionLine.reach
         let start = xline.startParameter
         guard let own = xline.primitives().first else { return nil }
-        // intersections as a distance from the line's point along the line's direction
+        // intersections as a distance from the line's point along the line's direction (measured from the point itself –
+        // the far ends of the line lie 1e7 away, which would round neighbouring cuts together)
         var cuts: [CGFloat] = []
+        let d = xline.direction
         for edge in edges where edge !== xline {
             for b in edge.primitives() {
-                cuts.append(contentsOf: own.intersections(with: b).map { $0.param + start })
+                cuts.append(contentsOf: own.intersections(with: b).map { ($0.point - xline.point).dot(d) })
             }
         }
-        let tolerance: CGFloat = 1e-7 * max(1, abs(start))
+        let tolerance: CGFloat = 1e-12 * reach
         // ray: a cut at its origin divides nothing
         cuts = cuts.filter { $0.isFinite && $0 > start + tolerance && $0 < reach - tolerance }.sorted()
         var unique: [CGFloat] = []
         for c in cuts where unique.last.map({ c - $0 > tolerance }) ?? true { unique.append(c) }
         guard !unique.isEmpty else { return nil }
 
-        let d = xline.direction
         let t = (click - xline.point).dot(d)
         // interval containing the click: lower bound (nil = start of the line), upper bound (nil = infinity)
         let lower = unique.last(where: { $0 < t })
@@ -353,7 +366,9 @@ enum EditOperations {
 
         var extent = entity.boundingBox()
         for edge in boundaries { extent = extent.union(edge.boundingBox()) }
-        let reach = (hypot(extent.width, extent.height) + 1) * 4
+        var reach = (hypot(extent.width, extent.height) + 1) * 4
+        // a construction line has no bounds – it can be crossed far beyond all the other objects
+        if boundaries.contains(where: { $0 is ConstructionLine && $0 !== entity }) { reach = max(reach, ConstructionLine.reach) }
 
         /// The nearest intersection of a ray from point `from` in the direction `direction`.
         func rayHit(from: CGPoint, direction: CGPoint) -> CGPoint? {
@@ -984,11 +999,15 @@ enum EditOperations {
         }
         result?.lineWeight = entity.lineWeight
         result?.lineTypeScale = entity.lineTypeScale
+        // the copy lies at the same height as its original (above or below hatches the same way)
+        result?.drawOrder = entity.drawOrder
         return result
     }
 
     /// Offset of a polyline with arc segments: straight segments are shifted, arcs change their radius.
-    /// Adjacent straight segments are joined at their intersection, otherwise the ends are connected by a straight segment.
+    /// Adjacent straight segments are joined at their intersection. Where an arc meets another piece at a corner,
+    /// on the inner side both pieces end where they cross, on the outer side an arc around the corner fills the gap
+    /// (so every point keeps the offset distance).
     private static func offsetWithArcs(_ polyline: Polyline, distance: CGFloat, side: CGPoint) -> Polyline? {
         let primitives = polyline.primitives()
         guard !primitives.isEmpty else { return nil }
@@ -1010,7 +1029,11 @@ enum EditOperations {
         }
         let d = onLeft ? distance : -distance
 
-        struct Piece { var start: CGPoint; var end: CGPoint; var bulge: CGFloat; var isLine: Bool }
+        /// A shifted piece; an arc also keeps its circle and direction (to move its ends along it).
+        struct Piece {
+            var start: CGPoint, end: CGPoint, bulge: CGFloat, isLine: Bool
+            var center = CGPoint.zero, radius: CGFloat = 0, ccw = true
+        }
         var pieces: [Piece] = []
         for (index, primitive) in primitives.enumerated() {
             switch primitive {
@@ -1022,29 +1045,96 @@ enum EditOperations {
                 guard radius > Geometry.epsilon else { return nil }     // offset larger than the arc radius
                 pieces.append(Piece(start: Geometry.pointOnCircle(c, radius, start),
                                     end: Geometry.pointOnCircle(c, radius, start + sweep),
-                                    bulge: polyline.bulge(at: index), isLine: false))
+                                    bulge: polyline.bulge(at: index), isLine: false, center: c, radius: radius, ccw: sweep > 0))
             }
+        }
+
+        /// The direction of the original curve at the start or end of a piece.
+        func tangent(_ primitive: Primitive, atEnd: Bool) -> CGPoint {
+            switch primitive {
+            case let .segment(a, b, _):
+                return (b - a).normalized
+            case let .arc(_, _, start, sweep, _):
+                let angle = atEnd ? start + sweep : start
+                let t = CGPoint(x: -sin(angle), y: cos(angle))
+                return sweep >= 0 ? t : t * -1
+            }
+        }
+        /// Where two pieces cross (a line taken as infinite, an arc as its whole circle).
+        func crossings(_ p: Piece, _ q: Piece) -> [CGPoint] {
+            func lineCircle(_ line: Piece, _ arc: Piece) -> [CGPoint] {
+                let u = (line.end - line.start).normalized
+                guard u != .zero else { return [] }
+                let foot = line.start + u * (arc.center - line.start).dot(u)
+                let h2 = arc.radius * arc.radius - Geometry.distance(foot, arc.center) * Geometry.distance(foot, arc.center)
+                guard h2 >= 0 else { return [] }
+                let h = sqrt(h2)
+                return [foot + u * h, foot - u * h]
+            }
+            switch (p.isLine, q.isLine) {
+            case (true, true): return Geometry.lineIntersection(p.start, p.end, q.start, q.end).map { [$0] } ?? []
+            case (true, false): return lineCircle(p, q)
+            case (false, true): return lineCircle(q, p)
+            case (false, false): return Geometry.circleCircleIntersections(p.center, p.radius, q.center, q.radius)
+            }
+        }
+        /// Does the point lie on the piece (between its ends)?
+        func lies(_ point: CGPoint, on piece: Piece) -> Bool {
+            if piece.isLine {
+                let t = Geometry.projectionParameter(of: point, ontoSegmentFrom: piece.start, to: piece.end)
+                return t >= -1e-9 && t <= 1 + 1e-9
+            }
+            let a1 = Geometry.angle(from: piece.center, to: piece.start), a2 = Geometry.angle(from: piece.center, to: piece.end)
+            let at = Geometry.angle(from: piece.center, to: point)
+            return piece.ccw ? Geometry.ccwDelta(from: a1, to: at) <= Geometry.ccwDelta(from: a1, to: a2) + 1e-9
+                             : Geometry.ccwDelta(from: at, to: a1) <= Geometry.ccwDelta(from: a2, to: a1) + 1e-9
+        }
+        /// An arc piece whose end moved along its circle gets the bulge of its new sweep.
+        func rebulge(_ piece: inout Piece) {
+            guard !piece.isLine else { return }
+            let a1 = Geometry.angle(from: piece.center, to: piece.start), a2 = Geometry.angle(from: piece.center, to: piece.end)
+            let sweep = piece.ccw ? Geometry.ccwDelta(from: a1, to: a2) : -Geometry.ccwDelta(from: a2, to: a1)
+            piece.bulge = Polyline.bulge(forSweep: sweep)
         }
 
         let closed = polyline.isClosedCurve
         let count = pieces.count
         let tolerance = max(distance, 1) * 1e-9
+        /// Bulge of the piece that closes the gap after piece k (an arc around an outer corner; nil = a straight one).
+        var gapBulges: [Int: CGFloat] = [:]
         for k in 0..<(closed ? count : count - 1) {
             let m = (k + 1) % count
-            guard Geometry.distance(pieces[k].end, pieces[m].start) > tolerance,
-                  pieces[k].isLine, pieces[m].isLine,
-                  let hit = Geometry.lineIntersection(pieces[k].start, pieces[k].end, pieces[m].start, pieces[m].end),
-                  Geometry.distance(hit, polyline.vertices[m % polyline.vertices.count]) <= abs(d) * 4 else { continue }
-            pieces[k].end = hit
-            pieces[m].start = hit
+            guard Geometry.distance(pieces[k].end, pieces[m].start) > tolerance else { continue }
+            let vertex = polyline.vertices[m % polyline.vertices.count]
+            if pieces[k].isLine && pieces[m].isLine {
+                guard let hit = Geometry.lineIntersection(pieces[k].start, pieces[k].end, pieces[m].start, pieces[m].end),
+                      Geometry.distance(hit, vertex) <= abs(d) * 4 else { continue }
+                pieces[k].end = hit
+                pieces[m].start = hit
+                continue
+            }
+            let turn = tangent(primitives[k], atEnd: true).cross(tangent(primitives[m], atEnd: false))
+            if turn * d > 0 {
+                // inner corner: the pieces overlap – both end where they cross
+                let hits = crossings(pieces[k], pieces[m]).filter { lies($0, on: pieces[k]) && lies($0, on: pieces[m]) }
+                guard let hit = hits.min(by: { Geometry.distance($0, vertex) < Geometry.distance($1, vertex) }) else { continue }
+                pieces[k].end = hit
+                pieces[m].start = hit
+                rebulge(&pieces[k])
+                rebulge(&pieces[m])
+            } else {
+                // outer corner: an arc of the offset distance around the corner
+                let u1 = pieces[k].end - vertex, u2 = pieces[m].start - vertex
+                gapBulges[k] = Polyline.bulge(forSweep: atan2(u1.cross(u2), u1.dot(u2)))
+            }
         }
 
         var vertices: [CGPoint] = []
         var bulges: [CGFloat] = []
-        for piece in pieces {
+        for (index, piece) in pieces.enumerated() {
             if let last = vertices.last {
                 if Geometry.distance(last, piece.start) > tolerance {
-                    bulges.append(0)                 // connection with a straight segment
+                    bulges.append(gapBulges[index - 1] ?? 0)       // connection: an arc around a corner or a straight segment
                     vertices.append(piece.start)
                 }
             } else {
@@ -1057,7 +1147,7 @@ enum EditOperations {
             if let first = vertices.first, let last = vertices.last, Geometry.distance(first, last) <= tolerance {
                 vertices.removeLast()
             } else {
-                bulges.append(0)
+                bulges.append(gapBulges[count - 1] ?? 0)
             }
         } else {
             bulges.append(0)
@@ -1222,6 +1312,11 @@ enum Measure {
             return (hatch.area, perimeter, hatch.loops)
         case let viewport as ViewportEntity:
             return (viewport.rect.width * viewport.rect.height, 2 * (viewport.rect.width + viewport.rect.height), [viewport.corners])
+        case let polyline as Polyline where polyline.isClosedCurve:
+            // exact: the polygon of the vertices plus the circular segments of the arcs (the outline is only for the picture)
+            let points = outline(of: polyline.primitives())
+            guard points.count >= 3 else { return nil }
+            return (abs(exactArea(of: polyline)), polyline.curveLength, [points])
         case let curve as CurveEntity where curve.isClosedCurve:
             let points = outline(of: curve.primitives())
             guard points.count >= 3 else { return nil }
@@ -1229,6 +1324,18 @@ enum Measure {
         default:
             return nil
         }
+    }
+
+    /// Signed area of a closed polyline: the vertex polygon and, for each arc segment, the circular segment
+    /// between its chord and the arc (r²/2 · (θ − sin θ), θ signed like the bulge).
+    static func exactArea(of polyline: Polyline) -> CGFloat {
+        var area = HatchEntity.signedArea(polyline.vertices)
+        for i in 0..<polyline.segmentCount {
+            let (a, b) = polyline.segmentEnds(i)
+            guard let arc = Polyline.arcGeometry(from: a, to: b, bulge: polyline.bulge(at: i)) else { continue }
+            area += arc.radius * arc.radius / 2 * (arc.sweep - sin(arc.sweep))
+        }
+        return area
     }
 
     /// Area of a region with islands (the first loop is the outer one).

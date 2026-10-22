@@ -80,7 +80,21 @@ class CADDocument {
     }
 
     /// Removes `removed` and inserts `added` at the position of the first removed entity (keeps the draw order).
+    /// One for one (Move, Rotate, Properties… and their Undo): each new object takes the place of its original,
+    /// so objects of the same draw order keep lying over and under each other as before.
     func replace(_ removed: [CADEntity], with added: [CADEntity]) {
+        if removed.count == added.count, removed.count > 1,
+           removed.allSatisfy({ entities[$0.id] != nil }), added.allSatisfy({ entities[$0.id] == nil }),
+           Set(added.map { $0.id }).count == added.count {
+            var slot: [UUID: UUID] = [:]
+            for (old, new) in zip(removed, added) { slot[old.id] = new.id }
+            for old in removed { entities.removeValue(forKey: old.id) }
+            for new in added { entities[new.id] = new }
+            entityOrder = entityOrder.map { slot[$0] ?? $0 }
+            revision += 1
+            onEntitiesChanged?()
+            return
+        }
         let removedIds = Set(removed.map { $0.id }).filter { entities[$0] != nil }
         for id in removedIds { entities.removeValue(forKey: id) }
         // one pass over the order – large edits (Convert Units, Explode) stay fast

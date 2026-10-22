@@ -274,6 +274,12 @@ enum PlotRenderer {
 
         context.saveGState()
         context.clip(to: plan.printable.insetBy(dx: -0.5, dy: -0.5))
+        // objects inside blocks on their own layers: that layer's plot style; hidden or not plotted layers are left out
+        BlockReference.innerStyle = { entity in
+            guard layerManager.isLayerPrintable(entity.layer) else { return nil }
+            return style(entity, patternPointsPerMM: patternPointsPerMM)
+        }
+        defer { BlockReference.innerStyle = nil }
 
         if let layout = source.layout {
             // viewports: the model scaled down into their rectangles (line types in paper mm)

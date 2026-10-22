@@ -205,7 +205,7 @@ enum ViewportDrawing {
     static func drawContents(of viewport: ViewportEntity, center: CGPoint? = nil,
                              model: [CADEntity], layerManager: LayerManager, mmPerUnit: CGFloat,
                              paperTransform: CGAffineTransform, in context: CGContext, printing: Bool,
-                             style: (CADEntity) -> StrokeStyle) {
+                             style: @escaping (CADEntity) -> StrokeStyle) {
         let clip = viewport.makePath()
         var t = paperTransform
         guard let clipPath = clip.copy(using: &t), DrawingSafety.isDrawable(clipPath.boundingBoxOfPath) else { return }
@@ -220,6 +220,14 @@ enum ViewportDrawing {
         context.saveGState()
         context.addPath(clipPath)
         context.clip()
+        // objects inside blocks follow their own layers too (hidden in this viewport = left out)
+        let previousInner = BlockReference.innerStyle
+        BlockReference.innerStyle = { entity in
+            guard !viewport.frozenLayers.contains(entity.layer),
+                  printing ? layerManager.isLayerPrintable(entity.layer) : layerManager.isLayerVisible(entity.layer) else { return nil }
+            return style(entity)
+        }
+        defer { BlockReference.innerStyle = previousInner }
         for entity in DrawOrder.sorted(shown) { entity.draw(in: context, transform: transform, style: style(entity)) }
         context.restoreGState()
     }
@@ -611,6 +619,11 @@ final class BlockReference: CADEntity {
     /// Drawn highlighted (selection) – internal colors are not used then.
     static var highlightDrawing = false
 
+    /// The style of an object inside a block that lies on its own layer (not on layer 0), as in AutoCAD:
+    /// its layer's color, linetype and lineweight; nil = the layer is hidden (or not plotted) and the object is left out.
+    /// Set by whoever draws the drawing (screen, viewport, plot); without it everything inside takes the block's style.
+    static var innerStyle: ((CADEntity) -> StrokeStyle?)?
+
     private var cache: (version: Int, entities: [CADEntity])?
 
     init(definition: BlockDefinition, position: CGPoint, layer: String = "0", color: NSColor? = nil) {
@@ -682,8 +695,14 @@ final class BlockReference: CADEntity {
         }
         for entity in entities {
             var s = style
-            // an object with its own color keeps it (except for selection highlighting)
-            if let own = entity.color, !BlockReference.highlightDrawing { s.color = own }
+            if !BlockReference.highlightDrawing, entity.layer != "0", let inner = BlockReference.innerStyle {
+                // an object on its own layer: that layer's look, or nothing when the layer is hidden
+                guard let own = inner(entity) else { continue }
+                s = own
+            } else if let own = entity.color, !BlockReference.highlightDrawing {
+                // an object with its own color keeps it (except for selection highlighting)
+                s.color = own
+            }
             entity.draw(in: context, transform: transform, style: s)
         }
     }

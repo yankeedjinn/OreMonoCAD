@@ -12,8 +12,11 @@ import Cocoa
 enum RoomLabels {
     /// Gaps up to this size (mm on paper) are bridged when looking for the outline of a room.
     static let gapMM: CGFloat = 0.5
-    /// Max. deviation when arcs are replaced with segments (mm on paper).
-    static let flatnessMM: CGFloat = 0.05
+    /// Max. deviation when arcs are replaced with segments (mm on paper) – small enough that a curved wall
+    /// changes the area by less than 0.01 m² (0.05 mm made a room with a 3 m round bay 0.03 m² smaller at 1:100).
+    static let flatnessMM: CGFloat = 0.002
+    /// Without a known outline (e.g. just opened) the room of a label is looked for this far around it (real mm).
+    static let searchRadiusMM: CGFloat = 100_000
     /// The line with the area ends with this unit.
     static let unit = "m²"
 
@@ -94,7 +97,7 @@ enum RoomLabels {
         var changedBoxes: [CGRect] = []
         for entity in removed + added where isBoundary(entity) {
             let box = entity.boundingBox()
-            if DrawingSafety.isDrawable(box) { changedBoxes.append(box) }
+            if DrawingSafety.isValidWorld(box) { changedBoxes.append(box) }
         }
         let addedIDs = Set(added.map { $0.id })
         let affected = labels.filter { label in
@@ -107,7 +110,20 @@ enum RoomLabels {
         }
         guard !affected.isEmpty else { return ([], []) }
 
-        let finder = self.finder(for: after.filter(isVisible), unitsPerPaperMM: unitsPerPaperMM)
+        // only the objects around those labels can bound their rooms (a big drawing has a hundred thousand objects):
+        // the last outline with half its size around it, or a wide square around a label not measured yet
+        let areas = affected.map { label -> CGRect in
+            if let bounds = label.roomBounds { return bounds.insetBy(dx: -bounds.width / 2 - 1, dy: -bounds.height / 2 - 1) }
+            let r = searchRadiusMM / max(mmPerUnit, 1e-9)
+            return CGRect(x: label.position.x - r, y: label.position.y - r, width: 2 * r, height: 2 * r)
+        }
+        let nearby = after.filter { entity in
+            guard isBoundary(entity), isVisible(entity) else { return false }
+            let box = entity.boundingBox()
+            // compared by hand (mayMeet): CGRect.intersects is false for the flat box of a straight horizontal wall
+            return areas.contains { EditOperations.mayMeet($0, box) }
+        }
+        let finder = self.finder(for: nearby, unitsPerPaperMM: unitsPerPaperMM)
         var replacedOld: [CADEntity] = []
         var replacedNew: [CADEntity] = []
         for label in affected {

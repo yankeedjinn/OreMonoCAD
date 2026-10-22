@@ -347,7 +347,16 @@ final class HatchRegionFinder {
         let merge = max(size * 1e-9, gap * 1e-3)
 
         // 2) bridges over small gaps: free end → nearest point of another object
-        var grid = SegmentGrid(extent: extent, cellSize: max(size / 64, gap * 4))
+        // (grid cells about twice the usual segment length: even where the drawing is dense only a few segments
+        // share a cell – a fixed 64 × 64 grid held thousands of them per cell in a big drawing, and every pair is compared)
+        var lengths: [CGFloat] = []
+        let step = max(1, segments.count / 4000)
+        for index in stride(from: 0, to: segments.count, by: step) {
+            lengths.append(Geometry.distance(segments[index].a, segments[index].b))
+        }
+        lengths.sort()
+        let median = lengths.isEmpty ? size : lengths[lengths.count / 2]
+        var grid = SegmentGrid(extent: extent, cellSize: max(median * 2, gap * 2, size / 4096), margin: merge * 2)
         for (i, s) in segments.enumerated() { grid.insert(i, s.a, s.b) }
         if gap > 0 {
             for end in openEnds {
@@ -370,19 +379,20 @@ final class HatchRegionFinder {
 
         // 3) split points: intersections and ends lying on other segments
         var splits = Array(repeating: [CGFloat(0), 1], count: segments.count)
-        for (i, j) in grid.candidatePairs() {
+        grid.forEachCandidatePair(of: segments) { i, j in
             let s = segments[i], r = segments[j]
             if let hit = Geometry.segmentIntersection(s.a, s.b, r.a, r.b) {
                 splits[i].append(hit.ta)
                 splits[j].append(hit.tb)
             }
             // touches and collinear overlaps
-            for (end, target, list) in [(r.a, s, i), (r.b, s, i), (s.a, r, j), (s.b, r, j)] {
+            func touch(_ end: CGPoint, _ target: (a: CGPoint, b: CGPoint), _ list: Int) {
                 let t = Geometry.projectionParameter(of: end, ontoSegmentFrom: target.a, to: target.b)
                 if t > 0 && t < 1 && Geometry.distance(end, Geometry.lerp(target.a, target.b, t)) < merge {
                     splits[list].append(t)
                 }
             }
+            touch(r.a, s, i); touch(r.b, s, i); touch(s.a, r, j); touch(s.b, r, j)
         }
 
         // 4) vertices (merged within tolerance) and edges
@@ -503,11 +513,16 @@ final class HatchRegionFinder {
 private struct SegmentGrid {
     private let origin: CGPoint
     private let cellSize: CGFloat
+    /// Short segments are also registered this far beyond their ends (touches within the merge distance).
+    private let margin: CGFloat
     private var cells: [Int64: [Int]] = [:]
+    /// Segments too long for their box of cells – registered only along themselves.
+    private var long = Set<Int>()
 
-    init(extent: CGRect, cellSize: CGFloat) {
+    init(extent: CGRect, cellSize: CGFloat, margin: CGFloat) {
         self.origin = CGPoint(x: extent.minX, y: extent.minY)
         self.cellSize = max(cellSize, 1e-9)
+        self.margin = max(margin, 0)
     }
 
     private func cell(_ v: CGFloat, _ o: CGFloat) -> Int {
@@ -520,36 +535,63 @@ private struct SegmentGrid {
     }
 
     mutating func insert(_ index: Int, _ a: CGPoint, _ b: CGPoint) {
-        let x0 = cell(min(a.x, b.x), origin.x), x1 = cell(max(a.x, b.x), origin.x)
-        let y0 = cell(min(a.y, b.y), origin.y), y1 = cell(max(a.y, b.y), origin.y)
-        guard (x1 - x0 + 1) * (y1 - y0 + 1) < 200_000 else { return }
-        for x in x0...x1 {
-            for y in y0...y1 { cells[key(x, y), default: []].append(index) }
+        let x0 = cell(min(a.x, b.x) - margin, origin.x), x1 = cell(max(a.x, b.x) + margin, origin.x)
+        let y0 = cell(min(a.y, b.y) - margin, origin.y), y1 = cell(max(a.y, b.y) + margin, origin.y)
+        if (x1 - x0 + 1) * (y1 - y0 + 1) <= 64 {
+            for x in x0...x1 {
+                for y in y0...y1 { cells[key(x, y), default: []].append(index) }
+            }
+            return
         }
+        // a long segment: only the cells along it and their neighbours (its whole box would be far too many cells)
+        let steps = Int((Geometry.distance(a, b) / (cellSize / 2)).rounded(.up))
+        guard steps > 0, steps < 4_000_000 else { return }
+        long.insert(index)
+        var keys = Set<Int64>()
+        for k in 0...steps {
+            let p = Geometry.lerp(a, b, CGFloat(k) / CGFloat(steps))
+            let cx = cell(p.x, origin.x), cy = cell(p.y, origin.y)
+            for dx in -1...1 {
+                for dy in -1...1 { keys.insert(key(cx + dx, cy + dy)) }
+            }
+        }
+        for k in keys { cells[k, default: []].append(index) }
     }
 
-    func candidates(near p: CGPoint, radius: CGFloat) -> Set<Int> {
-        var result = Set<Int>()
+    /// Segments registered in the cells around a point (a segment may come more than once).
+    func candidates(near p: CGPoint, radius: CGFloat) -> [Int] {
+        var result: [Int] = []
         let x0 = cell(p.x - radius, origin.x), x1 = cell(p.x + radius, origin.x)
         let y0 = cell(p.y - radius, origin.y), y1 = cell(p.y + radius, origin.y)
         for x in x0...x1 {
-            for y in y0...y1 { result.formUnion(cells[key(x, y)] ?? []) }
+            for y in y0...y1 { result.append(contentsOf: cells[key(x, y)] ?? []) }
         }
         return result
     }
 
-    /// Pairs of segments sharing a cell (each pair only once).
-    func candidatePairs() -> [(Int, Int)] {
-        var seen = Set<Int64>()
-        var pairs: [(Int, Int)] = []
-        for list in cells.values where list.count > 1 {
-            for i in 0..<list.count {
-                for j in (i + 1)..<list.count {
-                    let a = min(list[i], list[j]), b = max(list[i], list[j])
-                    if a != b && seen.insert((Int64(a) << 32) | Int64(b)).inserted { pairs.append((a, b)) }
+    /// Every pair of segments whose bounds touch (within the margin), each pair once: a pair of short segments
+    /// in the one cell holding the corner of their common bounds, a pair with a long segment the first time it is met.
+    func forEachCandidatePair(of segments: [(a: CGPoint, b: CGPoint)], _ body: (Int, Int) -> Void) {
+        var seenLong = Set<Int64>()
+        for (cellKey, list) in cells where list.count > 1 {
+            for x in 0..<(list.count - 1) {
+                let i = list[x], s = segments[i]
+                let iMinX = min(s.a.x, s.b.x), iMaxX = max(s.a.x, s.b.x), iMinY = min(s.a.y, s.b.y), iMaxY = max(s.a.y, s.b.y)
+                for y in (x + 1)..<list.count {
+                    let j = list[y]
+                    guard i != j else { continue }
+                    let r = segments[j]
+                    let jMinX = min(r.a.x, r.b.x), jMaxX = max(r.a.x, r.b.x), jMinY = min(r.a.y, r.b.y), jMaxY = max(r.a.y, r.b.y)
+                    guard iMinX <= jMaxX + margin, jMinX <= iMaxX + margin, iMinY <= jMaxY + margin, jMinY <= iMaxY + margin else { continue }
+                    let a = min(i, j), b = max(i, j)
+                    if long.contains(i) || long.contains(j) {
+                        guard seenLong.insert((Int64(a) << 32) | Int64(b)).inserted else { continue }
+                    } else {
+                        guard key(cell(max(iMinX, jMinX), origin.x), cell(max(iMinY, jMinY), origin.y)) == cellKey else { continue }
+                    }
+                    body(a, b)
                 }
             }
         }
-        return pairs
     }
 }
