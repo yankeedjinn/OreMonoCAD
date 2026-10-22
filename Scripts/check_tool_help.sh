@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#  check_tool_help.sh – OhMyCAD
+#  check_tool_help.sh – OreMonoCAD
 #
 #  RULE: every tool must have help (a summary + short usage instructions).
 #  The script runs on every build (the “Check Tool Help” phase) and, for every tool
@@ -8,7 +8,7 @@
 #  The build does not fail – only a yellow warning appears, linking to the tool's line.
 #
 
-FILE="${SRCROOT}/OhMyCAD/EditorView.swift"
+FILE="${SRCROOT}/OreMonoCAD/EditorView.swift"
 
 if [ ! -f "$FILE" ]; then
     echo "warning: Tool help check: ${FILE} not found"

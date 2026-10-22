@@ -1,16 +1,14 @@
-# OhMyCAD
+# OreMonoCAD
 
-A small 2D CAD editor for macOS – a fancy drawing board somewhere between a classic CAD program and SketchUp. Written in Swift on plain AppKit (no SwiftUI, no storyboards).
+A small 2D CAD editor for macOS – a fancy drawing board: more than a sketchpad, far less than a full CAD suite. Written in Swift on plain AppKit (no SwiftUI, no storyboards).
 
 It is a personal project: built for one architect's everyday drawing, kept deliberately simple.
-
-Current version: 1.14 (build 15).
 
 ## Features
 
 - Lines, polylines, rectangles, arcs, circles, ellipses, polygons, splines, construction lines
 - Move, Copy, Rotate, Scale, Mirror, Array, Edit Points, Match Properties
-- Trim, Power Trim (click to extend, drag a fence to trim), Extend, Break, Fillet, Chamfer, Offset, Join, Explode
+- Trim, MagicTrim (drag across parts to remove them, click to extend), Extend, Break, Fillet, Chamfer, Offset, Join, Explode
 - Dimensions (linear, aligned, continue, angular, radius, diameter), text, leaders
 - Hatches with a pick-inside-area fill, Rebuild Hatch and Cut Out of Hatch
 - Walls and Wall from Curve, room labels with floor area, revision clouds, wipeouts, scale bar and north arrow
@@ -18,7 +16,7 @@ Current version: 1.14 (build 15).
 - Copy and paste between drawings, Draw Order (kept in DXF export)
 - Plot / print, PDF and image export, plot style tables (.ctb)
 - Layers, blocks with in-place editing, layouts with viewports, named views
-- DXF import and export, native `.ohmycad` format
+- DXF import and export, native `.oremono` format (drawings saved by older versions as `.ohmycad` still open)
 - Drawing units: mm, cm, m, inches and feet, with conversion of an existing drawing; text, dimension and lineweight sizes in paper millimeters
 - Survey support: geodetic base point (S-JTSK), point list import, rotated view / UCS
 - Snaps, Snap Tracking, ortho, polar angles, grid, the value box next to the cursor, Find and Replace
@@ -34,7 +32,7 @@ Current version: 1.14 (build 15).
 
 ## Building
 
-1. Open `OhMyCAD.xcodeproj` in Xcode.
+1. Open `OreMonoCAD.xcodeproj` in Xcode.
 2. Under *Signing & Capabilities*, choose your own team (or *Sign to Run Locally*).
 3. Press ⌘R.
 
@@ -42,10 +40,12 @@ Every build runs `Scripts/check_tool_help.sh`, which prints a warning for any to
 
 ## Fonts
 
-OhMyCAD bundles [osifont](https://github.com/hikikomori82/osifont), an ISO 3098 technical lettering font, licensed under the GNU GPL v3 with the font exception. See `OhMyCAD/Fonts/osifont-LICENSE.md`.
+OreMonoCAD bundles [osifont](https://github.com/hikikomori82/osifont), an ISO 3098 technical lettering font, licensed under the GNU GPL v3 with the font exception. See `OreMonoCAD/Fonts/osifont-LICENSE.md`.
 
 ## License
 
 The source code is released under the MIT License – see [LICENSE](LICENSE). The bundled osifont keeps its own license.
+
+Other product names mentioned in file formats or documentation belong to their respective owners; this project is not affiliated with any CAD vendor.
 
 © 2025–2026 Yankee Djinn
