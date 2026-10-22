@@ -979,8 +979,13 @@ enum EditOperations {
             result = Polyline(vertices: points, closed: polyline.isClosedCurve, layer: polyline.layer, color: polyline.color)
 
         case let spline as Spline:
-            // a spline is offset via a dense approximation – the result is a polyline that follows it faithfully
-            var path = spline.flattened
+            // a spline is offset via a dense approximation – the result is a polyline that follows it faithfully;
+            // the sampling is adaptive (by turning angle), so tight bends stay smooth even after a large offset
+            guard let firstSegment = spline.segments.first else { return nil }
+            var path = [firstSegment.p0]
+            for segment in spline.segments {
+                path.append(contentsOf: adaptiveSamples(from: 0, to: 1, segment.point(at:)).dropFirst())
+            }
             let closed = spline.isClosedCurve
             if closed, let first = path.first, let last = path.last, Geometry.distance(first, last) < 1e-9 { path.removeLast() }
             guard let points = offsetPath(path, closed: closed, distance: distance, side: side) else { return nil }
@@ -988,7 +993,7 @@ enum EditOperations {
 
         case let ellipse as Ellipse:
             // an offset ellipse is no longer an ellipse – a faithful polyline
-            var path = ellipse.flattened
+            var path = adaptiveSamples(from: ellipse.startParam, to: ellipse.startParam + ellipse.sweep, ellipse.point(at:))
             let closed = ellipse.isFull
             if closed, let first = path.first, let last = path.last, Geometry.distance(first, last) < 1e-9 { path.removeLast() }
             guard let points = offsetPath(path, closed: closed, distance: distance, side: side) else { return nil }
@@ -1154,6 +1159,37 @@ enum EditOperations {
         }
         guard vertices.count >= 2 else { return nil }
         return Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: polyline.layer, color: polyline.color)
+    }
+
+    /// Points along a curve `point(t)` for t in t0...t1, denser where the curve bends: adjacent chords turn
+    /// by at most about 2°. Uniform sampling is not enough for offset – a tight bend sampled by a few points
+    /// becomes visibly polygonal (with a sharp corner) once it is moved far away.
+    private static func adaptiveSamples(from t0: CGFloat, to t1: CGFloat, _ point: (CGFloat) -> CGPoint) -> [CGPoint] {
+        let maxTurn: CGFloat = 2 * .pi / 180
+        var result = [point(t0)]
+
+        func refine(_ ta: CGFloat, _ pa: CGPoint, _ tb: CGFloat, _ pb: CGPoint, depth: Int) {
+            let tm = (ta + tb) / 2, pm = point(tm)
+            let u = pm - pa, v = pb - pm
+            let turn = abs(atan2(u.cross(v), u.dot(v)))
+            if depth < 16, u.length > 1e-9, v.length > 1e-9, turn > maxTurn {
+                refine(ta, pa, tm, pm, depth: depth + 1)
+                refine(tm, pm, tb, pb, depth: depth + 1)
+            } else {
+                result.append(pm)
+                result.append(pb)
+            }
+        }
+
+        // a few uniform pieces first, so that an S-bend inside one piece is not missed
+        let pieces = 8
+        var ta = t0, pa = result[0]
+        for k in 1...pieces {
+            let tb = t0 + (t1 - t0) * CGFloat(k) / CGFloat(pieces), pb = point(tb)
+            refine(ta, pa, tb, pb, depth: 0)
+            ta = tb; pa = pb
+        }
+        return result
     }
 
     /// Offset of a polyline: shift each segment and join at intersections (with overly sharp corners beveled).
