@@ -25,6 +25,10 @@ It is a personal project: built for one architect's everyday drawing, kept delib
 - Auto-save, crash recovery and backups of previous versions
 - Help for every tool: a short summary at once on hover, usage instructions after a moment (tools inside a button's menu show their summary in the menu and a HOW TO USE tip after a moment)
 
+## DWG files
+
+DWG is not supported. Convert DWG drawings to DXF first, for example with the free [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter).
+
 ## Requirements
 
 - macOS 26.1 or later
