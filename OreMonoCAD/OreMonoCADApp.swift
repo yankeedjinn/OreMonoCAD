@@ -48,7 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         window.contentViewController = mainViewController
         window.setContentSize(NSSize(width: 1400, height: 900))
-        window.minSize = NSSize(width: 1100, height: 650)
+        // small enough for half of a laptop screen (window tiling, Split View)
+        window.minSize = NSSize(width: 700, height: 480)
         window.isRestorable = false
         // the window is held by AppDelegate – AppKit must not release it on close (otherwise a crash on quit)
         window.isReleasedWhenClosed = false

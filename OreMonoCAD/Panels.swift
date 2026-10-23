@@ -3597,7 +3597,7 @@ final class StatusBarView: NSView {
         addSubview(snapMore)
         rightItems.append(snapMore)
         snapMoreButton = snapMore
-        trackButton = toggle("Track", "Snap tracking – hold the cursor on a snap point for a moment to track it (a small cross); the cursor then lines up with it horizontally, vertically and at polar angles. Hold it there again to release it\nShortcut: ⌥1 · F11", #selector(trackClicked))
+        trackButton = toggle("Track", "Snap tracking – hold the cursor on a snap point for a moment to track it (a small cross); the cursor then lines up with it horizontally, vertically and at polar angles. Hold it there again to release it\nShortcut: ⌥1 · F11 (when macOS does not use it for Show Desktop)", #selector(trackClicked))
         orthoButton = toggle("Ortho", "Ortho – only horizontal and vertical directions (of the drawing coordinates)\nShortcut: ⌥8 · F8 · or hold Shift", #selector(orthoClicked))
         polarButton = toggle("Polar 15° ", "Polar angles – the direction snaps in steps (the number is the step)\nShortcut: ⌥0 · F10 · right-click = step or Custom…", #selector(polarClicked), valued: true)
         gridButton = toggle("Grid 10 ", "Snap to grid – points jump to the grid (the number is the grid step)\nShortcut: ⌥9 · F9 · right-click = grid size, Custom…, Show Grid or Show Axes", #selector(gridClicked), valued: true)
@@ -3605,9 +3605,9 @@ final class StatusBarView: NSView {
         separator()
 
         // display: LWT (the value box at the cursor no longer has a toggle – typing values always works)
-        lineWeightButton = toggle("LWT", "Show lineweights\nShortcut: ⌥5 · ⇧⌘L", #selector(lineWeightClicked))
-        askToCloseButton = toggle("CLS", "Ask whether to close polylines and splines when you finish them\nShortcut: ⌥4", #selector(askToCloseClicked))
-        lineContinueButton = toggle("LNC", "Continuous lines – each new line starts at the end of the previous one (separate lines, not a polyline); works also while drawing\nShortcut: ⌥7 · in the Line tool also the Line key (\(DrawingTool.line.shortcut ?? "–")) again", #selector(lineContinueClicked))
+        lineWeightButton = toggle("LWT", "Show lineweights\nShortcut: ⌥5 · F5 · ⇧⌘L", #selector(lineWeightClicked))
+        askToCloseButton = toggle("CLS", "Ask whether to close polylines and splines when you finish them\nShortcut: ⌥4 · F4", #selector(askToCloseClicked))
+        lineContinueButton = toggle("LNC", "Continuous lines – each new line starts at the end of the previous one (separate lines, not a polyline); works also while drawing\nShortcut: ⌥7 · F6 · in the Line tool also the Line key (\(DrawingTool.line.shortcut ?? "–")) again", #selector(lineContinueClicked))
         fkeysButton = toggle("FNK", "", #selector(fkeysClicked))
         setFunctionKeysState(nil)
         separator()
@@ -3630,6 +3630,7 @@ final class StatusBarView: NSView {
     }
 
     /// Toggles from the right edge; the coordinates get the remaining space on the left.
+    /// In a narrow window (half of the screen) the coordinates move up to the right end of the prompt row.
     private func layoutRow() {
         var x = bounds.width - 12
         for (index, view) in rightItems.enumerated().reversed() {
@@ -3644,8 +3645,23 @@ final class StatusBarView: NSView {
                 x -= 4
             }
         }
-        coordinateLabel.frame.size.width = max(min(x - 24, 360), 120)
+        let room = x - 24
+        let promptY = bounds.height - StatusBarView.promptRowHeight + 7
+        if room >= StatusBarView.coordinateMinWidth {
+            let mid = StatusBarView.bottomMargin + (bounds.height - StatusBarView.promptRowHeight - StatusBarView.bottomMargin) / 2
+            coordinateLabel.frame = NSRect(x: 12, y: mid - 8, width: min(room, 360), height: 16)
+            coordinateLabel.alignment = .left
+            promptLabel.frame = NSRect(x: 12, y: promptY, width: bounds.width - 24, height: 17)
+        } else {
+            let width = StatusBarView.coordinateMinWidth + 20
+            coordinateLabel.frame = NSRect(x: bounds.width - 12 - width, y: promptY + 1, width: width, height: 16)
+            coordinateLabel.alignment = .right
+            promptLabel.frame = NSRect(x: 12, y: promptY, width: max(bounds.width - 36 - width, 0), height: 17)
+        }
     }
+
+    /// Below this width the coordinates no longer fit next to the toggles.
+    private static let coordinateMinWidth: CGFloat = 200
 
     /// Zoom and layer are not shown in the status line (the layer is in the Layers panel).
     func setZoom(_ zoom: CGFloat) {}
@@ -3731,7 +3747,7 @@ final class StatusBarView: NSView {
         if kind == .grid {
             // display of the grid and the axes (saved in the drawing)
             menu.addItem(.separator())
-            let showGrid = NSMenuItem(title: "Show Grid  (F7)", action: #selector(showGridChosen), keyEquivalent: "")
+            let showGrid = NSMenuItem(title: "Show Grid  (⌥2, F7)", action: #selector(showGridChosen), keyEquivalent: "")
             showGrid.target = self
             showGrid.state = lastShowGrid ? .on : .off
             menu.addItem(showGrid)
@@ -3805,13 +3821,13 @@ final class StatusBarView: NSView {
         fkeysButton.state = fkeysOn ? .on : .off
         let state: String
         switch standard {
-        case true?: state = "ON – the top row sends F1, F2… (F3 and F7–F12 work directly)."
+        case true?: state = "ON – the top row sends F1, F2… (F1–F12 work directly)."
         case false?: state = "OFF – the top row controls brightness, volume…; hold fn (Globe) for F1, F2…"
         case nil: state = "unknown"
         }
         fkeysButton.toolTip = """
         Function keys as F1–F12 (macOS keyboard setting): \(state)
-        Every mode also has a shortcut that always works: ⌥ + number (⌥1 Snap tracking, ⌥3 Snap, ⌥4 CLS, ⌥5 LWT, ⌥6 value box, ⌥7 LNC, ⌥8 Ortho, ⌥9 Grid snap, ⌥0 Polar).
+        Every mode also has a shortcut that always works: ⌥ + number (⌥1 Snap tracking, ⌥2 Show grid, ⌥3 Snap, ⌥4 CLS, ⌥5 LWT, ⌥6 value box, ⌥7 LNC, ⌥8 Ortho, ⌥9 Grid snap, ⌥0 Polar).
         Click for how to change the setting
         """
     }

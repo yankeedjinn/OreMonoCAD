@@ -677,7 +677,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// View › Info Panel (⌘3).
+    /// View › Info Panel (⌘3, F2).
     @objc func toggleInfoPanel(_ sender: Any?) {
         if !infoShown || trayCollapsed || infoFolded {
             infoShown = true
@@ -3622,7 +3622,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.needsDisplay = true
     }
 
-    /// Edit › Filter… (⇧S on the drawing area): selects the objects that match the ticked properties (Filter.swift) –
+    /// Edit › Filter… (⌥S on the drawing area): selects the objects that match the ticked properties (Filter.swift) –
     /// in the open space on visible and unlocked layers, or within the current selection.
     @objc func filterObjects(_ sender: Any?) {
         let all = document.getAllEntities()
@@ -3861,16 +3861,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private var modeKeyMonitor: Any?
 
-    private enum ModeKey { case snap, snapTracking, askToClose, lineWeights, dynamicInput, lineContinue, ortho, grid, polar, showGrid }
+    private enum ModeKey { case snap, snapTracking, askToClose, lineWeights, dynamicInput, lineContinue, ortho, grid, polar, showGrid, help, infoPanel }
 
     /// ⌥ + digit by the physical key (works on every layout, including Czech).
     private static let optionKeys: [UInt16: ModeKey] = [
-        18: .snapTracking, 20: .snap, 21: .askToClose, 23: .lineWeights, 22: .dynamicInput,
+        18: .snapTracking, 19: .showGrid, 20: .snap, 21: .askToClose, 23: .lineWeights, 22: .dynamicInput,
         26: .lineContinue, 28: .ortho, 25: .grid, 29: .polar
     ]
-    /// F-keys (F7 = grid display; LNC only ⌥7).
+    /// F1–F12 (F11 reaches the app only when macOS does not use it for Show Desktop).
     private static let functionKeys: [UInt16: ModeKey] = [
-        99: .snap, 98: .showGrid, 100: .ortho, 101: .grid, 109: .polar, 103: .snapTracking, 111: .dynamicInput
+        122: .help, 120: .infoPanel, 99: .snap, 118: .askToClose, 96: .lineWeights, 97: .lineContinue,
+        98: .showGrid, 100: .ortho, 101: .grid, 109: .polar, 103: .snapTracking, 111: .dynamicInput
     ]
 
     private func installModeKeys() {
@@ -3892,6 +3893,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         // text typed directly on the canvas: ⌥+digit types characters (@, #, …), doesn't toggle modes
         if editorView.isEditingText { return false }
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        // ⇧⌘] / ⇧⌘[ = next / previous tab (by the physical key, as ⌥ + digit)
+        if modifiers == [.command, .shift], event.keyCode == 30 || event.keyCode == 33 {
+            if event.keyCode == 30 { selectNextTab(nil) } else { selectPreviousTab(nil) }
+            return true
+        }
         let mode: ModeKey?
         if modifiers == [.option] {
             mode = MainViewController.optionKeys[event.keyCode]
@@ -3918,6 +3924,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case .grid: toggleGridSnap()
         case .showGrid: toggleGrid()
         case .polar: togglePolar()
+        case .help: showKeyboardShortcuts(nil)
+        case .infoPanel: toggleInfoPanel(nil)
         }
     }
 
@@ -3937,7 +3945,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
         • Hold fn (Globe) and press the F-key, or
         • turn on “Use F1, F2, etc. keys as standard function keys” in System Settings › Keyboard › Keyboard Shortcuts… › Function Keys, or
-        • use the shortcuts that always work in OreMonoCAD: ⌥1 Snap tracking · ⌥3 Snap · ⌥4 CLS · ⌥5 LWT · ⌥6 value box · ⌥7 LNC · ⌥8 Ortho · ⌥9 Grid snap · ⌥0 Polar.
+        • use the shortcuts that always work in OreMonoCAD: ⌥1 Snap tracking · ⌥2 Show grid · ⌥3 Snap · ⌥4 CLS · ⌥5 LWT · ⌥6 value box · ⌥7 LNC · ⌥8 Ortho · ⌥9 Grid snap · ⌥0 Polar.
 
         Keyboards that are not made by Apple usually send F1–F12 directly.
         """
@@ -4568,6 +4576,8 @@ extension MainViewController {
         item(appMenu, "Settings…", #selector(showSettings(_:)), ",", target: self).image = symbol("gearshape")
         appMenu.addItem(.separator())
         item(appMenu, "Hide OreMonoCAD", #selector(NSApplication.hide(_:)), "h").image = symbol("eye.slash")
+        item(appMenu, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]).image = symbol("eye.slash.circle")
+        item(appMenu, "Show All", #selector(NSApplication.unhideAllApplications(_:)), modifiers: []).image = symbol("eye")
         appMenu.addItem(.separator())
         item(appMenu, "Quit OreMonoCAD", #selector(NSApplication.terminate(_:)), "q").image = symbol("power")
 
@@ -4745,7 +4755,7 @@ extension MainViewController {
         viewMenu.addItem(.separator())
         item(viewMenu, "Layers Panel", #selector(toggleLayerPanel), "1", target: self).image = ToolIcons.image(for: MatchProperty.layer, size: 17)
         item(viewMenu, "Properties Panel", #selector(togglePropertiesPanel), "2", target: self).image = symbol("list.bullet.rectangle")
-        item(viewMenu, "Info Panel", #selector(toggleInfoPanel(_:)), "3", target: self).image = symbol("info.square")
+        item(viewMenu, "Info Panel  (F2)", #selector(toggleInfoPanel(_:)), "3", target: self).image = symbol("info.square")
         // which tool panel sections to show (the panel fills the submenu each time it opens)
         if let toolbarView = toolbarView {
             let toolPanelItem = NSMenuItem(title: "Tool Panel", action: nil, keyEquivalent: "")
@@ -4756,8 +4766,9 @@ extension MainViewController {
         item(viewMenu, "Reset Right Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
         item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self).image = symbol("macwindow.on.rectangle")
+        // Enter Full Screen (⌃⌘F) is added to the View menu by macOS itself
         viewMenu.addItem(.separator())
-        item(viewMenu, "Show Grid  (F7)", #selector(toggleGrid), "g", target: self)
+        item(viewMenu, "Show Grid  (⌥2, F7)", #selector(toggleGrid), modifiers: [], target: self)
         item(viewMenu, "Show Axes", #selector(toggleAxes), modifiers: [], target: self)
         // drawing modes (status line); ⌥ + digit and F-keys are caught by the window (handleModeKey)
         let aidsMenu = submenu("Drawing Aids", in: viewMenu, image: icon(.drawingAids))
@@ -4767,8 +4778,8 @@ extension MainViewController {
         item(aidsMenu, "Snap to Grid  (⌥9, F9)", #selector(toggleGridSnap), modifiers: [], target: self)
         item(aidsMenu, "Polar Angles  (⌥0, F10)", #selector(togglePolar), modifiers: [], target: self)
         item(aidsMenu, "Value Box Always Visible  (⌥6, F12)", #selector(toggleDynamicInput), modifiers: [], target: self)
-        item(aidsMenu, "Ask to Close Polylines & Splines  (⌥4)", #selector(toggleAskToClose), modifiers: [], target: self)
-        item(aidsMenu, "Continuous Lines – LNC  (⌥7)", #selector(toggleLineContinue), modifiers: [], target: self)
+        item(aidsMenu, "Ask to Close Polylines & Splines  (⌥4, F4)", #selector(toggleAskToClose), modifiers: [], target: self)
+        item(aidsMenu, "Continuous Lines – LNC  (⌥7, F6)", #selector(toggleLineContinue), modifiers: [], target: self)
         aidsMenu.addItem(.separator())
         let snapMenu = submenu("Snap Points", in: aidsMenu)
         for type in SnapType.allCases {
@@ -4780,7 +4791,7 @@ extension MainViewController {
         snapMenu.addItem(.separator())
         item(snapMenu, "Snap Points Panel…", #selector(showSnapSettingsFromMenu(_:)), modifiers: [], target: self)
         viewMenu.addItem(.separator())
-        item(viewMenu, "Show Lineweights – LWT  (⌥5)", #selector(toggleLineWeights), "l", modifiers: [.command, .shift], target: self)
+        item(viewMenu, "Show Lineweights – LWT  (⌥5, F5)", #selector(toggleLineWeights), "l", modifiers: [.command, .shift], target: self)
         item(viewMenu, "Lineweights Fixed on Screen", #selector(toggleScreenWeights), target: self)
         item(viewMenu, "Smooth Lines (Antialiasing)", #selector(toggleSmoothLines), target: self)
         item(viewMenu, "Custom Scale…", #selector(addCustomScale), target: self).image = DrawingTool.scaleBar.icon(pointSize: 13)
@@ -4798,7 +4809,7 @@ extension MainViewController {
         item(layoutMenu, "New Layout", #selector(newLayout(_:)), "l", modifiers: [.command, .control], target: self).image = icon(.newLayout)
         item(layoutMenu, "Duplicate Layout", #selector(duplicateLayoutFromMenu(_:)), modifiers: [], target: self).image = icon(.duplicateLayout)
         item(layoutMenu, "Rename Layout…", #selector(renameLayoutFromMenu(_:)), modifiers: [], target: self).image = symbol("pencil")
-        item(layoutMenu, "Page Setup…", #selector(pageSetupFromMenu(_:)), modifiers: [], target: self).image = settingsIcon
+        item(layoutMenu, "Page Setup…", #selector(pageSetupFromMenu(_:)), "p", modifiers: [.command, .shift], target: self).image = settingsIcon
         item(layoutMenu, "Delete Layout…", #selector(deleteLayoutFromMenu(_:)), modifiers: [], target: self).image = symbol("trash")
         layoutMenu.addItem(.separator())
         item(layoutMenu, "Add Viewport", #selector(addViewport(_:)), "v", modifiers: [.command, .control], target: self).image = icon(.viewport)
@@ -4810,13 +4821,13 @@ extension MainViewController {
         item(windowMenu, "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m").image = symbol("minus.square")
         item(windowMenu, "Zoom", #selector(NSWindow.performZoom(_:)), modifiers: []).image = symbol("arrow.up.left.and.arrow.down.right")
         windowMenu.addItem(.separator())
-        item(windowMenu, "Show Next Tab", #selector(selectNextTab(_:)), "\t", modifiers: [.control], target: self).image = symbol("chevron.right")
-        item(windowMenu, "Show Previous Tab", #selector(selectPreviousTab(_:)), "\t", modifiers: [.control, .shift], target: self).image = symbol("chevron.left")
+        item(windowMenu, "Show Next Tab  (⇧⌘])", #selector(selectNextTab(_:)), "\t", modifiers: [.control], target: self).image = symbol("chevron.right")
+        item(windowMenu, "Show Previous Tab  (⇧⌘[)", #selector(selectPreviousTab(_:)), "\t", modifiers: [.control, .shift], target: self).image = symbol("chevron.left")
         NSApp.windowsMenu = windowMenu
 
         // Help (macOS adds menu search to it by itself)
         let helpMenu = submenu("Help")
-        item(helpMenu, "Keyboard Shortcuts…", #selector(showKeyboardShortcuts(_:)), modifiers: [], target: self).image = symbol("keyboard")
+        item(helpMenu, "Keyboard Shortcuts…  (F1)", #selector(showKeyboardShortcuts(_:)), modifiers: [], target: self).image = symbol("keyboard")
         helpMenu.addItem(.separator())
         item(helpMenu, "Report a Problem…", #selector(reportProblem(_:)), modifiers: [], target: self).image = symbol("exclamationmark.bubble")
         item(helpMenu, "Show Log in Finder", #selector(showLogInFinder(_:)), modifiers: [], target: self).image = symbol("doc.text")

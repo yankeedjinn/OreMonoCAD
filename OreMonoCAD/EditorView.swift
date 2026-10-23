@@ -305,54 +305,60 @@ enum DrawingTool: Int, CaseIterable {
         return ToolIcons.image(for: self, size: pointSize + 4)
     }
 
-    /// Keyboard shortcut (without modifiers) on the drawing area – custom from Settings, otherwise the default.
+    /// Keyboard shortcut on the drawing area – custom from Settings, otherwise the default (Select: the space bar).
     var shortcut: String? {
-        return Shortcuts.key(for: self)
+        return Shortcuts.key(for: self) ?? (self == .select ? "Space" : nil)
     }
 
     /// The tool's default shortcut.
     var defaultShortcut: String? {
         switch self {
-        case .select: return "S"
+        // Select is the space bar (with nothing in progress) – see keyDown
         case .line: return "L"
+        case .rectangle: return "R"
         case .circle: return "C"
         case .arc: return "A"
-        case .rectangle: return "R"
+        case .move: return "M"
+        case .rotate: return "Q"
+        case .scale: return "S"
+        case .offset: return "F"
+        case .measure: return "T"
+        case .blockCreate: return "G"
+        case .matchProperties: return "B"
+        case .zoomWindow: return "Z"
+        case .zoomExtents: return "⇧Z"
+        case .magicTrim: return "E"
+        case .trim: return "W"
+        case .fillet: return "O"
+        case .join: return "J"
         case .polyline: return "P"
-        case .spline: return "N"
         case .hatch: return "H"
-        case .trim: return "T"
-        case .extend: return "E"
-        case .fillet: return "F"
-        case .offset: return "J"
+        case .spline: return "N"
+        case .copy: return "K"
+        case .mirror: return "I"
         case .explode: return "X"
         case .editPoints: return "V"
-        case .join: return "G"
-        case .magicTrim: return "W"
-        case .move: return "M"
-        case .copy: return "K"
-        case .rotate: return "O"
-        case .scale: return "B"
-        case .mirror: return "I"
         case .dimLinear: return "D"
         case .text: return "U"
-        case .ellipse: return "Q"
-        case .measure: return "Z"
         case .xline: return "Y"
-        // second layer: Shift + the letter of a related tool
-        case .chamfer: return "⇧F"
-        case .polygon: return "⇧C"
-        case .breakObject: return "⇧T"
-        case .breakAtPoint: return "⇧E"
-        case .revisionCloud: return "⇧R"
-        case .wall: return "⇧L"
-        case .wallFromCurve: return "⇧P"
-        case .wipeout: return "⇧W"
-        case .filter: return "⇧S"
-        case .image: return "⇧I"
-        case .roomLabel: return "⇧U"
-        case .scaleBar: return "⇧B"
-        case .northArrow: return "⇧N"
+        // second layer: ⌥ + the letter of a related tool (Shift stays free for Ortho, squares and 15° steps)
+        case .extend: return "⌥W"
+        case .chamfer: return "⌥O"
+        case .ellipse: return "⌥A"
+        case .array: return "⌥M"
+        case .wipeout: return "⌥X"
+        case .polygon: return "⌥C"
+        case .breakObject: return "⌥T"
+        case .breakAtPoint: return "⌥E"
+        case .revisionCloud: return "⌥R"
+        case .wall: return "⌥L"
+        case .wallFromCurve: return "⌥P"
+        case .filter: return "⌥S"
+        case .image: return "⌥I"
+        case .roomLabel: return "⌥U"
+        case .scaleBar: return "⌥B"
+        case .northArrow: return "⌥N"
+        case .dimAligned: return "⌥D"
         default: return nil
         }
     }
@@ -770,6 +776,15 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private(set) var lastTool: DrawingTool?
 
     /// Repeat the last tool? Only in the Select tool when nothing is running (otherwise Enter / right click confirm).
+    /// Does the space bar confirm (something is in progress or waits for ↩), or switch to Select?
+    private var spaceConfirms: Bool {
+        if isBusy || !selectedPoints.isEmpty || inlineText != nil || viewportPan != nil || pickRequest != nil { return true }
+        if currentTool == .measure, measureResult != nil || !measureObjects.isEmpty { return true }
+        // commands that run on the selection with ↩ (Move, Explode, Array, Wall from Curve…)
+        let hasSelection = !(selectionManager?.isEmpty ?? true)
+        return hasSelection && currentTool != .select
+    }
+
     private func repeatLastTool() -> Bool {
         guard AppSettings.repeatLastTool, currentTool == .select, !isBusy, pickRequest == nil, inlineText == nil, viewportPan == nil,
               let tool = lastTool, tool != .select else { return false }
@@ -6479,11 +6494,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
-        // the letters inside a tool work without Shift – Shift + a letter stays a tool shortcut (⇧T, ⇧C…)
+        // the letters inside a tool work with or without Shift (Shift may be held for Ortho) – ⌥ + a letter is a tool shortcut (⌥T, ⌥C…)
+        let optioned = modifiers == [.option]
         let shifted = event.modifierFlags.contains(.shift)
 
         // C with continuous lines = the last line back to the start of the chain
-        if modifiers.isEmpty, !shifted, currentTool == .line, lineContinue, lineChainCount >= 2,
+        if modifiers.isEmpty, currentTool == .line, lineContinue, lineChainCount >= 2,
            let start = lineChainStart, let last = points.last,
            event.charactersIgnoringModifiers?.lowercased() == "c", !dynamicInput.hasLockedValue {
             onCommit?([], [Line(start: last, end: start, layer: currentLayerName)], "Close Lines")
@@ -6492,14 +6508,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         // C while drawing a polyline / spline = close right away
-        if modifiers.isEmpty, !shifted, [.polyline, .spline].contains(currentTool), points.count >= 3,
+        if modifiers.isEmpty, [.polyline, .spline].contains(currentTool), points.count >= 3,
            event.charactersIgnoringModifiers?.lowercased() == "c", !dynamicInput.hasLockedValue {
             finishOpenEnded(closed: true)
             return
         }
 
         // C on a line in progress that cannot be closed yet: don't switch to Circle (the drawing would be lost)
-        if modifiers.isEmpty, !shifted, !points.isEmpty, !dynamicInput.hasLockedValue,
+        if modifiers.isEmpty, !points.isEmpty, !dynamicInput.hasLockedValue,
            [.polyline, .spline].contains(currentTool) || (currentTool == .line && lineContinue),
            event.charactersIgnoringModifiers?.lowercased() == "c" {
             onMessage?(currentTool == .line ? "Draw at least two lines before closing (C)." : "Closing (C) needs at least three points.")
@@ -6539,6 +6555,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             return
 
+        // space bar with nothing in progress = Select (in Select itself it does nothing); otherwise it confirms like ↩
+        case 49 where !spaceConfirms:
+            if currentTool != .select { onToolChangeRequested?(.select) }
+            return
+
         case 36, 76, 49: // Return, Enter, space bar
             if dynamicInput.hasLockedValue {
                 commitDynamicInput()
@@ -6571,18 +6592,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if currentTool == .select { onDeleteRequested?() }
             return
 
-        // F3, F7–F10, F12 and ⌥ + digit never get here – the window toggles them already (MainViewController.handleModeKey)
+        // F-keys and ⌥ + digit never get here – the window handles them already (MainViewController.handleModeKey)
         default:
             break
         }
 
-        guard modifiers.isEmpty, let characters = event.charactersIgnoringModifiers, !characters.isEmpty else {
+        guard modifiers.isEmpty || optioned, let characters = event.charactersIgnoringModifiers, !characters.isEmpty else {
             super.keyDown(with: event)
             return
         }
 
         // numeric input → the box at the cursor (length, radius, angle, expression…)
-        if characters.allSatisfy({ "0123456789.,-+(".contains($0) }) {
+        if !optioned, characters.allSatisfy({ "0123456789.,-+(".contains($0) }) {
             if inputMode != .none {
                 valueBoxRequested = true
                 updateDynamicInput()
@@ -6594,34 +6615,36 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         // polygon: I / C / E switches the method, S = number of sides
-        if currentTool == .polygon, !shifted, characters.count == 1, polygonLetter(characters.lowercased()) {
+        if currentTool == .polygon, !optioned, characters.count == 1, polygonLetter(characters.lowercased()) {
             return
         }
 
         // rectangle: C = from the center / from a corner, S = square
-        if currentTool == .rectangle, !shifted, characters.count == 1, rectangleLetter(characters.lowercased()) {
+        if currentTool == .rectangle, !optioned, characters.count == 1, rectangleLetter(characters.lowercased()) {
             return
         }
 
         // revision cloud and wipeout: R / P = rectangle or corners, A = arc size (cloud), C = close
-        if drawsOutline, !shifted, characters.count == 1, outlineLetter(characters.lowercased()) {
+        if drawsOutline, !optioned, characters.count == 1, outlineLetter(characters.lowercased()) {
             return
         }
 
         // wall: T = thickness, J = side, C = close
-        if currentTool == .wall, !shifted, characters.count == 1, wallLetter(characters.lowercased()) {
+        if currentTool == .wall, !optioned, characters.count == 1, wallLetter(characters.lowercased()) {
             return
         }
-        if currentTool == .wallFromCurve, !shifted, characters.count == 1, wallFromCurveLetter(characters.lowercased()) {
+        if currentTool == .wallFromCurve, !optioned, characters.count == 1, wallFromCurveLetter(characters.lowercased()) {
             return
         }
 
         // construction line: H / V / A / B switches the method
-        if currentTool == .xline, !shifted, characters.count == 1, switchXLineKind(letter: characters.lowercased()) {
+        if currentTool == .xline, !optioned, characters.count == 1, switchXLineKind(letter: characters.lowercased()) {
             return
         }
 
-        let typedKey = (shifted ? "⇧" : "") + characters.uppercased()
+        // Shift + letter is normally the plain letter (Shift may be held for Ortho), unless it has a shortcut of its own (⇧Z)
+        var typedKey = (optioned ? "⌥" : "") + characters.uppercased()
+        if shifted, !optioned, Shortcuts.command(forKey: "⇧" + typedKey) != nil { typedKey = "⇧" + typedKey }
         if characters.count == 1, let command = Shortcuts.command(forKey: typedKey) {
             // the Line key again while in the Line tool = continuous lines (LNC) on / off
             if command == .tool(.line), currentTool == .line, !dynamicInput.hasLockedValue {

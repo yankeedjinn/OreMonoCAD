@@ -59,34 +59,44 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             guard let key = Shortcuts.key(for: command) else { continue }
             toolRows.append(Row(key: key, action: command.title))
         }
-        // plain letters first, then with Shift
-        toolRows.sort { ($0.key.hasPrefix("⇧") ? 1 : 0, $0.key) < ($1.key.hasPrefix("⇧") ? 1 : 0, $1.key) }
+        if Shortcuts.key(for: .select) == nil { toolRows.append(Row(key: "Space", action: DrawingTool.select.title)) }
+        // Space first, then plain letters (and ⇧Z), then with ⌥
+        func rank(_ key: String) -> Int { return key == "Space" ? 0 : key.hasPrefix("⌥") ? 2 : 1 }
+        func letter(_ key: String) -> String { return key.hasPrefix("⇧") ? String(key.dropFirst()) + "⇧" : key }
+        toolRows.sort { (rank($0.key), letter($0.key)) < (rank($1.key), letter($1.key)) }
         sections.append(("Tools (on the drawing area – change them in Settings › Shortcuts)", toolRows))
 
         sections.append(("While drawing", [
-            Row(key: "↩  Space", action: "Confirm / finish; with nothing in progress repeat the last tool"),
+            Row(key: "↩", action: "Confirm / finish; with nothing in progress repeat the last tool"),
+            Row(key: "Space", action: "Select when nothing is in progress; while drawing or typing a value it confirms like ↩"),
             Row(key: "Esc", action: "Cancel the current step; again = back to Select"),
             Row(key: "0–9 . -", action: "Start typing a value (length, radius, angle…)"),
             Row(key: "Tab", action: "Jump into the value box at the cursor"),
             Row(key: "⌫", action: "Remove the last point (Polyline, Spline, Wall, Leader, Revision Cloud, Wipeout, Area); in Select delete"),
             Row(key: "C", action: "Close (Polyline, Spline, Wall, Revision Cloud, Wipeout, continuous lines)"),
             Row(key: DrawingTool.line.shortcut ?? "–", action: "In the Line tool: continuous lines (LNC) on / off"),
-            Row(key: "Letters", action: "Options of the current tool, shown in the bottom line (I / C / E, H / V / A / B, T, J…) – without Shift; ⇧ + letter switches the tool"),
+            Row(key: "Letters", action: "Options of the current tool, shown in the bottom line (I / C / E, H / V / A / B, T, J…) – also with Shift held for Ortho; ⌥ + letter switches the tool"),
             Row(key: "Y / N", action: "Answer a question (Mirror, Close?)"),
             Row(key: "Shift (hold)", action: "Ortho while moving the mouse; a square in Rectangle, Wipeout and Revision Cloud; 15° steps in Rotate and Arc")
         ]))
 
         sections.append(("Drawing aids (always work)", [
             Row(key: "⌥3  F3", action: "Object snap"),
-            Row(key: "⌥1  F11", action: "Snap tracking – hold the cursor on a snap point to line up with it"),
-            Row(key: "⌥4", action: "Ask to close polylines and splines (CLS)"),
-            Row(key: "⌥5", action: "Show lineweights (LWT)"),
-            Row(key: "⌥6  F12", action: "Value box always visible"),
-            Row(key: "⌥7", action: "Continuous lines (LNC)"),
-            Row(key: "F7", action: "Show grid"),
-            Row(key: "⌥8  F8", action: "Ortho"),
+            Row(key: "⌥1  F11", action: "Snap tracking – hold the cursor on a snap point to line up with it (F11 only when macOS does not use it for Show Desktop)"),
+            Row(key: "⌥4  F4", action: "Ask to close polylines and splines (CLS)"),
+            Row(key: "⌥5  F5", action: "Show lineweights (LWT)"),
+            Row(key: "⌥7  F6", action: "Continuous lines (LNC)"),
+            Row(key: "⌥2  F7", action: "Show grid"),
+            Row(key: "⌥8  F8", action: "Ortho (or hold Shift)"),
             Row(key: "⌥9  F9", action: "Snap to grid"),
-            Row(key: "⌥0  F10", action: "Polar angles")
+            Row(key: "⌥0  F10", action: "Polar angles"),
+            Row(key: "⌥6  F12", action: "Value box always visible")
+        ]))
+
+        sections.append(("Help and windows", [
+            Row(key: "F1", action: "This overview (Help › Keyboard Shortcuts…)"),
+            Row(key: "F2", action: "Info Panel"),
+            Row(key: "⇧⌘]  ⇧⌘[", action: "Next / previous tab (also ⌃⇥ and ⌃⇧⇥)")
         ]))
 
         sections.append(("Mouse", [

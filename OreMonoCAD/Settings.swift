@@ -356,7 +356,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let general = pane([
             check("Show the welcome screen at launch", AppSettings.showWelcomeScreen,
                   tip: "The window with New Drawing / Open File… / Open Recent when OreMonoCAD starts") { AppSettings.showWelcomeScreen = $0 },
-            check("Repeat the last tool with ↩, Space or right-click", AppSettings.repeatLastTool,
+            check("Repeat the last tool with ↩ or right-click", AppSettings.repeatLastTool,
                   tip: "Only when the Select tool is active and nothing is in progress") { AppSettings.repeatLastTool = $0 },
             check("Smooth lines and text (antialiasing)", AppSettings.smoothLines,
                   tip: "Also in View › Smooth Lines (Antialiasing)") { AppSettings.smoothLines = $0 },
@@ -762,7 +762,7 @@ final class SnapSettingsPanel: NSViewController {
 // MARK: - Custom keyboard shortcuts
 //
 // One shared table for tools and hatch patterns (including custom ones). A shortcut = a single letter A–Z,
-// alone (“F”) or with Shift (“⇧F”). Digits are for entering values, ⌥ + digit and F-keys for modes.
+// alone (“F”) or with Option (“⌥F”). Shift is left for Ortho, digits for entering values, ⌥ + digit and F-keys for modes.
 
 /// A command that can be assigned a shortcut.
 enum ShortcutCommand: Hashable {
@@ -797,7 +797,15 @@ enum Shortcuts {
     static let didChange = Notification.Name("OreMonoCADShortcutsDidChange")
 
     /// User changes: command id → letter ("" = no shortcut).
-    private static var overrides: [String: String] = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+    private static var overrides: [String: String] = {
+        var stored = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+        // up to 1.21 the second layer was Shift + letter (“⇧F”); custom keys move to ⌥ + letter once
+        if stored.values.contains(where: { $0.hasPrefix("⇧") }) {
+            stored = stored.mapValues { $0.hasPrefix("⇧") ? "⌥" + $0.dropFirst() : $0 }
+            UserDefaults.standard.set(stored, forKey: storageKey)
+        }
+        return stored
+    }()
 
     /// The effective shortcut of a command (custom, otherwise default).
     static func key(for command: ShortcutCommand) -> String? {
@@ -814,23 +822,23 @@ enum Shortcuts {
         return DrawingTool.availableTools.map { ShortcutCommand.tool($0) } + HatchPatternLibrary.all.map { .hatch($0.name) }
     }
 
-    /// The command for a pressed key (“F” or “⇧F”).
+    /// The command for a pressed key (“F” or “⌥F”).
     static func command(forKey key: String) -> ShortcutCommand? {
         let upper = key.uppercased()
         return commands.first { self.key(for: $0) == upper }
     }
 
-    /// Converts the table notation to a shortcut: “f” → “F”; “⇧F”, “+F” or “Shift F” → “⇧F”. Otherwise nil.
+    /// Converts the table notation to a shortcut: “f” → “F”; “⌥F”, “Alt F”, “Opt F” or “Option F” → “⌥F”. Otherwise nil.
     static func normalized(_ text: String) -> String? {
         var rest = text.trimmingCharacters(in: .whitespaces).uppercased()
-        var shift = false
-        for prefix in ["⇧", "SHIFT+", "SHIFT-", "SHIFT", "+"] where rest.hasPrefix(prefix) {
-            shift = true
+        var option = false
+        for prefix in ["⌥", "OPTION+", "OPTION-", "OPTION", "OPT+", "OPT-", "OPT", "ALT+", "ALT-", "ALT"] where rest.hasPrefix(prefix) {
+            option = true
             rest = String(rest.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
             break
         }
         guard rest.count == 1, let c = rest.unicodeScalars.first, c.value >= 65 && c.value <= 90 else { return nil }
-        return (shift ? "⇧" : "") + rest
+        return (option ? "⌥" : "") + rest
     }
 
     /// Sets a shortcut (nil = none). The same letter on another command is released.
@@ -903,7 +911,7 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
 
         let reset = NSButton(title: "Reset All to Defaults", target: self, action: #selector(resetAll))
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a key cell and type one letter (A–Z), or ⇧ and a letter for Shift (+F works too); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥1, ⌥3–⌥0 and F3, F7–F12 switch modes, digits start typed values, ↩, Space or right-click repeats the last tool. Help › Keyboard Shortcuts… lists them all.")
+            "Click a key cell and type one letter (A–Z), or Alt and a letter for ⌥ + letter (Alt F, Opt F or ⌥F); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥ + digit and F1–F12 (modes, Keyboard Shortcuts, Info Panel), Shift = Ortho, digits start typed values, Space = Select, ↩ or right-click repeats the last tool. Help › Keyboard Shortcuts… (F1) lists them all.")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 540
