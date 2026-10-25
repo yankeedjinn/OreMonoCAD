@@ -155,6 +155,41 @@ final class ToolDragGhost {
     }
 }
 
+/// The picture of a whole group dragged out of the tool panel by its heading: the group as it looks in the panel,
+/// in an accent outline – the palette it will become. It follows the mouse, held by its heading.
+final class GroupDragGhost {
+    static let shared = GroupDragGhost()
+    private let imageView = NSImageView()
+    var isShown: Bool { return imageView.superview != nil }
+
+    private init() {
+        imageView.wantsLayer = true
+        imageView.imageScaling = .scaleNone
+        imageView.layer?.cornerRadius = 8
+        imageView.layer?.borderWidth = 2
+        imageView.alphaValue = 0.85
+    }
+
+    /// Shows the picture with its heading under the mouse of the event (the picture is taken once per drag).
+    func show(_ image: @autoclosure () -> NSImage?, for event: NSEvent) {
+        guard let content = event.window?.contentView else { return }
+        if imageView.superview !== content {
+            let picture = image()
+            imageView.image = picture
+            imageView.frame.size = picture?.size ?? NSSize(width: 80, height: 60)
+            imageView.layer?.backgroundColor = Theme.toolbarBackground.cgColor
+            imageView.layer?.borderColor = Theme.accent.cgColor
+            content.addSubview(imageView, positioned: .above, relativeTo: nil)
+        }
+        let point = content.convert(event.locationInWindow, from: nil)
+        imageView.setFrameOrigin(NSPoint(x: point.x - imageView.frame.width / 2, y: point.y - imageView.frame.height + 8))
+    }
+
+    func hide() {
+        imageView.removeFromSuperview()
+    }
+}
+
 /// Vertical tool panel on the left – icons in two columns, by section (Favorites and the tool groups).
 /// Holding (or right-clicking) the Arc tool opens a menu of arc construction methods.
 /// A section is moved by dragging its heading and hidden from the heading's menu;
@@ -169,6 +204,8 @@ final class ToolbarView: NSView, NSMenuDelegate {
     private var customIcons: [DrawingTool: NSImage] = [:]
     /// Buttons on the floating palettes – a palette owns them, the panel only keeps them up to date.
     private var paletteButtons: [DrawingTool: NSHashTable<ToolButtonView>] = [:]
+    /// Combined buttons on the floating palettes (key = the family's first tool), kept up to date like the panel's.
+    private var combinedPaletteButtons: [DrawingTool: NSHashTable<ToolButtonView>] = [:]
     private var selectedTool: DrawingTool = .select
     private(set) var arcMethod: ArcMethod = .threePoint
     /// Tools (one button or a whole group) dragged out of the panel and released elsewhere in the window
@@ -176,10 +213,40 @@ final class ToolbarView: NSView, NSMenuDelegate {
     var onToolsDroppedOutside: (([DrawingTool], NSPoint) -> Void)?
     /// A whole section dragged out of the panel by its heading and released elsewhere in the window.
     var onSectionDroppedOutside: ((ToolPanelSection, [DrawingTool], NSPoint) -> Void)?
-    /// The panel layout was reset (the sections moved to palettes come back).
+    /// Reset All Palettes to Default View was chosen – the window resets the panel and the palettes together.
     var onLayoutReset: (() -> Void)?
+    /// A section was shown in the panel again from its menu – it leaves the palette holding it.
+    var onSectionShown: ((ToolPanelSection) -> Void)?
+    /// No section is shown in the panel (all hidden or moved to palettes) – the window hides the panel.
+    private(set) var isEmpty = false
+    /// The width the panel wants: one column of groups, more when they don't fit and columns are added.
+    private(set) var panelWidth: CGFloat = ToolbarView.columnWidth
+    /// The panel became empty, got a section again or changed its width – the window lays itself out again.
+    var onShapeChanged: (() -> Void)?
+
+    /// When the groups don't fit the panel's height: true = they go on in another column (the panel gets wider),
+    /// false = the panel scrolls (kept in the app's settings).
+    static var addsColumns: Bool {
+        get { return UserDefaults.standard.bool(forKey: "ToolPanelAddsColumns") }
+        set { UserDefaults.standard.set(newValue, forKey: "ToolPanelAddsColumns") }
+    }
 
     static let preferredWidth: CGFloat = 80
+
+    /// Icons in a row of the panel, 1 to 4 – set by dragging the panel's inner edge (kept in the app's settings).
+    static var iconsPerRow: Int {
+        get {
+            let saved = UserDefaults.standard.integer(forKey: "ToolPanelIconsPerRow")
+            return saved == 0 ? 2 : min(4, max(1, saved))
+        }
+        set { UserDefaults.standard.set(min(4, max(1, newValue)), forKey: "ToolPanelIconsPerRow") }
+    }
+
+    /// Width of one column of groups for the current number of icons in a row (80 for two icons).
+    static var columnWidth: CGFloat {
+        let icons = CGFloat(iconsPerRow)
+        return icons * 34 + (icons - 1) * 4 + 8
+    }
     private let buttonSize = NSSize(width: 34, height: 32)
 
     override init(frame frameRect: NSRect) {
@@ -221,15 +288,27 @@ final class ToolbarView: NSView, NSMenuDelegate {
         rebuild()
     }
 
-    /// Where each shown section lies (heading top to the end of its buttons) – for dragging a heading.
-    private var sectionSpans: [(section: ToolPanelSection, top: CGFloat, bottom: CGFloat)] = []
-    /// Top of the Favorites buttons (nil = Favorites not shown) – for dragging a favorite.
+    /// Where each shown section lies (its column's left edge, heading top to the end of its buttons) –
+    /// for dragging a heading.
+    private var sectionSpans: [(section: ToolPanelSection, left: CGFloat, top: CGFloat, bottom: CGFloat)] = []
+    /// Top of the Favorites buttons (nil = Favorites not shown) and the left edge of their column –
+    /// for dragging a favorite.
     private var favoritesTop: CGFloat?
+    private var favoritesLeft: CGFloat = 0
     /// Line showing where a dragged section will land.
     private let dropMarker = NSBox()
 
+    /// The buttons' left edge inside a column of the panel.
     private var buttonsLeft: CGFloat {
-        return (bounds.width - 2 * buttonSize.width - 4) / 2
+        let icons = CGFloat(ToolbarView.iconsPerRow)
+        return (ToolbarView.columnWidth - icons * buttonSize.width - (icons - 1) * 4) / 2
+    }
+
+    // in the column mode a new height can need another number of columns
+    override func setFrameSize(_ newSize: NSSize) {
+        let heightChanged = newSize.height != frame.height
+        super.setFrameSize(newSize)
+        if heightChanged && ToolbarView.addsColumns { rebuild() }
     }
 
     /// Sections shown on the panel, in the user's order (an empty Favorites is not shown).
@@ -253,23 +332,43 @@ final class ToolbarView: NSView, NSMenuDelegate {
         buttons = [:]
         sectionSpans = []
         favoritesTop = nil
-        var y: CGFloat = 8
+        let columnWidth = ToolbarView.columnWidth
+        let icons = ToolbarView.iconsPerRow
+        var y: CGFloat = 8, left: CGFloat = 0, contentHeight: CGFloat = 0
         let sections = visibleSections
         for section in sections {
+            let sectionTools = tools(in: section)
+            let sectionHeight = 14 + CGFloat((sectionTools.count + icons - 1) / icons) * (buttonSize.height + 2) + 8
+            if y > 8 {
+                // the group doesn't fit the column: it starts the next one (in the column mode)
+                if ToolbarView.addsColumns && y + 4 + sectionHeight > bounds.height {
+                    contentHeight = max(contentHeight, y)
+                    left += columnWidth
+                    y = 8
+                } else {
+                    // separator between groups of one column
+                    let separator = NSBox(frame: NSRect(x: left + 10, y: y - 4, width: columnWidth - 20, height: 1))
+                    separator.boxType = .separator
+                    content.addSubview(separator)
+                    y += 4
+                }
+            }
             let top = y
-            let caption = ToolSectionCaptionView(frame: NSRect(x: 0, y: y, width: bounds.width, height: 13), title: section.title)
+            let caption = ToolSectionCaptionView(frame: NSRect(x: left, y: y, width: columnWidth, height: 13), title: section.title)
             caption.toolTip = "Drag to move this group, right-click to hide it"
             caption.onDrag = { [weak self] phase, event in self?.sectionDragged(section, phase: phase, event: event) }
             caption.menuProvider = { [weak self] in self?.makeSectionMenu(section) }
             content.addSubview(caption)
             y += 14
 
-            let sectionTools = tools(in: section)
-            if section == .favorites { favoritesTop = y }
+            if section == .favorites {
+                favoritesTop = y
+                favoritesLeft = left
+            }
             for (index, tool) in sectionTools.enumerated() {
-                let column = CGFloat(index % 2)
-                let row = CGFloat(index / 2)
-                let button = makeButton(tool, frame: NSRect(x: buttonsLeft + column * (buttonSize.width + 4),
+                let column = CGFloat(index % icons)
+                let row = CGFloat(index / icons)
+                let button = makeButton(tool, frame: NSRect(x: left + buttonsLeft + column * (buttonSize.width + 4),
                                                             y: y + row * (buttonSize.height + 2),
                                                             width: buttonSize.width, height: buttonSize.height))
                 let inFavorites = section == .favorites
@@ -279,33 +378,31 @@ final class ToolbarView: NSView, NSMenuDelegate {
                 content.addSubview(button)
                 buttons[tool, default: []].append(button)
             }
-            y += CGFloat((sectionTools.count + 1) / 2) * (buttonSize.height + 2) + 8
-            sectionSpans.append((section, top, y))
-
-            // section separator
-            if section != sections.last {
-                let separator = NSBox(frame: NSRect(x: 10, y: y - 4, width: bounds.width - 20, height: 1))
-                separator.boxType = .separator
-                content.addSubview(separator)
-                y += 4
-            }
+            y += CGFloat((sectionTools.count + icons - 1) / icons) * (buttonSize.height + 2) + 8
+            sectionSpans.append((section, left, top, y))
         }
+        contentHeight = max(contentHeight, y)
         if sections.isEmpty {
             // everything hidden – say how to get the groups back
             let hint = NSTextField(wrappingLabelWithString: "All tool groups are hidden. Right-click here to show them.")
             hint.font = NSFont.systemFont(ofSize: 10)
             hint.textColor = Theme.textHint
             hint.alignment = .center
-            hint.frame = NSRect(x: 4, y: y, width: bounds.width - 8, height: 80)
+            hint.frame = NSRect(x: 4, y: y, width: columnWidth - 8, height: 80)
             content.addSubview(hint)
-            y += 84
+            contentHeight = y + 84
         }
         dropMarker.boxType = .custom
         dropMarker.borderWidth = 0
         dropMarker.fillColor = Theme.accent
         dropMarker.isHidden = true
         content.addSubview(dropMarker)
-        content.frame.size.height = y + 4
+        content.frame.size = NSSize(width: left + columnWidth, height: contentHeight + 4)
+        if sections.isEmpty != isEmpty || left + columnWidth != panelWidth {
+            isEmpty = sections.isEmpty
+            panelWidth = left + columnWidth
+            onShapeChanged?()
+        }
         let leader = selectedTool.paletteLeader
         for (key, list) in buttons { list.forEach { $0.isSelected = key == leader } }
     }
@@ -360,12 +457,21 @@ final class ToolbarView: NSView, NSMenuDelegate {
     }
 
     /// A button for a floating palette – the same as in the panel, kept up to date by the panel.
-    func makePaletteButton(_ tool: DrawingTool) -> ToolButtonView {
-        let button = makeButton(tool, frame: NSRect(origin: .zero, size: buttonSize), fixed: true)
-        button.isSelected = tool == selectedTool
-        let table = paletteButtons[tool] ?? .weakObjects()
-        table.add(button)
-        paletteButtons[tool] = table
+    /// combined = it offers the tool's whole family like the panel button (a group moved to a palette),
+    /// otherwise it always stands for this one tool.
+    func makePaletteButton(_ tool: DrawingTool, combined: Bool = false) -> ToolButtonView {
+        let button = makeButton(tool, frame: NSRect(origin: .zero, size: buttonSize), fixed: !combined)
+        if combined {
+            button.isSelected = tool == selectedTool.paletteLeader
+            let table = combinedPaletteButtons[tool] ?? .weakObjects()
+            table.add(button)
+            combinedPaletteButtons[tool] = table
+        } else {
+            button.isSelected = tool == selectedTool
+            let table = paletteButtons[tool] ?? .weakObjects()
+            table.add(button)
+            paletteButtons[tool] = table
+        }
         return button
     }
 
@@ -374,6 +480,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         customIcons[tool] = image
         buttons[tool]?.forEach { $0.image = icon(for: tool) }
         paletteButtons[tool]?.allObjects.forEach { $0.image = fixedIcon(for: tool) }
+        combinedPaletteButtons[tool]?.allObjects.forEach { $0.image = icon(for: tool) }
     }
 
     func setSelectedTool(_ tool: DrawingTool) {
@@ -383,9 +490,11 @@ final class ToolbarView: NSView, NSMenuDelegate {
         if tool.paletteFamily != nil, familyChoice[leader] != tool {
             familyChoice[leader] = tool
             buttons[leader]?.forEach { $0.image = icon(for: leader) }
+            combinedPaletteButtons[leader]?.allObjects.forEach { $0.image = icon(for: leader) }
         }
         for (key, list) in buttons { list.forEach { $0.isSelected = key == leader } }
-        // a palette button stands for exactly one tool
+        for (key, table) in combinedPaletteButtons { table.allObjects.forEach { $0.isSelected = key == leader } }
+        // a single-tool palette button stands for exactly one tool
         for (key, table) in paletteButtons { table.allObjects.forEach { $0.isSelected = key == tool } }
     }
 
@@ -463,12 +572,13 @@ final class ToolbarView: NSView, NSMenuDelegate {
     /// A favorite released inside the panel takes the place under the mouse.
     private func moveFavorite(_ tool: DrawingTool, to point: NSPoint) {
         guard let top = favoritesTop else { return }
-        let column = point.x < buttonsLeft + buttonSize.width + 2 ? 0 : 1
+        let icons = ToolbarView.iconsPerRow
+        let column = max(0, min(icons - 1, Int((point.x - favoritesLeft - buttonsLeft + 2) / (buttonSize.width + 4))))
         let row = max(0, Int(((point.y - top) / (buttonSize.height + 2)).rounded(.down)))
         var favorites = ToolPanelLayout.favorites
         guard let from = favorites.firstIndex(of: tool) else { return }
         favorites.remove(at: from)
-        favorites.insert(tool, at: min(row * 2 + column, favorites.count))
+        favorites.insert(tool, at: min(row * icons + column, favorites.count))
         ToolPanelLayout.favorites = favorites
         scheduleRebuild()
     }
@@ -478,27 +588,43 @@ final class ToolbarView: NSView, NSMenuDelegate {
     private func sectionDragged(_ section: ToolPanelSection, phase: ToolDragPhase, event: NSEvent) {
         let outside = !bounds.contains(convert(event.locationInWindow, from: nil))
         let shownTools = tools(in: section).map { familyChoice[$0] ?? $0 }
-        let y = content.convert(event.locationInWindow, from: nil).y
-        // the place in front of the first section whose middle lies below the mouse
-        let index = sectionSpans.firstIndex { ($0.top + $0.bottom) / 2 > y } ?? sectionSpans.count
+        let point = content.convert(event.locationInWindow, from: nil)
+        let y = point.y
+        // the place in front of the first section whose middle lies below the mouse in its column
+        // (or that starts a column further right)
+        let columnLeft = (point.x / ToolbarView.columnWidth).rounded(.down) * ToolbarView.columnWidth
+        let index = sectionSpans.firstIndex { $0.left > columnLeft || ($0.left == columnLeft && ($0.top + $0.bottom) / 2 > y) }
+            ?? sectionSpans.count
         switch phase {
         case .moved where outside:
             dropMarker.isHidden = true
-            ToolDragGhost.shared.show(shownTools.first.flatMap { icon(for: $0.paletteLeader) }, for: event)
+            GroupDragGhost.shared.show(self.picture(of: section), for: event)
         case .moved:
-            ToolDragGhost.shared.hide()
+            GroupDragGhost.shared.hide()
             let markerY = index < sectionSpans.count ? sectionSpans[index].top - 5 : (sectionSpans.last?.bottom ?? 0) - 2
-            dropMarker.frame = NSRect(x: 6, y: markerY, width: bounds.width - 12, height: 2)
+            let markerX = index < sectionSpans.count ? sectionSpans[index].left : (sectionSpans.last?.left ?? 0)
+            dropMarker.frame = NSRect(x: markerX + 6, y: markerY, width: ToolbarView.columnWidth - 12, height: 2)
             dropMarker.isHidden = false
         case .ended:
             dropMarker.isHidden = true
-            ToolDragGhost.shared.hide()
+            GroupDragGhost.shared.hide()
             if outside {
                 onSectionDroppedOutside?(section, shownTools, event.locationInWindow)
             } else {
                 move(section, toVisibleIndex: index)
             }
         }
+    }
+
+    /// The section as it looks in the panel (its heading and buttons) – the picture of a dragged group.
+    private func picture(of section: ToolPanelSection) -> NSImage? {
+        guard let span = sectionSpans.first(where: { $0.section == section }) else { return nil }
+        let rect = NSRect(x: span.left, y: span.top - 3, width: ToolbarView.columnWidth, height: span.bottom - span.top - 2)
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        content.cacheDisplay(in: rect, to: rep)
+        let image = NSImage(size: rect.size)
+        image.addRepresentation(rep)
+        return image
     }
 
     /// Moves a section in front of the shown section at the index (index = count: to the end).
@@ -577,8 +703,16 @@ final class ToolbarView: NSView, NSMenuDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let reset = NSMenuItem(title: "Reset Tool Panel Layout", action: #selector(layoutReset(_:)), keyEquivalent: "")
+        let columns = NSMenuItem(title: "Add Columns When Groups Don't Fit", action: #selector(addsColumnsToggled(_:)),
+                                 keyEquivalent: "")
+        columns.target = self
+        columns.state = ToolbarView.addsColumns ? .on : .off
+        columns.subtitle = "Otherwise the panel scrolls"
+        menu.addItem(columns)
+        let reset = NSMenuItem(title: "Reset All Palettes to Default View", action: #selector(layoutReset(_:)),
+                               keyEquivalent: "")
         reset.target = self
+        reset.subtitle = "The tool panel and all palettes as at the start"
         reset.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: nil)
         menu.addItem(reset)
     }
@@ -590,8 +724,11 @@ final class ToolbarView: NSView, NSMenuDelegate {
     @objc private func sectionVisibilityToggled(_ sender: NSMenuItem) {
         guard let section = section(of: sender) else { return }
         var hidden = ToolPanelLayout.hidden
-        if hidden.contains(section) { hidden.remove(section) } else { hidden.insert(section) }
+        let shown = hidden.contains(section)
+        if shown { hidden.remove(section) } else { hidden.insert(section) }
         ToolPanelLayout.hidden = hidden
+        // a section lying in a floating palette comes back from it, so it is not in both places
+        if shown { onSectionShown?(section) }
         scheduleRebuild()
     }
 
@@ -606,9 +743,21 @@ final class ToolbarView: NSView, NSMenuDelegate {
         move(section, toVisibleIndex: index + 2)
     }
 
+    @objc private func addsColumnsToggled(_ sender: NSMenuItem) {
+        ToolbarView.addsColumns.toggle()
+        scheduleRebuild()
+    }
+
     @objc private func layoutReset(_ sender: NSMenuItem) {
-        ToolPanelLayout.resetLayout()
         onLayoutReset?()
+    }
+
+    /// Back to the default panel: all groups shown in the default order, two icons in a row, scrolling
+    /// (the favorites stay).
+    func resetToDefaults() {
+        ToolPanelLayout.resetLayout()
+        ToolbarView.iconsPerRow = 2
+        ToolbarView.addsColumns = false
         scheduleRebuild()
     }
 
@@ -1114,6 +1263,18 @@ final class ToolButtonView: NSView {
                                   owner: self, userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
+        refreshHover()
+    }
+
+    /// The button can move away from under a still mouse (a palette bar scrolled or laid out again) without
+    /// getting an exit event – then it would stay lit up. Checks where the mouse really is.
+    func refreshHover() {
+        guard let window = window else { return }
+        let inside = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        guard inside != isHovered else { return }
+        isHovered = inside
+        updateAppearance()
+        if !inside { onHover?(false) }
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -2319,8 +2480,16 @@ final class PropertiesPanelView: NSView {
     private func shown(_ p: CGPoint) -> CGPoint { return p.applying(ucsToWorld.inverted()) }
     private func stored(_ p: CGPoint) -> CGPoint { return p.applying(ucsToWorld) }
     /// Angle from the drawing X axis in degrees ↔ world angle in radians.
-    private func shownDegrees(_ angle: CGFloat) -> CGFloat { return Geometry.normalizeAngle(angle - ucsAngle) * 180 / .pi }
-    private func storedAngle(_ degrees: CGFloat) -> CGFloat { return Geometry.normalizeAngle(degrees * .pi / 180 + ucsAngle) }
+    /// A direction of an object as shown (degrees or gons, a bearing if chosen in Settings – Units.swift).
+    private func shownDegrees(_ angle: CGFloat) -> CGFloat {
+        return AngleStyle.shown(Geometry.normalizeAngle(angle - ucsAngle) * 180 / .pi, .direction)
+    }
+    private func storedAngle(_ shown: CGFloat) -> CGFloat {
+        return Geometry.normalizeAngle(AngleStyle.degrees(shown, .direction) * .pi / 180 + ucsAngle)
+    }
+    private var directionTip: String {
+        return AngleStyle.bearings ? "Bearings go clockwise from north (the Y axis)" : "Angles go counter-clockwise from the X axis"
+    }
 
     /// X and Y rows of a point in drawing coordinates; `apply` gets the new point in world coordinates.
     private func addPointRows(_ xLabel: String, _ yLabel: String, _ point: CGPoint, tip: String? = nil,
@@ -2624,8 +2793,8 @@ final class PropertiesPanelView: NSView {
             addRow("Pattern", hatchPatternPopup)
             let angles = Set(hatches.map { LineType.format($0.angle * 180 / .pi) })
             let scales = Set(hatches.map { LineType.format($0.scale) })
-            addNumber("Angle °", angles.count == 1 ? first.angle * 180 / .pi : nil) { [weak self] value in
-                self?.onChangeHatchAngle?(value)
+            addNumber(AngleStyle.caption("Angle", .amount), angles.count == 1 ? AngleStyle.shown(first.angle * 180 / .pi, .amount) : nil) { [weak self] value in
+                self?.onChangeHatchAngle?(AngleStyle.degrees(value, .amount))
             }
             addNumber("Scale", scales.count == 1 ? first.scale : nil) { [weak self] value in
                 guard value > 0 else { NSSound.beep(); return }
@@ -2765,7 +2934,7 @@ final class PropertiesPanelView: NSView {
                     return c
                 }
             }
-            addNumber("Angle °", shownDegrees(angle), tip: "Rotates the line around its start point") { [weak self] degrees in
+            addNumber(AngleStyle.caption("Angle", .direction), shownDegrees(angle), tip: "Rotates the line around its start point") { [weak self] degrees in
                 guard let self = self else { return }
                 let world = self.storedAngle(degrees)
                 self.edit("Change Angle", Line.self) { l in
@@ -2798,12 +2967,12 @@ final class PropertiesPanelView: NSView {
                 guard r > 0 else { NSSound.beep(); return }
                 self?.edit("Change Radius", Arc.self) { o in let c = o.clone() as! Arc; c.radius = r; return c }
             }
-            addNumber("Start °", shownDegrees(arc.startAngle), tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
+            addNumber(AngleStyle.caption("Start", .direction), shownDegrees(arc.startAngle), tip: directionTip) { [weak self] v in
                 guard let self = self else { return }
                 let world = self.storedAngle(v)
                 self.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.startAngle = world; return c }
             }
-            addNumber("End °", shownDegrees(arc.endAngle), tip: "Angles go counter-clockwise from the X axis") { [weak self] v in
+            addNumber(AngleStyle.caption("End", .direction), shownDegrees(arc.endAngle), tip: directionTip) { [weak self] v in
                 guard let self = self else { return }
                 let world = self.storedAngle(v)
                 self.edit("Change Arc", Arc.self) { o in let c = o.clone() as! Arc; c.endAngle = world; return c }
@@ -2833,6 +3002,15 @@ final class PropertiesPanelView: NSView {
                     guard p.vertices.count >= 3 || !closed else { return nil }
                     let c = p.clone() as! Polyline
                     c.closed = closed
+                    return c
+                }
+            }
+            addNumber("Polyline Width", polyline.width,
+                      tip: "Width of the polyline in drawing units, drawn as a band \u{2013} 0 = a thin line with its lineweight") { [weak self] v in
+                guard v >= 0 else { NSSound.beep(); return }
+                self?.edit("Change Polyline Width", Polyline.self) { p in
+                    let c = p.clone() as! Polyline
+                    c.width = v
                     return c
                 }
             }
@@ -2883,18 +3061,20 @@ final class PropertiesPanelView: NSView {
             addNumber("Minor r.", ellipse.minorRadius, tip: "Half of the short axis") { [weak self] v in
                 self?.edit("Change Ellipse", Ellipse.self) { e in rebuilt(e, minor: v) }
             }
-            addNumber("Rotation °", shownDegrees(ellipse.rotation),
-                      tip: "Direction of the major axis, counter-clockwise from the X axis") { [weak self] v in
+            addNumber(AngleStyle.caption("Rotation", .direction), shownDegrees(ellipse.rotation),
+                      tip: "Direction of the major axis \u{2013} " + directionTip.lowercased()) { [weak self] v in
                 guard let self = self else { return }
                 let world = self.storedAngle(v)
                 self.edit("Change Rotation", Ellipse.self) { e in rebuilt(e, rotation: world) }
             }
             if !ellipse.isFull {
-                addNumber("Start °", ellipse.startParam * 180 / .pi, tip: "Parametric angle of the start of the arc") { [weak self] v in
-                    self?.edit("Change Elliptical Arc", Ellipse.self) { e in rebuilt(e, start: v * .pi / 180) }
+                addNumber(AngleStyle.caption("Start", .amount), AngleStyle.shown(ellipse.startParam * 180 / .pi, .amount),
+                          tip: "Parametric angle of the start of the arc") { [weak self] v in
+                    self?.edit("Change Elliptical Arc", Ellipse.self) { e in rebuilt(e, start: AngleStyle.degrees(v, .amount) * .pi / 180) }
                 }
-                addNumber("End °", ellipse.endParam * 180 / .pi, tip: "Parametric angle of the end of the arc") { [weak self] v in
-                    self?.edit("Change Elliptical Arc", Ellipse.self) { e in rebuilt(e, end: v * .pi / 180) }
+                addNumber(AngleStyle.caption("End", .amount), AngleStyle.shown(ellipse.endParam * 180 / .pi, .amount),
+                          tip: "Parametric angle of the end of the arc") { [weak self] v in
+                    self?.edit("Change Elliptical Arc", Ellipse.self) { e in rebuilt(e, end: AngleStyle.degrees(v, .amount) * .pi / 180) }
                 }
             }
 
@@ -2968,7 +3148,7 @@ final class PropertiesPanelView: NSView {
         addPointRows("X", "Y", reference.position, tip: "Insertion point") { [weak self] p in
             self?.edit("Move Block", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.position = p; return c }
         }
-        addNumber("Rotation °", shownDegrees(reference.rotation)) { [weak self] v in
+        addNumber(AngleStyle.caption("Rotation", .direction), shownDegrees(reference.rotation)) { [weak self] v in
             guard let self = self else { return }
             let world = self.storedAngle(v)
             self.edit("Change Rotation", BlockReference.self) { r in
@@ -2977,9 +3157,21 @@ final class PropertiesPanelView: NSView {
                 return c
             }
         }
-        addNumber("Scale", reference.scale, tip: "1 = original size") { [weak self] v in
+        addNumber(reference.isStretched ? "X Scale" : "Scale", reference.scale,
+                  tip: reference.isStretched ? "1 = original size \u{2013} the Y scale changes in the same proportion" : "1 = original size") { [weak self] v in
             guard v > 0 else { NSSound.beep(); return }
             self?.edit("Change Scale", BlockReference.self) { r in let c = r.clone() as! BlockReference; c.scale = v; return c }
+        }
+        if reference.isStretched {
+            // a block stretched differently in X and Y (from DXF) – Y Scale = X Scale makes it uniform again
+            addNumber("Y Scale", reference.scale * reference.yRatio, tip: "The same value as X Scale makes the block uniform again") { [weak self] v in
+                guard v > 0 else { NSSound.beep(); return }
+                self?.edit("Change Scale", BlockReference.self) { r in
+                    let c = r.clone() as! BlockReference
+                    c.yRatio = v / max(c.scale, 1e-12)
+                    return c
+                }
+            }
         }
         addCheck("Mirrored", reference.mirrored) { [weak self] value in
             self?.edit("Change Mirroring", BlockReference.self) { r in
@@ -3083,7 +3275,7 @@ final class PropertiesPanelView: NSView {
             guard v > 0 else { NSSound.beep(); return }
             self?.edit("Change Text Height", TextEntity.self) { t in let c = t.clone() as! TextEntity; c.height = v; return c }
         }
-        addNumber("Rotation °", same({ LineType.format($0.rotation * 180 / .pi) }) ? shownDegrees(first.rotation) : nil) { [weak self] v in
+        addNumber(AngleStyle.caption("Rotation", .direction), same({ LineType.format($0.rotation * 180 / .pi) }) ? shownDegrees(first.rotation) : nil) { [weak self] v in
             guard let self = self else { return }
             let world = self.storedAngle(v)
             self.edit("Change Rotation", TextEntity.self) { t in
@@ -3599,7 +3791,7 @@ final class StatusBarView: NSView {
         snapMoreButton = snapMore
         trackButton = toggle("Track", "Snap tracking – hold the cursor on a snap point for a moment to track it (a small cross); the cursor then lines up with it horizontally, vertically and at polar angles. Hold it there again to release it\nShortcut: ⌥1 · F11 (when macOS does not use it for Show Desktop)", #selector(trackClicked))
         orthoButton = toggle("Ortho", "Ortho – only horizontal and vertical directions (of the drawing coordinates)\nShortcut: ⌥8 · F8 · or hold Shift", #selector(orthoClicked))
-        polarButton = toggle("Polar 15° ", "Polar angles – the direction snaps in steps (the number is the step)\nShortcut: ⌥0 · F10 · right-click = step or Custom…", #selector(polarClicked), valued: true)
+        polarButton = toggle("Polar " + AngleStyle.text(15) + " ", "Polar angles – the direction snaps in steps (the number is the step)\nShortcut: ⌥0 · F10 · right-click = step or Custom…", #selector(polarClicked), valued: true)
         gridButton = toggle("Grid 10 ", "Snap to grid – points jump to the grid (the number is the grid step)\nShortcut: ⌥9 · F9 · right-click = grid size, Custom…, Show Grid or Show Axes", #selector(gridClicked), valued: true)
         rebuildValueMenus(gridSize: 10, polarIncrement: 15)
         separator()
@@ -3716,11 +3908,10 @@ final class StatusBarView: NSView {
     private func valueMenu(_ kind: ValueKind, current: CGFloat) -> NSMenu {
         let presets = kind == .grid ? StatusBarView.gridPresets : StatusBarView.polarPresets
         let custom = StatusBarView.customValues(kind == .grid ? StatusBarView.customGridKey : StatusBarView.customPolarKey)
-        let unit = kind == .grid ? "" : "°"
         let menu = NSMenu()
         menu.autoenablesItems = false
         func add(_ value: CGFloat) {
-            let item = NSMenuItem(title: (kind == .grid ? LineType.format(value) : LineType.formatAngle(value)) + unit, action: #selector(valueChosen(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: kind == .grid ? LineType.format(value) : AngleStyle.text(value), action: #selector(valueChosen(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = value
             item.tag = kind == .grid ? 1 : 2
@@ -3774,15 +3965,23 @@ final class StatusBarView: NSView {
         alert.messageText = isGrid ? "Grid – Custom Size" : "Polar – Custom Angle"
         alert.informativeText = isGrid
             ? "Step of the grid in drawing units (an expression works too, e.g. 1000/3):"
-            : "Step of the polar angles in degrees (from 0 to 180, e.g. 7.5 or 360/24):"
+            : AngleStyle.unit == .gons ? "Step of the polar angles in gons (from 0 to 200, e.g. 50 or 400/16):"
+                : "Step of the polar angles in degrees (from 0 to 180, e.g. 7.5 or 360/24):"
         alert.addButton(withTitle: "Use")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
-        field.placeholderString = isGrid ? "e.g. 12.5" : "e.g. 7.5"
+        field.placeholderString = isGrid ? "e.g. 12.5" : AngleStyle.unit == .gons ? "e.g. 50" : "e.g. 7.5"
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard let number = ExpressionEvaluator.evaluate(field.stringValue), number > 0, isGrid || number <= 180 else {
+        guard var number = ExpressionEvaluator.evaluate(field.stringValue), number > 0 else {
+            NSSound.beep()
+            showMessage("“\(field.stringValue)” is not a valid \(isGrid ? "grid size" : "angle").")
+            return
+        }
+        // the polar step is kept in degrees
+        if !isGrid { number = Double(AngleStyle.degrees(CGFloat(number), .amount)) }
+        guard isGrid || number <= 180 else {
             NSSound.beep()
             showMessage("“\(field.stringValue)” is not a valid \(isGrid ? "grid size" : "angle").")
             return
@@ -3841,7 +4040,7 @@ final class StatusBarView: NSView {
         gridButton.state = gridSnap ? .on : .off
         polarButton.state = polar ? .on : .off
         retitle(gridButton, "Grid", value: LineType.format(gridSize))
-        retitle(polarButton, "Polar", value: LineType.formatAngle(polarIncrement) + "°")
+        retitle(polarButton, "Polar", value: AngleStyle.text(polarIncrement))
         lastGridSize = gridSize
         lastPolarIncrement = polarIncrement
         lastShowGrid = showGrid
@@ -4083,10 +4282,11 @@ enum DocumentSettingsDialog {
         view.addSubview(showCheck)
 
         section("Angles")
-        caption("Polar step °")
+        caption(AngleStyle.caption("Polar step", .amount))
         let polarField = NSComboBox(frame: NSRect(x: 128, y: y, width: 90, height: 24))
-        polarField.addItems(withObjectValues: ["1", "5", "10", "15", "22.5", "30", "45", "90"])
-        polarField.stringValue = LineType.format(polarIncrement)
+        polarField.addItems(withObjectValues: AngleStyle.unit == .gons ? ["1", "5", "10", "12.5", "25", "50", "100"]
+                                                                    : ["1", "5", "10", "15", "22.5", "30", "45", "90"])
+        polarField.stringValue = LineType.format(AngleStyle.shown(polarIncrement, .amount))
         view.addSubview(polarField)
         let polarCheck = NSButton(checkboxWithTitle: "On  (⌥0, F10)", target: nil, action: nil)
         polarCheck.frame = NSRect(x: 222, y: y + 3, width: 106, height: 18)
@@ -4098,7 +4298,8 @@ enum DocumentSettingsDialog {
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
 
         guard let grid = ExpressionEvaluator.evaluate(gridField.stringValue), grid > 0,
-              let step = ExpressionEvaluator.evaluate(polarField.stringValue), step > 0, step <= 180 else {
+              case let step = Double(AngleStyle.degrees(CGFloat(ExpressionEvaluator.evaluate(polarField.stringValue) ?? -1), .amount)),
+              step > 0, step <= 180 else {
             NSSound.beep()
             return nil
         }

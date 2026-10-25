@@ -380,6 +380,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let unitsRow = NSStackView(views: [NSTextField(labelWithString: "Units of a new drawing:"), unitsPopup])
         unitsRow.spacing = 8
 
+        // angles and feet-and-inches (Units.swift)
+        let anglePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        anglePopup.addItems(withTitles: AngleUnit.allCases.map { $0.title })
+        anglePopup.selectItem(at: AngleUnit.allCases.firstIndex(of: AngleStyle.unit) ?? 0)
+        anglePopup.toolTip = "How angles are shown and typed – in the value box, the panels, the dimensions and the messages"
+        let angleAction = MenuAction { [weak anglePopup] in
+            guard let popup = anglePopup else { return }
+            AngleStyle.unit = AngleUnit.allCases[max(0, popup.indexOfSelectedItem)]
+        }
+        actions.append(angleAction)
+        anglePopup.target = angleAction
+        anglePopup.action = #selector(MenuAction.run(_:))
+        let angleRow = NSStackView(views: [NSTextField(labelWithString: "Angles:"), anglePopup])
+        angleRow.spacing = 8
+        let bearingsCheck = check("Directions as bearings (clockwise from north)", AngleStyle.bearings,
+                                  tip: "Directions of lines, points and rotations go clockwise from the Y axis of the drawing coordinates. Sizes of angles (Rotate, arcs, polar steps) do not change") { AngleStyle.bearings = $0 }
+        let feetCheck = check("Feet and inches as 12'-6 1/2\" (drawings in feet or inches)", LengthStyle.feetAndInches,
+                              tip: "Lengths in the value box, the dimensions and Measure; you can also type 12'6\" or 6 1/2\" anywhere a length is asked") { LengthStyle.feetAndInches = $0 }
+
         let reset = NSButton(title: "Forget Remembered Values…", target: nil, action: nil)
         let resetAction = MenuAction { [weak self] in self?.confirmReset() }
         actions.append(resetAction)
@@ -426,6 +445,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let drawing = pane([
             unitsRow,
             note("A new tab takes the settings of the current drawing; an empty window after launch starts with these units."),
+            angleRow,
+            bearingsCheck,
+            feetCheck,
+            separator(),
             autosaveRow,
             backupRow,
             note("Auto-save keeps your unsaved changes in OreMonoCAD's own folder (your drawing file is not touched) and deletes them once you save or close the drawing. If OreMonoCAD quits unexpectedly, it offers to recover them at the next launch. A backup of the previous version is made when you save over a drawing – at most one every 10 minutes; File › Open Backup… opens one as a copy."),
@@ -800,9 +823,14 @@ enum Shortcuts {
     private static var overrides: [String: String] = {
         var stored = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
         // up to 1.21 the second layer was Shift + letter (“⇧F”); custom keys move to ⌥ + letter once
-        if stored.values.contains(where: { $0.hasPrefix("⇧") }) {
-            stored = stored.mapValues { $0.hasPrefix("⇧") ? "⌥" + $0.dropFirst() : $0 }
-            UserDefaults.standard.set(stored, forKey: storageKey)
+        // (only once: Shift + letter is a shortcut layer of its own again)
+        let migratedKey = "OreMonoCAD.shortcutsShiftMigrated"
+        if !UserDefaults.standard.bool(forKey: migratedKey) {
+            if stored.values.contains(where: { $0.hasPrefix("⇧") }) {
+                stored = stored.mapValues { $0.hasPrefix("⇧") ? "⌥" + $0.dropFirst() : $0 }
+                UserDefaults.standard.set(stored, forKey: storageKey)
+            }
+            UserDefaults.standard.set(true, forKey: migratedKey)
         }
         return stored
     }()
@@ -828,17 +856,25 @@ enum Shortcuts {
         return commands.first { self.key(for: $0) == upper }
     }
 
-    /// Converts the table notation to a shortcut: “f” → “F”; “⌥F”, “Alt F”, “Opt F” or “Option F” → “⌥F”. Otherwise nil.
+    /// Converts the table notation to a shortcut: “f” → “F”; “⌥F”, “Alt F”, “Opt F” or “Option F” → “⌥F”;
+    /// “⇧F” or “Shift F” → “⇧F”. Otherwise nil.
     static func normalized(_ text: String) -> String? {
         var rest = text.trimmingCharacters(in: .whitespaces).uppercased()
-        var option = false
+        var prefixMark = ""
         for prefix in ["⌥", "OPTION+", "OPTION-", "OPTION", "OPT+", "OPT-", "OPT", "ALT+", "ALT-", "ALT"] where rest.hasPrefix(prefix) {
-            option = true
+            prefixMark = "⌥"
             rest = String(rest.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
             break
         }
+        if prefixMark.isEmpty {
+            for prefix in ["⇧", "SHIFT+", "SHIFT-", "SHIFT"] where rest.hasPrefix(prefix) {
+                prefixMark = "⇧"
+                rest = String(rest.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
         guard rest.count == 1, let c = rest.unicodeScalars.first, c.value >= 65 && c.value <= 90 else { return nil }
-        return (option ? "⌥" : "") + rest
+        return prefixMark + rest
     }
 
     /// Sets a shortcut (nil = none). The same letter on another command is released.
@@ -911,7 +947,7 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
 
         let reset = NSButton(title: "Reset All to Defaults", target: self, action: #selector(resetAll))
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a key cell and type one letter (A–Z), or Alt and a letter for ⌥ + letter (Alt F, Opt F or ⌥F); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥ + digit and F1–F12 (modes, Keyboard Shortcuts, Info Panel), Shift = Ortho, digits start typed values, Space = Select, ↩ or right-click repeats the last tool. Help › Keyboard Shortcuts… (F1) lists them all.")
+            "Click a key cell and type one letter (A–Z), or Alt and a letter for ⌥ + letter (Alt F, Opt F or ⌥F), or Shift and a letter for ⇧ + letter (Shift F or ⇧F – works only with nothing in progress); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥ + digit and F1–F12 (modes, Keyboard Shortcuts, Info Panel), Shift = Ortho, digits start typed values, Space = Select, ↩ or right-click repeats the last tool. Help › Keyboard Shortcuts… (F1) lists them all.")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 540

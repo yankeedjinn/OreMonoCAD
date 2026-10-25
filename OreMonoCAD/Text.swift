@@ -250,8 +250,8 @@ final class TextEntity: CADEntity {
 
     var infoText: String {
         let lines = text.components(separatedBy: "\n").count
-        var info = String(format: "Text\n%@\n\nPosition: %.3f, %.3f\nHeight:   %.3f\nRotation: %.2f°\nFont:     %@ %@\nLines:    %ld",
-                          commonInfo, position.x, position.y, height, rotation * 180 / .pi,
+        var info = String(format: "Text\n%@\n\nPosition: %.3f, %.3f\nHeight:   %.3f\nRotation: %@\nFont:     %@ %@\nLines:    %ld",
+                          commonInfo, position.x, position.y, height, AngleStyle.text(rotation * 180 / .pi, .direction),
                           fontFamily.isEmpty ? FontLibrary.systemFamilyTitle : fontFamily, fontFace, lines)
         if widthFactor != 1 { info += String(format: "\nWidth:    %.2f×", widthFactor) }
         if let width = boxWidth { info += String(format: "\nBox:      %.3f", width) }
@@ -263,8 +263,8 @@ final class TextEntity: CADEntity {
 
     private static let referenceSize: CGFloat = 100
     private var cachedLayout: (box: CGRect, ascent: CGFloat)?
-    /// The text measured at the last drawn size (measuring is the most expensive part of drawing).
-    private var cachedMeasure: (fontSize: CGFloat, color: NSColor, attributed: NSAttributedString, size: CGRect)?
+    /// The text measured at the reference size (measuring is the most expensive part of drawing).
+    private var cachedMeasure: (color: NSColor, attributed: NSAttributedString, size: CGRect)?
 
     private func invalidate() {
         cachedLayout = nil
@@ -412,39 +412,44 @@ final class TextEntity: CADEntity {
         let screenDir = CGPoint(x: transform.a * dir.x + transform.c * dir.y, y: transform.b * dir.x + transform.d * dir.y)
         let screenAngle = atan2(screenDir.y, screenDir.x)
 
-        // Sizes are measured directly at the size being drawn: fonts don't scale exactly linearly
-        // at different sizes, and a box computed at another size would wrap the last character or word
-        // onto the next line outside the drawn area (the text would then be “missing”).
+        // The text is always laid out at the reference size and only the drawing is scaled. Laid out at the
+        // on-screen size, the glyph widths would not follow the zoom exactly (the system font changes its letter
+        // spacing and design with the point size, and small sizes are rounded to whole pixels), so the text would
+        // shift against the drawing and rewrap differently at every zoom. This way it scales exactly with the drawing
+        // and matches the box from `layout`, which is measured at the same reference size.
         let wf = max(widthFactor, 0.05)
-        let font = FontLibrary.font(family: fontFamily, face: fontFace, size: fontSize)
+        let reference = TextEntity.referenceSize
+        let s = fontSize / reference
+        let font = FontLibrary.font(family: fontFamily, face: fontFace, size: reference)
         let ascent = font.ascender
         // wrapping happens at the width before the font is condensed (it is then drawn condensed)
-        let wrapWidth: CGFloat = self.wrapWidth.map { max($0 * scale / wf, 1) } ?? 10_000_000
+        let k = height * emScale / reference
+        let wrapWidth: CGFloat = self.wrapWidth.map { max($0 / (k * wf), 1) } ?? 10_000_000
         let attributed: NSAttributedString
         let measured: CGRect
-        if let cached = cachedMeasure, abs(cached.fontSize - fontSize) < 0.01, cached.color == style.color {
+        if let cached = cachedMeasure, cached.color == style.color {
             attributed = cached.attributed
             measured = cached.size
         } else {
-            attributed = attributedString(fontSize: fontSize, color: style.color)
+            attributed = attributedString(fontSize: reference, color: style.color)
             measured = attributed.boundingRect(with: CGSize(width: wrapWidth, height: CGFloat.greatestFiniteMagnitude),
                                                options: [.usesLineFragmentOrigin, .usesFontLeading])
-            cachedMeasure = (fontSize, style.color, attributed, measured)
+            cachedMeasure = (style.color, attributed, measured)
         }
         // no paragraph: width from the longest line + a margin so nothing wraps
-        let width = boxWidth != nil ? wrapWidth : ceil(measured.width) + max(2, fontSize * 0.25)
+        let width = boxWidth != nil ? wrapWidth : ceil(measured.width) + reference * 0.25
         let x: CGFloat
         switch justify {
         case .left: x = 0
         case .center: x = -width / 2
         case .right: x = -width
         }
-        let rect = CGRect(x: x, y: -ascent, width: width, height: ceil(measured.height) + fontSize)
+        let rect = CGRect(x: x, y: -ascent, width: width, height: ceil(measured.height) + reference)
 
         context.saveGState()
         context.translateBy(x: anchor.x, y: anchor.y)
         context.rotate(by: screenAngle)
-        context.scaleBy(x: wf, y: -1)          // font condensing; AppKit text top to bottom (flipped context)
+        context.scaleBy(x: wf * s, y: -s)      // zoom and font condensing; AppKit text top to bottom (flipped context)
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
         attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading])
@@ -685,7 +690,7 @@ final class TextFormatPanel: NSViewController {
         facePopup.action = #selector(changed)
 
         setupNumber(heightField, format.height)
-        setupNumber(rotationField, format.rotationDegrees)
+        setupNumber(rotationField, AngleStyle.shown(format.rotationDegrees, .amount))
         setupNumber(widthField, format.boxWidth)
         setupNumber(spacingField, format.lineSpacing, width: 48)
         widthField.placeholderString = "no wrap"
@@ -710,7 +715,7 @@ final class TextFormatPanel: NSViewController {
             field.textColor = .secondaryLabelColor
             return field
         }
-        let sizeRow = NSStackView(views: [heightField, unit(unitName), label("Rotation °"), rotationField])
+        let sizeRow = NSStackView(views: [heightField, unit(unitName), label(AngleStyle.caption("Rotation", .amount)), rotationField])
         sizeRow.spacing = 5
         let widthRow = NSStackView(views: [widthField, unit(unitName), label("Spacing"), spacingField])
         widthRow.spacing = 5
@@ -774,7 +779,7 @@ final class TextFormatPanel: NSViewController {
         f.family = selectedFamily
         f.face = facePopup.titleOfSelectedItem ?? f.face
         if let height = number(heightField), height > 0 { f.height = height } else { heightField.stringValue = LineType.format(f.height) }
-        f.rotationDegrees = number(rotationField) ?? 0
+        f.rotationDegrees = number(rotationField).map { AngleStyle.degrees($0, .amount) } ?? 0
         f.justify = TextJustify.allCases[max(0, justifyControl.selectedSegment)]
         f.underline = underlineBox.state == .on
         f.boxWidth = number(widthField).flatMap { $0 > 0 ? $0 : nil }

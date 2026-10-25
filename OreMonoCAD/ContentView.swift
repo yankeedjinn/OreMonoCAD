@@ -20,15 +20,14 @@ final class ReplaceBatch: NSObject {
     let added: [CADEntity]
     /// The document the change concerns (model or layout) – Undo then works even after switching spaces.
     let document: CADDocument?
+    /// Where the added objects lay in the drawing order before they were removed (Undo / Redo); nil = a new change.
+    let addedAnchors: [CADDocument.OrderAnchor]?
 
-    init(removed: [CADEntity], added: [CADEntity], document: CADDocument? = nil) {
+    init(removed: [CADEntity], added: [CADEntity], document: CADDocument? = nil, addedAnchors: [CADDocument.OrderAnchor]? = nil) {
         self.removed = removed
         self.added = added
         self.document = document
-    }
-
-    var inverse: ReplaceBatch {
-        return ReplaceBatch(removed: added, added: removed, document: document)
+        self.addedAnchors = addedAnchors
     }
 }
 
@@ -74,6 +73,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var infoFolded = false
     /// The whole right panel collapsed into a narrow strip.
     private var trayCollapsed = false
+    /// The right panel moved to the left edge, next to the tool panel (kept in the app's settings).
+    private var trayOnLeft = UserDefaults.standard.bool(forKey: "OreMonoCAD.trayOnLeft")
     private var propertiesFolded = false
     private var layersFolded = false
     private var trayWidth: CGFloat = 300
@@ -111,7 +112,28 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var toolbarHeight: CGFloat = 0
     /// The bar above the drawing tabs for the palettes held to the top.
     private var paletteDockBar: PaletteDockBar!
-    private let paletteWidth: CGFloat = ToolbarView.preferredWidth
+    /// Width of the palette bar at the right edge of the window (0 when no palette is held to the right).
+    private var sideDockWidth: CGFloat = 0
+    /// The bar at the right edge of the window, beyond the right panel, for the palettes held to the right.
+    private var paletteSideBar: PaletteDockBar!
+    /// Height of the palette bar under the drawing (0 when no palette is held to the bottom).
+    private var bottomDockHeight: CGFloat = 0
+    /// The bar under the drawing, above the layout tabs, for the palettes held to the bottom.
+    private var paletteBottomBar: PaletteDockBar!
+    /// Width of the tool panel on the left – none when all its groups are hidden or moved to palettes.
+    /// Width of the palette bar at the left edge of the window (0 when no palette is held to the left).
+    private var leftDockWidth: CGFloat = 0
+    /// The bar at the left edge of the window, beyond the tool panel, for the palettes held to the left.
+    private var paletteLeftBar: PaletteDockBar!
+    /// Where the parts right of the tool panel start: the left palette bar and the tool panel.
+    private var leftInset: CGFloat {
+        return leftDockWidth + paletteWidth
+    }
+
+    private var paletteWidth: CGFloat {
+        guard let toolbarView = toolbarView else { return ToolbarView.preferredWidth }
+        return toolbarView.isEmpty ? 0 : toolbarView.panelWidth
+    }
     /// Status line – a free margin at the bottom so the Dock doesn't open when clicking the toggles.
     private let statusBarHeight: CGFloat = 70
     private let layerPanelWidth: CGFloat = 290
@@ -160,6 +182,15 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 guard let self = self else { return }
                 self.editorView.snapManager.enabledSnaps = AppSettings.enabledSnaps
                 self.editorView.needsDisplay = true
+            }
+        }
+        // angles in degrees or gons, bearings, feet and inches (Settings › Drawing)
+        NotificationCenter.default.addObserver(forName: AngleStyle.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self = self else { return }
+                self.editorView.unitStyleChanged()
+                self.updateModes()
+                self.refreshPanels()
             }
         }
         startXrefWatcher()
@@ -215,9 +246,14 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         toolbarView.autoresizingMask = [.height, .maxXMargin]
         toolbarView.delegate = self
         view.addSubview(toolbarView)
+        toolbarView.onShapeChanged = { [weak self] in self?.toolPanelShapeChanged() }
+        toolbarView.isHidden = toolbarView.isEmpty
+        toolbarView.frame.size.width = paletteWidth
 
         // floating tool palettes on top of the drawing: their buttons come from the tool panel
-        editorView.paletteLayer.makeButton = { [weak self] tool in self?.toolbarView.makePaletteButton(tool) }
+        editorView.paletteLayer.makeButton = { [weak self] tool, combined in
+            self?.toolbarView.makePaletteButton(tool, combined: combined)
+        }
         toolbarView.onToolsDroppedOutside = { [weak self] tools, windowPoint in
             self?.editorView.paletteLayer.dropTools(tools, atWindowPoint: windowPoint)
         }
@@ -226,12 +262,31 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             self?.editorView.paletteLayer.dropTools(tools, atWindowPoint: windowPoint, section: section.title)
         }
         editorView.paletteLayer.onPanelLayoutChanged = { [weak self] in self?.toolbarView.reloadLayout() }
-        toolbarView.onLayoutReset = { [weak self] in self?.editorView.paletteLayer.closeGroupPalettes() }
-        paletteDockBar = PaletteDockBar(frame: NSRect(x: 0, y: b.height, width: b.width, height: 0))
+        // one reset for the tool panel and the palettes, from the menus of both
+        toolbarView.onLayoutReset = { [weak self] in self?.resetToolLayout() }
+        editorView.paletteLayer.onResetAll = { [weak self] in self?.resetToolLayout() }
+        toolbarView.onSectionShown = { [weak self] section in self?.editorView.paletteLayer.takeBackSection(section) }
+        paletteDockBar = PaletteDockBar(edge: .top, frame: NSRect(x: 0, y: b.height, width: b.width, height: 0))
         paletteDockBar.autoresizingMask = [.width, .minYMargin]
-        paletteDockBar.onHeightChanged = { [weak self] height in self?.paletteDockBarChanged(height) }
+        paletteDockBar.onThicknessChanged = { [weak self] height in self?.paletteDockBarChanged(height) }
         view.addSubview(paletteDockBar)
         editorView.paletteLayer.dockBar = paletteDockBar
+        paletteSideBar = PaletteDockBar(edge: .right, frame: NSRect(x: b.width, y: statusBarHeight, width: 0, height: middleHeight))
+        paletteSideBar.autoresizingMask = [.height, .minXMargin]
+        paletteSideBar.onThicknessChanged = { [weak self] width in self?.paletteSideBarChanged(width) }
+        view.addSubview(paletteSideBar)
+        editorView.paletteLayer.sideBar = paletteSideBar
+        paletteBottomBar = PaletteDockBar(edge: .bottom, frame: NSRect(x: paletteWidth, y: statusBarHeight + LayoutBarView.height,
+                                                                       width: b.width - paletteWidth, height: 0))
+        paletteBottomBar.onThicknessChanged = { [weak self] height in self?.paletteBottomBarChanged(height) }
+        view.addSubview(paletteBottomBar)
+        editorView.paletteLayer.bottomBar = paletteBottomBar
+        editorView.paletteLayer.toolPanel = toolbarView
+        paletteLeftBar = PaletteDockBar(edge: .left, frame: NSRect(x: 0, y: statusBarHeight, width: 0, height: middleHeight))
+        paletteLeftBar.autoresizingMask = [.height, .maxXMargin]
+        paletteLeftBar.onThicknessChanged = { [weak self] width in self?.paletteLeftBarChanged(width) }
+        view.addSubview(paletteLeftBar)
+        editorView.paletteLayer.leftBar = paletteLeftBar
         editorView.paletteLayer.reload()
 
         // right panel: Properties and Layers stacked, both collapsible
@@ -275,6 +330,16 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar = StatusBarView(frame: NSRect(x: 0, y: 0, width: b.width, height: statusBarHeight))
         statusBar.autoresizingMask = [.width, .maxYMargin]
         view.addSubview(statusBar)
+        // the inner edges of the side columns: dragging them sets 1 to 4 icons in a row
+        for part in ColumnPart.allCases {
+            let handle = DragHandleView(frame: .zero)
+            handle.cursor = .resizeLeftRight
+            handle.toolTip = "Drag to show 1 to 4 icons in a row"
+            handle.isHidden = true
+            handle.onDrag = { [weak self] offset, finished in self?.dragColumnWidth(part, offset, finished: finished) }
+            view.addSubview(handle)
+            columnHandles[part] = handle
+        }
         toast = ToastView(frame: .zero)
         view.addSubview(toast, positioned: .above, relativeTo: nil)
         statusBar.onMessage = { [weak self] message in self?.showToast(message) }
@@ -353,7 +418,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let visible = !sections.isEmpty && !trayCollapsed
 
         collapsedStrip.isHidden = !(trayCollapsed && !sections.isEmpty)
-        collapsedStrip.frame = NSRect(x: b.width - collapsedWidth, y: bottom, width: collapsedWidth, height: top - bottom)
+        collapsedStrip.frame = NSRect(x: trayOnLeft ? leftInset : b.width - sideDockWidth - collapsedWidth, y: bottom,
+                                      width: collapsedWidth, height: top - bottom)
         collapsedStrip.titles = sections.map { $0.kind.rawValue.capitalized }
 
         // remove panels that should not be in the right panel (or when it is collapsed)
@@ -369,8 +435,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         traySplitHandles.forEach { $0.isHidden = true }
 
         if visible {
-            trayWidth = min(max(trayWidth, 240), max(240, b.width - paletteWidth - 320))
-            let x = b.width - trayWidth
+            trayWidth = min(max(trayWidth, 240), max(240, b.width - sideDockWidth - leftInset - 320))
+            let x = trayOnLeft ? leftInset : b.width - sideDockWidth - trayWidth
             let header = DockablePanelView.headerHeight
             let total = top - bottom
             let expanded = sections.indices.filter { !sections[$0].folded }
@@ -410,7 +476,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 panel.frame = NSRect(x: x, y: y, width: trayWidth, height: heights[index])
                 trayHeights[section.kind] = heights[index]
             }
-            trayResizeHandle.frame = NSRect(x: x - 3, y: bottom, width: 6, height: total)
+            // the handle lies on the side facing the drawing
+            trayResizeHandle.frame = NSRect(x: (trayOnLeft ? x + trayWidth : x) - 3, y: bottom, width: 6, height: total)
             // a divider below every expanded panel that is followed by another expanded one
             splitPairs = []
             for (pair, handle) in zip(zip(expanded, expanded.dropFirst()), traySplitHandles) {
@@ -430,7 +497,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func resizeTray(_ offset: CGPoint, finished: Bool) {
         if trayDragStartWidth == nil { trayDragStartWidth = trayWidth }
-        trayWidth = (trayDragStartWidth ?? trayWidth) - offset.x
+        trayWidth = (trayDragStartWidth ?? trayWidth) + (trayOnLeft ? offset.x : -offset.x)
         layoutTray()
         if finished {
             trayDragStartWidth = nil
@@ -473,20 +540,72 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// The dragged panel and the top edge the drag started from.
     private var trayDrag: (kind: TrayPanel, startTop: CGFloat)?
 
+    /// The panel whose header is dragged sideways to move the whole right panel to the other side.
+    private var traySideDrag: TrayPanel?
+
+    /// How far (points) a header must be dragged toward the other side to move the right panel there.
+    private let traySideDistance: CGFloat = 150
+
+    /// Where the right panel will lie when the dragged header is released now: an accent area on the other side.
+    private lazy var traySidePreview: NSView = {
+        let preview = NSView()
+        preview.wantsLayer = true
+        preview.layer?.backgroundColor = Theme.accent.withAlphaComponent(0.15).cgColor
+        preview.layer?.borderColor = Theme.accent.cgColor
+        preview.layer?.borderWidth = 2
+        preview.layer?.cornerRadius = 6
+        let label = NSTextField(labelWithString: "Release to move the panels here")
+        label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        label.textColor = Theme.accent
+        label.alignment = .center
+        label.autoresizingMask = [.width, .minYMargin, .maxYMargin]
+        preview.addSubview(label)
+        return preview
+    }()
+
+    /// Shows (or hides) the place on the other side where the right panel will move.
+    private func showTraySidePreview(_ shown: Bool) {
+        guard shown else {
+            traySidePreview.removeFromSuperview()
+            return
+        }
+        let b = view.bounds
+        // the panel keeps its width; on the left it starts after the tool panel, on the right it ends at the right bar
+        let x = trayOnLeft ? b.width - sideDockWidth - trayWidth : leftInset
+        traySidePreview.frame = NSRect(x: x, y: statusBarHeight, width: trayWidth, height: b.height - toolbarHeight - statusBarHeight)
+        if let label = traySidePreview.subviews.first as? NSTextField {
+            label.frame = NSRect(x: 8, y: (traySidePreview.bounds.height - 20) / 2, width: trayWidth - 16, height: 20)
+        }
+        if traySidePreview.superview !== view { view.addSubview(traySidePreview, positioned: .above, relativeTo: nil) }
+    }
+
     /// Panel header in the right panel: dragging up / down changes the order,
-    /// Properties dragged left out of the panel come loose as floating.
+    /// any panel (Info, Properties, Layers) dragged far toward the other side of the window moves the whole panel there.
     private func dragTrayPanel(_ kind: TrayPanel, _ offset: CGPoint, finished: Bool) {
         if kind == .properties && propertiesMode != .docked {
             dragProperties(offset, finished: finished)
             return
         }
-        if kind == .properties && trayDrag == nil && offset.x < -40 && abs(offset.x) > abs(offset.y) * 1.5 {
-            dragProperties(offset, finished: finished)
-            return
-        }
+        let towardDrawing = trayOnLeft ? offset.x > 40 : offset.x < -40
+        let sideways = abs(offset.x) > abs(offset.y) * 1.5
         let sections = traySections
         guard !trayCollapsed, sections.contains(where: { $0.kind == kind }) else { return }
         let panel = container(for: kind)
+        if trayDrag == nil && (traySideDrag == kind || (traySideDrag == nil && towardDrawing && sideways)) {
+            traySideDrag = kind
+            // the panel follows the mouse sideways; released far enough, the right panel changes sides
+            let x = trayOnLeft ? leftInset : view.bounds.width - sideDockWidth - trayWidth
+            panel.frame.origin.x = x + offset.x
+            panel.layer?.zPosition = 10
+            // far enough: the place on the other side lights up
+            showTraySidePreview(!finished && abs(offset.x) >= traySideDistance)
+            if finished {
+                traySideDrag = nil
+                panel.layer?.zPosition = 0
+                if abs(offset.x) >= traySideDistance { setTrayOnLeft(!trayOnLeft) } else { layoutTray() }
+            }
+            return
+        }
         if trayDrag == nil {
             guard abs(offset.y) > 6, !finished else { return }
             trayDrag = (kind, panel.frame.maxY)
@@ -528,6 +647,19 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
+    /// Moves the right panel to the left edge (next to the tool panel) or back to the right.
+    private func setTrayOnLeft(_ left: Bool) {
+        trayOnLeft = left
+        UserDefaults.standard.set(left, forKey: "OreMonoCAD.trayOnLeft")
+        // a floating Properties panel stays where it is, a docked one moves with the panel
+        layoutTray()
+    }
+
+    /// View › Right Panel on the Left.
+    @objc func toggleTraySide(_ sender: Any?) {
+        setTrayOnLeft(!trayOnLeft)
+    }
+
     /// View › Reset Right Panel Layout: Info, Properties, Layers stacked, default heights.
     @objc func resetTrayLayout(_ sender: Any?) {
         trayOrder = TrayPanel.allCases
@@ -549,7 +681,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// Suffix after the coordinates in the status line (units, rotation).
     private var coordinateSuffix: String {
         var text = editorView.drawingUnits.suffix
-        if editorView.isUCSRotated { text += String(format: " · UCS %@°", LineType.formatAngle(Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi)) }
+        if editorView.isUCSRotated { text += String(format: " · UCS %@", AngleStyle.text(Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi)) }
         return text
     }
 
@@ -581,8 +713,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.pickAxis(byObject: true, prompt: "Drawing Coordinates: click a line or a text – its direction becomes the X axis") { [weak self] axis in
             guard let self = self, let axis = axis else { return }
             self.setUCS(origin: axis.origin, angle: axis.angle,
-                        message: String(format: "Drawing coordinates rotated %@° – ortho, grid and new rectangles follow the object · View › Rotate View to Drawing Coordinates turns the screen",
-                                        LineType.formatAngle(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
+                        message: String(format: "Drawing coordinates rotated %@ – ortho, grid and new rectangles follow the object · View › Rotate View to Drawing Coordinates turns the screen",
+                                        AngleStyle.text(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
         }
     }
 
@@ -592,8 +724,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.pickAxis(byObject: false, prompt: "Drawing Coordinates: click the new origin (0,0)") { [weak self] axis in
             guard let self = self, let axis = axis else { return }
             self.setUCS(origin: axis.origin, angle: axis.angle,
-                        message: String(format: "Drawing coordinates: new origin, X axis at %@°",
-                                        LineType.formatAngle(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
+                        message: String(format: "Drawing coordinates: new origin, X axis at %@",
+                                        AngleStyle.text(Geometry.normalizeAngle(axis.angle) * 180 / .pi)))
         }
     }
 
@@ -603,7 +735,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                      message: "Angle of the X axis in degrees (counter-clockwise, 0 = world). The origin stays.",
                                      initial: Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi) else { return }
         setUCS(origin: editorView.ucsOrigin, angle: degrees * .pi / 180,
-               message: "Drawing coordinates rotated \(LineType.formatAngle(degrees))°")
+               message: "Drawing coordinates rotated \(AngleStyle.text(degrees))")
     }
 
     @objc func ucsWorld(_ sender: Any?) {
@@ -635,7 +767,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         activeTab.viewRotation = editorView.viewport.rotation
         markSettingsChanged()
         let degrees = editorView.viewport.rotation * 180 / .pi
-        statusBar.showMessage(abs(degrees) < 1e-9 ? "View not rotated" : "View rotated \(LineType.formatAngle(degrees))° – the objects keep their coordinates")
+        statusBar.showMessage(abs(degrees) < 1e-9 ? "View not rotated" : "View rotated \(AngleStyle.text(degrees)) – the objects keep their coordinates")
     }
 
     private func askAngle(title: String, message: String, initial: CGFloat) -> CGFloat? {
@@ -801,7 +933,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
         if let main = view.window {
-            panel.setFrameTopLeftPoint(NSPoint(x: main.frame.minX + paletteWidth + 20, y: main.frame.maxY - 70))
+            panel.setFrameTopLeftPoint(NSPoint(x: main.frame.minX + leftInset + 20, y: main.frame.maxY - 70))
         }
         layerWindow = panel
         return panel
@@ -926,8 +1058,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func finishPropertiesDrag() {
         dragStartFrame = nil
-        // pulled to the right edge = return to the right panel
-        if propertiesMode == .floating && propertiesContainer.frame.maxX >= view.bounds.width - 24 {
+        // pulled to the edge where the right panel lies = return to it
+        let atPanel = trayOnLeft ? propertiesContainer.frame.minX <= leftInset + 24
+                                 : propertiesContainer.frame.maxX >= view.bounds.width - sideDockWidth - 24
+        if propertiesMode == .floating && atPanel {
             floatingOrigin = nil
             setPropertiesMode(.docked)
         }
@@ -937,7 +1071,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private func clampFloatingProperties() {
         var frame = propertiesContainer.frame
         let b = view.bounds
-        frame.origin.x = min(max(frame.origin.x, paletteWidth), b.width - frame.width)
+        frame.origin.x = min(max(frame.origin.x, leftInset), b.width - sideDockWidth - frame.width)
         frame.origin.y = min(max(frame.origin.y, statusBarHeight), b.height - toolbarHeight - frame.height)
         propertiesContainer.frame = frame
     }
@@ -954,33 +1088,145 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
+    /// Reset All Palettes to Default View: all palettes close and lose their options, the tool panel
+    /// shows all its groups in the default order again.
+    private func resetToolLayout() {
+        editorView.paletteLayer.resetPalettes()
+        toolbarView.resetToDefaults()
+    }
+
+    /// The tool panel lost its last group or got one back, or got wider or narrower: it disappears, comes back
+    /// or changes its width, the drawing moves. (The groups come back from View › Tool Panel or when their
+    /// palettes close.)
+    private func toolPanelShapeChanged() {
+        toolbarView.isHidden = toolbarView.isEmpty
+        toolbarView.frame.size.width = paletteWidth
+        // while the window is still being built the right panel is not there yet – it is laid out later
+        if infoContainer != nil { layoutTray() }
+    }
+
     /// The palette bar at the top got taller or lower: the tool panel, the tabs and the drawing move below it.
     private func paletteDockBarChanged(_ height: CGFloat) {
         toolbarHeight = height
         let b = view.bounds
         paletteDockBar.frame = NSRect(x: 0, y: b.height - height, width: b.width, height: height)
-        toolbarView.frame = NSRect(x: 0, y: statusBarHeight, width: paletteWidth, height: b.height - height - statusBarHeight)
+        toolbarView.frame = NSRect(x: leftDockWidth, y: statusBarHeight, width: paletteWidth, height: b.height - height - statusBarHeight)
+        paletteLeftBar?.frame = NSRect(x: 0, y: statusBarHeight, width: leftDockWidth, height: b.height - height - statusBarHeight)
+        paletteSideBar?.frame = NSRect(x: b.width - sideDockWidth, y: statusBarHeight, width: sideDockWidth,
+                                       height: b.height - height - statusBarHeight)
         if propertiesContainer != nil { layoutTray() }
+    }
+
+    /// The palette bar at the left edge got wider or narrower: the tool panel and everything right of it move.
+    private func paletteLeftBarChanged(_ width: CGFloat) {
+        leftDockWidth = width
+        let b = view.bounds
+        paletteLeftBar.frame = NSRect(x: 0, y: statusBarHeight, width: width, height: b.height - toolbarHeight - statusBarHeight)
+        toolbarView.frame.origin.x = width
+        // while the window is still being built the right panel is not there yet – it is laid out later
+        if infoContainer != nil { layoutTray() }
+    }
+
+    /// The palette bar at the right edge got wider or narrower: the right panel and the drawing move aside.
+    private func paletteSideBarChanged(_ width: CGFloat) {
+        sideDockWidth = width
+        let b = view.bounds
+        paletteSideBar.frame = NSRect(x: b.width - width, y: statusBarHeight, width: width,
+                                      height: b.height - toolbarHeight - statusBarHeight)
+        // while the window is still being built the right panel is not there yet – it is laid out later
+        if infoContainer != nil { layoutTray() }
+    }
+
+    /// The palette bar under the drawing got taller or lower: the drawing gets lower or taller.
+    private func paletteBottomBarChanged(_ height: CGFloat) {
+        bottomDockHeight = height
+        // while the window is still being built the right panel is not there yet – it is laid out later
+        if infoContainer != nil { updateEditorViewFrame() }
     }
 
     private func updateEditorViewFrame() {
         var frame = view.bounds
         frame.origin.y = statusBarHeight
         frame.size.height -= toolbarHeight + statusBarHeight
-        frame.origin.x = paletteWidth
-        frame.size.width -= paletteWidth + trayOccupiedWidth
+        frame.origin.x = leftInset + (trayOnLeft ? trayOccupiedWidth : 0)
+        frame.size.width -= leftInset + trayOccupiedWidth + sideDockWidth
         // the tab bar at the top, the drawing area below it
         frame.size.height -= DrawingTabBarView.height
         // the Model | layouts bar at the bottom
         frame.origin.y += LayoutBarView.height
         frame.size.height -= LayoutBarView.height
+        // the bottom palette bar between the layout tabs and the drawing
+        let bottomDock = bottomDockHeight
+        frame.origin.y += bottomDock
+        frame.size.height -= bottomDock
         // block editing: the bar gets its own strip above the drawing, so it never covers the place you click
         let barStrip = blockEditStripHeight
         frame.size.height -= barStrip
         editorView.frame = frame
         tabBar?.frame = NSRect(x: frame.minX, y: frame.maxY + barStrip, width: frame.width, height: DrawingTabBarView.height)
-        layoutBar?.frame = NSRect(x: frame.minX, y: frame.minY - LayoutBarView.height, width: frame.width, height: LayoutBarView.height)
+        layoutBar?.frame = NSRect(x: frame.minX, y: frame.minY - bottomDock - LayoutBarView.height, width: frame.width,
+                                  height: LayoutBarView.height)
+        paletteBottomBar?.frame = NSRect(x: frame.minX, y: frame.minY - bottomDock, width: frame.width, height: bottomDock)
         positionBlockEditBar()
+        layoutColumnHandles()
+    }
+
+    // MARK: Width of the side columns (icons in a row)
+
+    /// The side columns whose inner edge can be dragged: the left palette bar, the tool panel, the right palette bar.
+    private enum ColumnPart: CaseIterable {
+        case leftBar, toolPanel, rightBar
+    }
+
+    private var columnHandles: [ColumnPart: DragHandleView] = [:]
+    /// Icons in a row when the drag of a column edge started.
+    private var columnDragStart: Int?
+
+    /// Puts the handles on the inner edges of the side columns (hidden when the column is not shown).
+    private func layoutColumnHandles() {
+        let b = view.bounds
+        let y = statusBarHeight, height = b.height - toolbarHeight - statusBarHeight, width: CGFloat = 5
+        let places: [ColumnPart: (x: CGFloat, shown: Bool)] = [
+            .leftBar: (leftDockWidth - width, leftDockWidth > 0),
+            .toolPanel: (leftInset - width, paletteWidth > 0),
+            .rightBar: (b.width - sideDockWidth, sideDockWidth > 0),
+        ]
+        for (part, handle) in columnHandles {
+            guard let place = places[part] else { continue }
+            handle.isHidden = !place.shown
+            handle.frame = NSRect(x: place.x, y: y, width: width, height: height)
+        }
+    }
+
+    private func iconsPerRow(_ part: ColumnPart) -> Int {
+        switch part {
+        case .toolPanel: return ToolbarView.iconsPerRow
+        case .leftBar: return PaletteDockBar.iconsPerRow(for: .left)
+        case .rightBar: return PaletteDockBar.iconsPerRow(for: .right)
+        }
+    }
+
+    /// Dragging the inner edge of a side column: every icon's width further (toward the drawing) adds an icon
+    /// to a row, back takes one away, 1 to 4.
+    private func dragColumnWidth(_ part: ColumnPart, _ offset: CGPoint, finished: Bool) {
+        let current = iconsPerRow(part)
+        if columnDragStart == nil { columnDragStart = current }
+        let inward = part == .rightBar ? -offset.x : offset.x
+        let wanted = min(4, max(1, (columnDragStart ?? current) + Int((inward / 38).rounded())))
+        if wanted != current {
+            switch part {
+            case .toolPanel:
+                ToolbarView.iconsPerRow = wanted
+                toolbarView.reloadLayout()
+            case .leftBar:
+                PaletteDockBar.setIconsPerRow(wanted, for: .left)
+                editorView.paletteLayer.reload()
+            case .rightBar:
+                PaletteDockBar.setIconsPerRow(wanted, for: .right)
+                editorView.paletteLayer.reload()
+            }
+        }
+        if finished { columnDragStart = nil }
     }
 
     private func connectManagers() {
@@ -1407,8 +1653,14 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     // MARK: Recent files
 
     /// Recently opened / saved drawings (managed by the system – work in the sandbox and across launches).
+    /// Files that were deleted or moved to the Trash are left out; the system list itself stays untouched,
+    /// so a drawing on a disconnected drive comes back once the drive is mounted again.
     var recentFileURLs: [URL] {
-        return NSDocumentController.shared.recentDocumentURLs
+        return NSDocumentController.shared.recentDocumentURLs.filter { url in
+            guard url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return false }
+            let components = url.standardizedFileURL.pathComponents
+            return !components.contains(".Trash") && !components.contains(".Trashes")
+        }
     }
 
     private func noteRecent(_ url: URL) {
@@ -2267,9 +2519,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 activateSpace(index)
             }
         }
+        perform(batch, on: target)
+    }
+
+    /// Applies the change to the document (without switching to its space) and registers its Undo.
+    private func perform(_ batch: ReplaceBatch, on target: CADDocument) {
         selectionManager.deselect(batch.removed)
-        target.replace(batch.removed, with: batch.added)
-        undoer.registerUndo(withTarget: self, selector: #selector(applyBatch(_:)), object: batch.inverse)
+        // the places of the removed objects, so that Undo puts them back where they were
+        let anchors = target.orderAnchors(of: batch.removed)
+        target.replace(batch.removed, with: batch.added, anchors: batch.addedAnchors)
+        let inverse = ReplaceBatch(removed: batch.added, added: batch.removed, document: target, addedAnchors: anchors)
+        undoer.registerUndo(withTarget: self, selector: #selector(applyBatch(_:)), object: inverse)
         hasUnsavedChanges = true
     }
 
@@ -3649,43 +3909,40 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.showMessage("Filter: selected \(found.count) object\(found.count == 1 ? "" : "s") with " + criteria.summary)
     }
 
-    /// Edit › Find and Replace… (⌘F) – texts, labels and dimension texts in the open space.
+    /// Edit › Find and Replace… (⌘F) – texts, labels and dimension texts in the model, on layouts and in blocks.
     @objc func findAndReplace(_ sender: Any?) {
         if findController == nil {
             let controller = FindReplaceController()
-            controller.entities = { [weak self] in
+            controller.sources = { [weak self] in
                 guard let self = self else { return [] }
-                return self.document.getAllEntities().filter { self.layerManager.isLayerVisible($0.layer) }
+                return self.findSources()
             }
             controller.isEditable = { [weak self] entity in
                 return !(self?.layerManager.isLayerLocked(entity.layer) ?? false)
             }
             controller.spaceName = { [weak self] in
                 guard let self = self else { return "the drawing" }
-                return "\u{201C}\(self.activeTab.title)\u{201D} \u{2013} " + (self.activeTab.activeLayout?.name ?? "Model")
-            }
-            controller.onShow = { [weak self] entities in
-                guard let self = self else { return }
-                self.selectionManager.select(entities)
-                self.zoom(toShow: entities)
-            }
-            controller.onSelect = { [weak self] entities in
-                guard let self = self else { return }
-                self.selectionManager.select(entities)
-                self.editorView.needsDisplay = true
-                self.statusBar.showMessage("Selected \(entities.count) object\(entities.count == 1 ? "" : "s") with the found text")
-            }
-            controller.onReplace = { [weak self] pairs in
-                guard let self = self else { return }
-                self.editorView.cancelCurrentOperation()
-                // a text left empty is deleted in the same step (an empty text is invisible and is not saved)
-                let added = pairs.map { $0.new }.filter { entity in
-                    guard let text = entity as? TextEntity else { return true }
-                    return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let title = "\u{201C}\(self.activeTab.title)\u{201D}"
+                if let session = self.activeTab.blockEdit {
+                    return title + " \u{2013} block \u{201C}\(session.definition.name)\u{201D}"
                 }
-                self.applyChange(removed: pairs.map { $0.old }, added: added, actionName: "Replace Text")
+                return title + " \u{2013} model, layouts and blocks"
+            }
+            controller.onShow = { [weak self] matches in
+                self?.showFound(matches)
+            }
+            controller.onSelect = { [weak self] matches in
+                guard let self = self else { return }
+                let here = self.uniqueEntities(matches.filter { self.isOpenSpace($0.place) }.map { $0.entity })
+                let elsewhere = matches.count - matches.filter { self.isOpenSpace($0.place) }.count
+                self.selectionManager.select(here)
                 self.editorView.needsDisplay = true
-                self.refreshPanels()
+                var message = "Selected \(here.count) object\(here.count == 1 ? "" : "s") with the found text"
+                if elsewhere > 0 { message += " \u{2013} texts on other layouts or in blocks are not selected" }
+                self.statusBar.showMessage(message)
+            }
+            controller.onReplace = { [weak self] replacements in
+                self?.replaceFoundTexts(replacements)
             }
             findController = controller
         }
@@ -3696,6 +3953,140 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             initial = text.text.components(separatedBy: "\n").first.map { String($0.prefix(80)) }
         }
         findController?.show(searching: initial)
+    }
+
+    /// Find and Replace searches the open space first, then the other spaces and the blocks.
+    /// During a block edit only the edited block is searched (its objects are the open space).
+    private func findSources() -> [TextSource] {
+        let tab = activeTab
+        let layers = layerManager
+        let visible: (CADEntity) -> Bool = { entity in layers.isLayerVisible(entity.layer) }
+        if let session = tab.blockEdit {
+            return [TextSource(place: .model, name: "Block \u{201C}\(session.definition.name)\u{201D}",
+                               entities: document.getAllEntities().filter(visible))]
+        }
+        var spaces = [TextSource(place: .model, name: "Model", entities: tab.document.getAllEntities().filter(visible))]
+        for (index, layout) in tab.layouts.enumerated() {
+            spaces.append(TextSource(place: .layout(index), name: layout.name,
+                                     entities: layout.document.getAllEntities().filter(visible)))
+        }
+        let open = spaces.firstIndex { isOpenSpace($0.place) } ?? 0
+        spaces.insert(spaces.remove(at: open), at: 0)
+        let blocks = tab.blocks.blocks.map { definition in
+            TextSource(place: .block(definition), name: "Block \u{201C}\(definition.name)\u{201D}",
+                       entities: definition.entities.filter(visible))
+        }
+        return spaces + blocks
+    }
+
+    /// Is the place the space being edited now? (During a block edit the found objects are all in it.)
+    private func isOpenSpace(_ place: TextPlace) -> Bool {
+        if activeTab.blockEdit != nil { return true }
+        switch place {
+        case .model: return activeTab.activeLayoutIndex == nil
+        case let .layout(index): return activeTab.activeLayoutIndex == index
+        case .block: return false
+        }
+    }
+
+    private func uniqueEntities(_ entities: [CADEntity]) -> [CADEntity] {
+        var seen = Set<UUID>()
+        return entities.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Shows found objects: in their space (switching to it), a text in a block through the copies of the block.
+    private func showFound(_ matches: [TextMatch]) {
+        guard let first = matches.first else { return }
+        let tab = activeTab
+        if tab.blockEdit != nil || !isBlock(first.place) {
+            if tab.blockEdit == nil {
+                switch first.place {
+                case .model: activateSpace(nil)
+                case let .layout(index): activateSpace(index)
+                case .block: break
+                }
+                guard isOpenSpace(first.place) else { return }      // the switch was cancelled
+            }
+            let entities = uniqueEntities(matches.filter { $0.place.isSame(as: first.place) }.map { $0.entity })
+            selectionManager.select(entities)
+            zoom(toShow: entities)
+            return
+        }
+        guard case let .block(definition) = first.place else { return }
+        // the copies of the block: in the open space, otherwise in the first space that has some
+        func copies(in document: CADDocument) -> [CADEntity] {
+            return document.getAllEntities().filter { ($0 as? BlockReference)?.definition === definition }
+        }
+        var found = copies(in: document)
+        if found.isEmpty {
+            let spaces: [(index: Int?, document: CADDocument)] = [(nil, tab.document)]
+                + tab.layouts.enumerated().map { (index: Optional($0.offset), document: $0.element.document) }
+            if let other = spaces.first(where: { !copies(in: $0.document).isEmpty }) {
+                activateSpace(other.index)
+                found = copies(in: document)
+            }
+        }
+        guard !found.isEmpty else {
+            statusBar.showMessage("The block \u{201C}\(definition.name)\u{201D} is not inserted in any space \u{2013} Block Manager shows it")
+            NSSound.beep()
+            return
+        }
+        selectionManager.select(found)
+        zoom(toShow: found)
+        statusBar.showMessage("The text is in the block \u{201C}\(definition.name)\u{201D} \u{2013} its copies are selected")
+    }
+
+    private func isBlock(_ place: TextPlace) -> Bool {
+        if case .block = place { return true }
+        return false
+    }
+
+    /// Replace in Find and Replace: the open space, the other spaces and the blocks change in one Undo step.
+    private func replaceFoundTexts(_ replacements: [TextReplacement]) {
+        guard !replacements.isEmpty else { return }
+        editorView.cancelCurrentOperation()
+        // a text left empty is deleted in the same step (an empty text is invisible and is not saved)
+        func kept(_ entity: CADEntity) -> Bool {
+            guard let text = entity as? TextEntity else { return true }
+            return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let tab = activeTab
+        let undo = undoer
+        undo.beginUndoGrouping()
+        // the open space as any other change (associative dimensions, room labels)
+        let here = replacements.filter { isOpenSpace($0.place) }
+        if !here.isEmpty {
+            applyChange(removed: here.map { $0.old }, added: here.map { $0.new }.filter(kept), actionName: "Replace Text")
+        }
+        if tab.blockEdit == nil {
+            // other spaces: changed without switching to them (Undo shows them)
+            let spaces: [(place: TextPlace, document: CADDocument)] = [(.model, tab.document)]
+                + tab.layouts.enumerated().map { (place: TextPlace.layout($0.offset), document: $0.element.document) }
+            for space in spaces where !isOpenSpace(space.place) {
+                let changes = replacements.filter { $0.place.isSame(as: space.place) }
+                guard !changes.isEmpty else { continue }
+                let batch = ReplaceBatch(removed: changes.map { $0.old }, added: changes.map { $0.new }.filter(kept),
+                                         document: space.document)
+                perform(batch, on: space.document)
+            }
+            // blocks: the new content of each definition (every copy of the block changes)
+            for definition in tab.blocks.blocks {
+                let changes = replacements.filter { $0.place.isSame(as: .block(definition)) }
+                guard !changes.isEmpty else { continue }
+                var edited: [UUID: CADEntity] = [:]
+                for change in changes { edited[change.old.id] = change.new }
+                let entities = definition.entities.compactMap { entity -> CADEntity? in
+                    guard let copy = edited[entity.id] else { return entity }
+                    return kept(copy) ? copy : nil
+                }
+                applyBlockChange(BlockContentChange(definition: definition, entities: entities, basePoint: definition.basePoint))
+            }
+        }
+        undo.setActionName("Replace Text")
+        undo.endUndoGrouping()
+        editorView.invalidateRenderCache()
+        editorView.needsDisplay = true
+        refreshPanels()
     }
 
     /// Shows objects in the drawing together with their surroundings (Find and Replace).
@@ -3969,7 +4360,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func togglePolar() {
         editorView.polarEnabled.toggle()
         statusBar.showMessage(editorView.polarEnabled
-            ? "Polar angles ON – every \(LineType.formatAngle(editorView.polarIncrement))°" : "Polar angles OFF")
+            ? "Polar angles ON – every \(AngleStyle.text(editorView.polarIncrement))" : "Polar angles OFF")
     }
 
     /// A change of the drawing settings is saved with the drawing.
@@ -4112,7 +4503,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.polarEnabled = result.polar
         markSettingsChanged()
         editorView.needsDisplay = true
-        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(gridSize)) · polar \(LineType.formatAngle(result.polarIncrement))°")
+        statusBar.showMessage("Units: \(result.units.title) · grid \(LineType.format(gridSize)) · polar \(AngleStyle.text(result.polarIncrement))")
     }
 
     /// Show Grid and Show Axes are saved in the drawing, so switching them is a change of the drawing.
@@ -4521,6 +4912,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case #selector(collapseProperties):
             menuItem.state = trayCollapsed ? .on : .off
             return true
+        case #selector(toggleTraySide(_:)):
+            menuItem.state = trayOnLeft ? .on : .off
+            return true
         case #selector(toggleInfoPanel(_:)):
             menuItem.state = infoShown && !trayCollapsed && !infoFolded ? .on : .off
             return true
@@ -4765,6 +5159,7 @@ extension MainViewController {
         }
         item(viewMenu, "Reset Right Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
         item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
+        item(viewMenu, "Right Panel on the Left", #selector(toggleTraySide(_:)), target: self).image = symbol("sidebar.left")
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self).image = symbol("macwindow.on.rectangle")
         // Enter Full Screen (⌃⌘F) is added to the View menu by macOS itself
         viewMenu.addItem(.separator())

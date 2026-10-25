@@ -172,7 +172,7 @@ class DXFReader {
             }
         }
 
-        var openPolyline: (record: Record, vertices: [CGPoint], bulges: [CGFloat], inBlocks: Bool)?
+        var openPolyline: (record: Record, vertices: [CGPoint], bulges: [CGFloat], widths: [(CGFloat, CGFloat)], inBlocks: Bool)?
         // BLOCKS section: the block in progress and its objects
         var currentBlock: BlockDefinition?
         var blockEntities: [CADEntity] = []
@@ -188,7 +188,7 @@ class DXFReader {
         func emit(_ entity: CADEntity, inBlocks: Bool, record: Record? = nil) {
             // these objects lie in object coordinates (OCS); with the extrusion pointing down (230 = −1,
             // e.g. after mirroring in 3D) OCS X runs against world X – the object is mirrored into place
-            if let record = record, ["CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE", "TEXT", "INSERT", "HATCH"].contains(record.type),
+            if let record = record, ["CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE", "TEXT", "ATTRIB", "ATTDEF", "INSERT", "HATCH"].contains(record.type),
                (record.double(230) ?? 1) < 0 {
                 entity.applyTransform(CGAffineTransform(scaleX: -1, y: 1))
             }
@@ -203,23 +203,94 @@ class DXFReader {
             }
         }
 
+        /// Single-line text from TEXT or ATTRIB (ATTRIB keeps its vertical alignment in 74 instead of 73).
+        func singleLineText(_ record: Record, verticalCode: Int) -> TextEntity? {
+            guard let rawText = record.string(1), case let value = DXFReader.decodeText(rawText), !value.isEmpty,
+                  let height = record.double(40), height > 0 else { return nil }
+            // alignment: 72 = horizontal (0 left, 1 center, 2 right, 3 aligned, 4 middle, 5 fit),
+            // 73 / 74 = vertical (0 baseline, 1 bottom, 2 middle, 3 top); then the second point (11/21) applies
+            let horizontal = record.int(72) ?? 0
+            let vertical = record.int(verticalCode) ?? 0
+            let rotation = (record.double(50) ?? 0) * .pi / 180
+            var position = CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0)
+            let usesSecond = (horizontal != 0 && horizontal != 3 && horizontal != 5) || vertical != 0
+            if usesSecond, let x = record.double(11), let y = record.double(21) {
+                position = CGPoint(x: x, y: y)
+            }
+            // baseline offset according to the vertical alignment (perpendicular to the text direction)
+            var lift: CGFloat = 0
+            switch horizontal == 4 ? 2 : vertical {
+            case 1: lift = height * 0.3      // bottom = below the descenders
+            case 2: lift = -height * 0.5     // middle of the capitals
+            case 3: lift = -height           // top
+            default: break
+            }
+            if lift != 0 {
+                position = CGPoint(x: position.x - sin(rotation) * lift, y: position.y + cos(rotation) * lift)
+            }
+            let text = TextEntity(position: position, text: value, height: height,
+                                  layer: record.string(8) ?? "0", color: entityColor(record))
+            text.rotation = rotation
+            text.justify = horizontal == 1 || horizontal == 4 ? .center : horizontal == 2 ? .right : .left
+            applyFont(text, record, ownWidth: record.double(41))
+            return text
+        }
+
+        /// A polyline with its widths (DXF: start and end width of each segment, or one constant width).
+        /// One width for all segments → a wide polyline; tapered segments (e.g. an arrow drawn with a polyline)
+        /// are filled shapes next to the thin polyline.
+        func emitPolyline(_ polyline: Polyline, widths: [(CGFloat, CGFloat)], constant: CGFloat?, inBlocks: Bool, record: Record) {
+            if let constant = constant, constant > 0 {
+                polyline.width = constant
+            } else if let first = widths.first, first.0 > 0,
+                      widths.prefix(polyline.segmentCount).allSatisfy({ abs($0.0 - first.0) < 1e-9 && abs($0.1 - first.0) < 1e-9 }) {
+                polyline.width = first.0
+            }
+            emit(polyline, inBlocks: inBlocks, record: record)
+            guard polyline.width == 0 else { return }
+            for (index, primitive) in polyline.primitives().enumerated() where index < widths.count {
+                let (start, end) = widths[index]
+                guard max(start, end) > 0, let band = DXFReader.taperedBand(primitive, start: start, end: end) else { continue }
+                emit(HatchEntity(loops: [band], pattern: .solid, angle: 0, scale: 1,
+                                 layer: polyline.layer, color: polyline.color), inBlocks: inBlocks)
+            }
+        }
+
+        // Block attributes (ATTRIB) follow their INSERT until SEQEND. They are read as plain texts
+        // (already in place, in drawing coordinates); in model space they form a group with their block,
+        // so they move together.
+        var attributeOwner: (reference: BlockReference, inBlocks: Bool, texts: [TextEntity])?
+        func finishAttributes() {
+            guard let owner = attributeOwner else { return }
+            attributeOwner = nil
+            guard !owner.texts.isEmpty, !owner.inBlocks else { return }
+            let group = UUID()
+            owner.reference.groupID = group
+            for text in owner.texts { text.groupID = group }
+        }
+
         for record in records {
             let section = record.section ?? ""
             let inBlocks = section == "BLOCKS"
+
+            if attributeOwner != nil, record.type != "ATTRIB" { finishAttributes() }
 
             // old POLYLINE: vertices follow as VERTEX until SEQEND
             if var polyline = openPolyline {
                 if record.type == "VERTEX" {
                     polyline.vertices.append(CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0))
                     polyline.bulges.append(record.double(42) ?? 0)
+                    // widths of the segment from this vertex (default: the POLYLINE's 40 / 41)
+                    polyline.widths.append((record.double(40) ?? polyline.record.double(40) ?? 0,
+                                            record.double(41) ?? polyline.record.double(41) ?? 0))
                     openPolyline = polyline
                     continue
                 }
                 let closed = (polyline.record.int(70) ?? 0) & 1 != 0
                 if polyline.vertices.count >= 2 {
-                    emit(Polyline(vertices: polyline.vertices, closed: closed, bulges: polyline.bulges,
-                                  layer: polyline.record.string(8) ?? "0",
-                                  color: entityColor(polyline.record)), inBlocks: polyline.inBlocks, record: polyline.record)
+                    emitPolyline(Polyline(vertices: polyline.vertices, closed: closed, bulges: polyline.bulges,
+                                          layer: polyline.record.string(8) ?? "0", color: entityColor(polyline.record)),
+                                 widths: polyline.widths, constant: nil, inBlocks: polyline.inBlocks, record: polyline.record)
                 }
                 openPolyline = nil
                 if record.type == "SEQEND" { continue }
@@ -312,20 +383,28 @@ class DXFReader {
                 // vertices and bulges (42 belongs to the most recently read vertex)
                 let vertices = record.points(xCode: 10, yCode: 20)
                 guard vertices.count >= 2 else { continue }
+                // 40 / 41 = start and end width of the segment from the most recent vertex, 43 = constant width
                 var bulges: [CGFloat] = []
+                var widths: [(CGFloat, CGFloat)] = []
                 for pair in record.pairs {
                     if pair.code == 10 {
                         bulges.append(0)
-                    } else if pair.code == 42, !bulges.isEmpty, let value = Double(pair.value) {
+                        widths.append((0, 0))
+                    } else if pair.code == 42, !bulges.isEmpty, let value = Double(pair.value), value.isFinite {
                         bulges[bulges.count - 1] = CGFloat(value)
+                    } else if pair.code == 40 || pair.code == 41, !widths.isEmpty, let value = Double(pair.value),
+                              value.isFinite, value > 0 {
+                        if pair.code == 40 { widths[widths.count - 1].0 = CGFloat(value) } else { widths[widths.count - 1].1 = CGFloat(value) }
                     }
                 }
-                emit(Polyline(vertices: vertices, closed: (record.int(70) ?? 0) & 1 != 0,
-                              bulges: bulges.count == vertices.count ? bulges : [],
-                              layer: record.string(8) ?? "0", color: entityColor(record)), inBlocks: inBlocks, record: record)
+                emitPolyline(Polyline(vertices: vertices, closed: (record.int(70) ?? 0) & 1 != 0,
+                                      bulges: bulges.count == vertices.count ? bulges : [],
+                                      layer: record.string(8) ?? "0", color: entityColor(record)),
+                             widths: widths.count == vertices.count ? widths : [], constant: record.double(43),
+                             inBlocks: inBlocks, record: record)
 
             case ("ENTITIES", "POLYLINE"):
-                openPolyline = (record, [], [], inBlocks)
+                openPolyline = (record, [], [], [], inBlocks)
 
             case ("ENTITIES", "ELLIPSE"):
                 // center, end of the major axis (relative), axis ratio, start and end parameters
@@ -354,34 +433,7 @@ class DXFReader {
                             layer: record.string(8) ?? "0", color: entityColor(record)), inBlocks: inBlocks, record: record)
 
             case ("ENTITIES", "TEXT"):
-                guard let rawText = record.string(1), case let value = DXFReader.decodeText(rawText), !value.isEmpty,
-                      let height = record.double(40), height > 0 else { continue }
-                // alignment: 72 = horizontal (0 left, 1 center, 2 right, 3 aligned, 4 middle, 5 fit),
-                // 73 = vertical (0 baseline, 1 bottom, 2 middle, 3 top); then the second point (11/21) applies
-                let horizontal = record.int(72) ?? 0
-                let vertical = record.int(73) ?? 0
-                let rotation = (record.double(50) ?? 0) * .pi / 180
-                var position = CGPoint(x: record.double(10) ?? 0, y: record.double(20) ?? 0)
-                let usesSecond = (horizontal != 0 && horizontal != 3 && horizontal != 5) || vertical != 0
-                if usesSecond, let x = record.double(11), let y = record.double(21) {
-                    position = CGPoint(x: x, y: y)
-                }
-                // baseline offset according to the vertical alignment (perpendicular to the text direction)
-                var lift: CGFloat = 0
-                switch horizontal == 4 ? 2 : vertical {
-                case 1: lift = height * 0.3      // bottom = below the descenders
-                case 2: lift = -height * 0.5     // middle of the capitals
-                case 3: lift = -height           // top
-                default: break
-                }
-                if lift != 0 {
-                    position = CGPoint(x: position.x - sin(rotation) * lift, y: position.y + cos(rotation) * lift)
-                }
-                let text = TextEntity(position: position, text: value, height: height,
-                                      layer: record.string(8) ?? "0", color: entityColor(record))
-                text.rotation = rotation
-                text.justify = horizontal == 1 || horizontal == 4 ? .center : horizontal == 2 ? .right : .left
-                applyFont(text, record, ownWidth: record.double(41))
+                guard let text = singleLineText(record, verticalCode: 73) else { continue }
                 emit(text, inBlocks: inBlocks, record: record)
 
             case ("ENTITIES", "MTEXT"):
@@ -431,10 +483,21 @@ class DXFReader {
                 let sy = record.double(42) ?? 1
                 reference.scale = abs(sx) > 0 ? abs(sx) : 1
                 reference.mirrored = sx * sy < 0
+                // a different Y scale (e.g. 2 × 1) – as a ratio to the X scale
+                if abs(sx) > 0, abs(sy) > 0, abs(abs(sy) / abs(sx) - 1) > 1e-9 { reference.yRatio = abs(sy) / abs(sx) }
                 var rotation = (record.double(50) ?? 0) * .pi / 180
                 if sx < 0 { rotation += .pi }      // mirroring across Y = rotation by 180° and mirroring across X
                 reference.rotation = Geometry.normalizeAngle(rotation)
                 emit(reference, inBlocks: inBlocks, record: record)
+                if record.int(66) == 1 { attributeOwner = (reference, inBlocks, []) }
+
+            case ("ENTITIES", "ATTRIB"):
+                // flag 70 bit 1 = invisible attribute (e.g. hidden data in a title block)
+                guard var owner = attributeOwner, (record.int(70) ?? 0) & 1 == 0,
+                      let text = singleLineText(record, verticalCode: 74) else { continue }
+                emit(text, inBlocks: owner.inBlocks, record: record)
+                owner.texts.append(text)
+                attributeOwner = owner
 
             case ("ENTITIES", "SOLID"), ("ENTITIES", "TRACE"):
                 // filled triangle or quad (e.g. a dimension arrow); corners 10, 11, 13, 12 in drawing order
@@ -484,7 +547,15 @@ class DXFReader {
                 leader.arrowStyle = (record.int(71) ?? 1) == 0 ? .none : .arrow
                 emit(leader, inBlocks: inBlocks, record: record)
 
-            case ("ENTITIES", "SEQEND"), ("ENTITIES", "VERTEX"), ("ENTITIES", "ATTRIB"), ("ENTITIES", "ATTDEF"):
+            case ("ENTITIES", "ATTDEF"):
+                // an attribute template inside a block definition is not drawn (each INSERT carries its own
+                // values as ATTRIB) – except a constant attribute (flag 2), which has no ATTRIB and shows its value
+                let flags = record.int(70) ?? 0
+                guard inBlocks, flags & 2 != 0, flags & 1 == 0,
+                      let text = singleLineText(record, verticalCode: 74) else { continue }
+                emit(text, inBlocks: inBlocks, record: record)
+
+            case ("ENTITIES", "SEQEND"), ("ENTITIES", "VERTEX"):
                 break
 
             case ("ENTITIES", let type):
@@ -494,13 +565,49 @@ class DXFReader {
                 break
             }
         }
+        finishAttributes()
         // the last open POLYLINE at the end of the file
         if let polyline = openPolyline, polyline.vertices.count >= 2 {
-            emit(Polyline(vertices: polyline.vertices, closed: (polyline.record.int(70) ?? 0) & 1 != 0, bulges: polyline.bulges,
-                          layer: polyline.record.string(8) ?? "0", color: entityColor(polyline.record)), inBlocks: polyline.inBlocks, record: polyline.record)
+            emitPolyline(Polyline(vertices: polyline.vertices, closed: (polyline.record.int(70) ?? 0) & 1 != 0, bulges: polyline.bulges,
+                                  layer: polyline.record.string(8) ?? "0", color: entityColor(polyline.record)),
+                         widths: polyline.widths, constant: nil, inBlocks: polyline.inBlocks, record: polyline.record)
         }
 
         return result
+    }
+
+    /// Outline of a polyline segment whose width changes from `start` to `end` (a filled shape; arcs in short steps).
+    static func taperedBand(_ primitive: Primitive, start: CGFloat, end: CGFloat) -> [CGPoint]? {
+        var samples: [(point: CGPoint, normal: CGPoint)] = []
+        switch primitive {
+        case let .segment(a, b, _):
+            let normal = (b - a).normalized.perpendicular
+            guard normal != .zero else { return nil }
+            samples = [(a, normal), (b, normal)]
+        case let .arc(c, r, startAngle, sweep, _):
+            let steps = max(2, Int(abs(sweep) / (.pi / 16)) + 1)
+            for k in 0...steps {
+                let angle = startAngle + sweep * CGFloat(k) / CGFloat(steps)
+                let normal = CGPoint(x: cos(angle), y: sin(angle))
+                samples.append((c + normal * r, normal))
+            }
+        }
+        let count = samples.count
+        var left: [CGPoint] = [], right: [CGPoint] = []
+        for (k, sample) in samples.enumerated() {
+            let half = (start + (end - start) * CGFloat(k) / CGFloat(count - 1)) / 2
+            left.append(sample.point + sample.normal * half)
+            right.append(sample.point - sample.normal * half)
+        }
+        // a pointed end (width 0) is one corner, not two
+        var outline: [CGPoint] = []
+        for p in left + right.reversed() where outline.last.map({ Geometry.distance($0, p) > 1e-9 }) ?? true {
+            outline.append(p)
+        }
+        if let first = outline.first, let last = outline.last, outline.count > 3, Geometry.distance(first, last) <= 1e-9 {
+            outline.removeLast()
+        }
+        return outline.count >= 3 ? outline : nil
     }
 
     /// DXF special characters: %%c = Ø, %%d = °, %%p = ±, %%u/%%o = underline/overline (skipped).
@@ -1145,6 +1252,10 @@ extension DXFReader {
 
 class DXFWriter {
     private var out = ""
+    /// Construction lines and rays (R12 has no XLINE / RAY) are written as lines this long from their point:
+    /// across the whole drawing, so they still reach everything they crossed.
+    private var constructionReach: CGFloat = 1000
+    private var drawingCenter = CGPoint.zero
 
     private func pair(_ code: Int, _ value: String) {
         out += String(code)
@@ -1198,6 +1309,11 @@ class DXFWriter {
         pair(66, "1")
         point(10, .zero)
         pair(70, closed ? "1" : "0")
+        // a wide polyline: the default start and end width of its segments
+        if let width = (entity as? Polyline)?.width, width > 0 {
+            number(40, width)
+            number(41, width)
+        }
         for (index, v) in vertices.enumerated() {
             pair(0, "VERTEX")
             pair(8, entity.layer)
@@ -1248,6 +1364,18 @@ class DXFWriter {
         }
         pair(0, "ENDTAB")
         pair(0, "ENDSEC")
+
+        // the extents of the finite objects – how far construction lines and rays reach
+        var extents = CGRect.null
+        for entity in document.getAllEntities() where !(entity is ConstructionLine) {
+            let box = entity.boundingBox()
+            guard !box.isNull, box.minX.isFinite, box.minY.isFinite, box.maxX.isFinite, box.maxY.isFinite else { continue }
+            extents = extents.union(box)
+        }
+        if !extents.isNull {
+            drawingCenter = CGPoint(x: extents.midX, y: extents.midY)
+            constructionReach = max(hypot(extents.width, extents.height), 1)
+        }
 
         // ENTITIES
         pair(0, "SECTION"); pair(2, "ENTITIES")
@@ -1324,6 +1452,14 @@ class DXFWriter {
                 point(10, dot)
                 point(11, dot)
             }
+
+        case let construction as ConstructionLine:
+            // R12 has no XLINE / RAY: a line (from the point for a ray) that reaches across the whole drawing
+            let reach = Geometry.distance(construction.point, drawingCenter) + constructionReach
+            let start = construction.isRay ? construction.point : construction.point - construction.direction * reach
+            header("LINE", construction, color: construction.color)
+            point(10, start)
+            point(11, construction.point + construction.direction * reach)
 
         case let reference as BlockReference:
             // R12 without blocks: the block's content as separate objects

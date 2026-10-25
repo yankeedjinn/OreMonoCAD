@@ -29,7 +29,7 @@ enum ToolGroup: Int, CaseIterable {
 enum DrawingTool: Int, CaseIterable {
     case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, wall, wallFromCurve, hatch, hatchRebuild, hatchCut
     case trim, extend, fillet, chamfer, magicTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties, filter
-    case move, copy, rotate, scale, mirror, stretch, array
+    case move, copy, rotate, scale, mirror, stretch, array, align
     case dimLinear, dimAligned, dimContinue, dimAngular, dimRadius, dimDiameter, leader
     case text, roomLabel, measure, revisionCloud, wipeout, scaleBar, northArrow
     case blockCreate, blockInsert, blockManager, xref, image, pdfReference
@@ -72,6 +72,7 @@ enum DrawingTool: Int, CaseIterable {
         case .mirror: return "Mirror"
         case .stretch: return "Stretch"
         case .array: return "Array"
+        case .align: return "Align"
         case .dimLinear: return "Linear Dimension"
         case .dimAligned: return "Aligned Dimension"
         case .dimContinue: return "Continue Dimension"
@@ -140,7 +141,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the points · ↩, Esc, right-click or double-click finishes (with CLS on it asks whether to close) · C or clicking the first point closes · ⌫ removes the last point."),
         .wall: (
             summary: "A wall drawn with a double line – click its line, and both faces appear at the wall thickness with mitered corners.",
-            usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. Walls are not joined automatically – clean up where they meet with Trim or MagicTrim."),
+            usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. A wall that touches or crosses another wall on the same layer is joined to it (T, L and X joints) – ⌘Z separates them again."),
         .wallFromCurve: (
             summary: "Turns selected lines, arcs, polylines, splines, circles and ellipses into walls – both faces at the wall thickness along the curve.",
             usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay."),
@@ -194,13 +195,13 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the object where it should be split (snaps work, e.g. to an intersection or a midpoint). A closed polyline is opened at that point."),
         .move: (
             summary: "Moves the selected objects.",
-            usage: "Select objects (↩), click a base point, then the target – or type distance and angle. With Select you can also simply drag a selected object."),
+            usage: "Select objects (↩), click a base point, then the target – or type distance and angle. Tap ⌥ while moving to copy instead (the originals stay, a green + shows it); right after placing the copy type x5 + ↩ for five copies in a row (or around, in Rotate) or /5 + ↩ for five copies spread up to it. With Select you can also simply drag a selected object (⌥ works there too)."),
         .copy: (
             summary: "Copies the selected objects, as many times as you like.",
-            usage: "Select objects (↩), click a base point, then click every place for a copy. Esc ends."),
+            usage: "Select objects (↩), click a base point, then click every place for a copy. Right after a copy, x5 + ↩ = five copies in a row, /5 + ↩ = five copies spread between the original and it. Esc ends."),
         .rotate: (
             summary: "Rotates the selected objects around a point.",
-            usage: "Select objects (↩), click the center of rotation, then click or type the angle (°). Hold Shift for 15° steps."),
+            usage: "Select objects (↩), click the center of rotation, then click or type the angle (°). Hold Shift for 15° steps. Tap ⌥ while rotating to copy instead (the originals stay); right after placing the copy type x5 + ↩ for five copies, each turned by the same angle, or /5 + ↩ for five copies spread over the angle."),
         .scale: (
             summary: "Enlarges or shrinks the selected objects.",
             usage: "Select objects (↩), click the base point (it stays put), then click a grip point on the objects and pull it: at the dashed circle = 1×, closer = smaller (down to 0.01), farther = larger, past the base point = negative (turned 180°). Or type any factor – 0.01, 10, -1, 1/3 – and press ↩."),
@@ -210,6 +211,9 @@ enum DrawingTool: Int, CaseIterable {
         .stretch: (
             summary: "Stretches objects: points inside a window move, everything else stays – walls get longer, openings shift.",
             usage: "Drag a window (or click two corners) around the points to move – objects completely inside move as a whole, objects crossing the window are stretched. Then click the base point and the target, or type distance and angle. Circles, texts and blocks move only when their center / insertion point is inside."),
+        .align: (
+            summary: "Moves, turns and scales the selected objects so that two of their points land on two target points – e.g. fits a scanned plan or a PDF underlay onto the drawing.",
+            usage: "Select objects (↩), click the first point on them, then where it goes; click the second point on them, then where it goes. The objects move, turn and scale so that both points match (use snaps for exact points)."),
         .array: (
             summary: "Many copies at once – in rows and columns, or around a center point.",
             usage: "Hold the button (or right-click it) to choose Rectangular or Polar. Select objects (↩), for Polar click the center, then set the counts and spacing in the dialog – the preview updates as you type."),
@@ -324,17 +328,17 @@ enum DrawingTool: Int, CaseIterable {
         case .offset: return "F"
         case .measure: return "T"
         case .blockCreate: return "G"
-        case .matchProperties: return "B"
+        case .matchProperties: return "⌥B"
         case .zoomWindow: return "Z"
         case .zoomExtents: return "⇧Z"
         case .magicTrim: return "E"
         case .trim: return "W"
         case .fillet: return "O"
         case .join: return "J"
-        case .polyline: return "P"
-        case .hatch: return "H"
-        case .spline: return "N"
-        case .copy: return "K"
+        case .polyline: return "N"
+        case .hatch: return "B"
+        case .spline: return "⌥N"
+        case .copy: return "⌥C"
         case .mirror: return "I"
         case .explode: return "X"
         case .editPoints: return "V"
@@ -347,7 +351,7 @@ enum DrawingTool: Int, CaseIterable {
         case .ellipse: return "⌥A"
         case .array: return "⌥M"
         case .wipeout: return "⌥X"
-        case .polygon: return "⌥C"
+        case .polygon: return "⇧P"
         case .breakObject: return "⌥T"
         case .breakAtPoint: return "⌥E"
         case .revisionCloud: return "⌥R"
@@ -356,9 +360,8 @@ enum DrawingTool: Int, CaseIterable {
         case .filter: return "⌥S"
         case .image: return "⌥I"
         case .roomLabel: return "⌥U"
-        case .scaleBar: return "⌥B"
-        case .northArrow: return "⌥N"
         case .dimAligned: return "⌥D"
+        case .align: return "⌥Q"
         default: return nil
         }
     }
@@ -368,7 +371,7 @@ enum DrawingTool: Int, CaseIterable {
         case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .hatch, .hatchRebuild, .hatchCut: return .draw
         case .wall, .wallFromCurve: return .architecture
         case .trim, .extend, .fillet, .chamfer, .magicTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter: return .modify
-        case .move, .copy, .rotate, .scale, .mirror, .stretch, .array: return .transform
+        case .move, .copy, .rotate, .scale, .mirror, .stretch, .array, .align: return .transform
         case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud, .wipeout, .scaleBar, .northArrow: return .dimension
         case .blockCreate, .blockInsert, .blockManager: return .block
         case .xref, .image, .pdfReference: return .reference
@@ -381,7 +384,7 @@ enum DrawingTool: Int, CaseIterable {
 
     /// Tools combined into one button on the panel – holding it (or right-clicking) picks the kind.
     /// The button shows the most recently used tool; shortcuts and the Tools menu work for each one separately.
-    static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.magicTrim, .trim, .extend, .breakObject, .breakAtPoint],
+    static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.magicTrim, .trim, .extend],
                                                     [.fillet, .chamfer], [.dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter],
                                                     [.revisionCloud, .wipeout], [.scaleBar, .northArrow]]
 
@@ -423,6 +426,7 @@ enum DrawingTool: Int, CaseIterable {
         case .dimAngular: return 4
         case .move, .copy, .rotate, .mirror, .stretch: return 2
         case .scale: return 3      // base point, grip, new grip position
+        case .align: return 4      // first point and its target, second point and its target
         case .array: return 1      // center (for a polar array)
         case .blockCreate, .blockInsert, .xref, .scaleBar, .northArrow, .image, .pdfReference: return 1      // base / insertion point
         case .polyline, .spline, .wall, .leader, .xline, .revisionCloud, .wipeout: return nil
@@ -566,7 +570,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
     /// Drawing coordinate units (affect the line scale, lineweights and plotting).
     var drawingUnits: DrawingUnits = .mm {
-        didSet { needsDisplay = true; onModesChanged?() }
+        didSet {
+            LengthStyle.drawingUnits = drawingUnits      // feet and inches in the value box and dimensions
+            needsDisplay = true
+            onModesChanged?()
+        }
     }
 
     /// How many drawing units correspond to 1 mm on paper (scale and units combined).
@@ -775,6 +783,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// The most recently used tool – Enter or right click while idle runs it again.
     private(set) var lastTool: DrawingTool?
 
+    /// The previous key was the space bar (no other key or click since) – a second space in Select clears the selection.
+    private var lastKeyWasSpace = false
+
     /// Repeat the last tool? Only in the Select tool when nothing is running (otherwise Enter / right click confirm).
     /// Does the space bar confirm (something is in progress or waits for ↩), or switch to Select?
     private var spaceConfirms: Bool {
@@ -839,6 +850,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     /// Is text currently being typed on the canvas? (⌥+digit shortcuts are not used then.)
     var isEditingText: Bool { return inlineText != nil }
+
+    /// Shift + letter shortcuts (⇧P): only when no tool is in progress and nothing is being typed.
+    private var shiftShortcutsAllowed: Bool {
+        return !isBusy && selectedPoints.isEmpty && inlineText == nil && pickRequest == nil && viewportPan == nil
+            && !dynamicInput.isEditing && !dynamicInput.hasLockedValue && lastCopyRun == nil
+    }
 
     /// Format of new text from the default style.
     private var defaultTextFormat: TextFormat {
@@ -1426,6 +1443,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// Dragging selected objects in selection mode: the base point.
     private var dragMoveBase: CGPoint?
 
+    /// Move or dragging a selection: a tap on ⌥ switches to copying (the originals stay put).
+    private var copyWhileMoving = false
+    /// ⌥ went down alone – released without another key, click or scroll in between, it counts as a tap.
+    private var optionTapPending = false
+    private var optionDown = false
+    private var optionTapMonitor: Any?
+    /// The copy placed last (Move or Rotate with ⌥, Copy, dragging with ⌥): right after it, x5 / *5 = five copies repeating
+    /// the step, /5 = five copies spread between the original and the placed copy. `step(1)` is the placed copy's transform.
+    private var lastCopyRun: (originals: [CADEntity], step: (CGFloat) -> CGAffineTransform, copies: [CADEntity], selectsCopies: Bool)?
+    /// The number of copies being typed (“x5”, “/5”).
+    private var copyCountEntry: String?
+
     // MARK: Grips
 
     /// Reference to a single grip (object + grip index).
@@ -1602,6 +1631,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         ignoreNextMouseUp = false
         activeSnap = nil
         dragMoveBase = nil
+        copyWhileMoving = false
+        lastCopyRun = nil
+        copyCountEntry = nil
         activeGrip = nil
         gripDragged = false
         hoverRemoved = nil
@@ -1618,7 +1650,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             stage = .pickTargets
         case .breakObject, .breakAtPoint:
             stage = .points
-        case .move, .copy, .rotate, .scale, .mirror:
+        case .move, .copy, .rotate, .scale, .mirror, .align:
             stage = (selectionManager?.isEmpty ?? true) ? .selectObjects : .points
         case .array:
             stage = (selectionManager?.isEmpty ?? true) ? .selectObjects : .points
@@ -1707,6 +1739,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if selectionBoxAwaitsCorner {
             return "Click the opposite corner · Esc = cancel"
         }
+        if let entry = copyCountEntry {
+            let how = entry.first == "/" ? "spread between the original and the placed copy" : "repeating the step"
+            return "Copies \(how): \(entry) · ↩ = create · ⌫ = correct · Esc = cancel"
+        }
         var text: String
         switch currentTool {
         case .select:
@@ -1714,6 +1750,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 ? "Click or drag a box to select · Shift adds or removes · ⌘-drag or two fingers to pan"
                 : "Drag a selected object to move it · click a blue grip to edit a point · Shift-click grips to move several points · Esc deselects"
             if let last = lastTool, last != .select { text += " · ↩ or right-click = repeat \(last.title)" }
+            if lastCopyRun != nil { text = "Type x5 or /5 + ↩ = more copies · " + text }
             if let edit = blockEditContext {
                 text = "Editing block \u{201C}\(edit.name)\u{201D} · " + text
             } else if selectionManager?.isEmpty ?? true, !(blockLibrary?.blocks.isEmpty ?? true) {
@@ -1822,7 +1859,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             text = "Wall from Curve \(DynamicInputView.format(wallThicknessMM)) mm, \(wallCurveAlignment.title): "
                 + "select lines, arcs, polylines, splines, circles or ellipses · T = thickness · J = side · ↩ or right-click = create"
         case .hatch:
-            text = "Hatch (\(hatchPattern.title), \(LineType.formatAngle(currentHatchAngle))°, scale \(LineType.format(currentHatchScale))"
+            text = "Hatch (\(hatchPattern.title), \(AngleStyle.text(currentHatchAngle)), scale \(LineType.format(currentHatchScale))"
                 + (hatchScale == nil ? " = drawing scale" : "") + "): click inside a closed area · hold the Hatch button for patterns"
         case .trim:
             text = edges.isEmpty
@@ -1868,16 +1905,31 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             text = "Cut Out of Hatch: select the hatch and the closed shapes to cut out, then ↩ or right-click"
         case .join:
             text = "Join: select lines, arcs and polylines, then ↩ or right-click"
-        case .move, .copy, .rotate, .scale, .mirror:
+        case .move, .copy, .rotate, .scale, .mirror, .align:
             if stage == .selectObjects {
                 text = "\(currentTool.title): select objects, then ↩ or right-click"
+            } else if currentTool == .align {
+                switch points.count {
+                case 0: text = "Align: first point on the objects"
+                case 1: text = "Align: where the first point goes"
+                case 2: text = "Align: second point on the objects"
+                default: text = "Align: where the second point goes – the objects move, turn and scale to fit"
+                }
             } else if points.isEmpty {
                 text = currentTool == .mirror ? "Mirror: first point of the mirror line" : "\(currentTool.title): base point"
+                if [.move, .rotate].contains(currentTool) {
+                    let title = currentTool.title
+                    text = copyWhileMoving ? "\(title) (copy): base point · ⌥ = \(title.lowercased()) instead" : "\(title): base point · ⌥ = copy"
+                }
             } else {
                 switch currentTool {
-                case .move: text = "Move: second point (or distance + ↩)"
+                case .move:
+                    text = copyWhileMoving ? "Move (copy): second point (or distance + ↩) · ⌥ = move instead"
+                        : "Move: second point (or distance + ↩) · ⌥ = copy"
                 case .copy: text = "Copy: second point (or distance + ↩) · Esc = done"
-                case .rotate: text = "Rotate: angle point (or angle in ° + ↩) · hold Shift = 15° steps"
+                case .rotate:
+                    text = copyWhileMoving ? "Rotate (copy): angle point (or angle in ° + ↩) · hold Shift = 15° steps · ⌥ = rotate instead"
+                        : "Rotate: angle point (or angle in ° + ↩) · hold Shift = 15° steps · ⌥ = copy"
                 case .scale:
                     text = points.count < 2
                         ? "Scale: click the grip point – a point of the objects you will pull (or type a factor + ↩)"
@@ -1885,6 +1937,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 default: text = "Mirror: second point of the mirror line"
                 }
             }
+            if lastCopyRun != nil, stage != .selectObjects { text += " · x5 or /5 + ↩ = more copies" }
         case .dimLinear, .dimAligned:
             switch points.count {
             case 0: text = "\(currentTool.title): first point"
@@ -1898,7 +1951,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     : "Construction Line: direction (click or type an angle) · more lines through the same point · Esc = end"
             case .horizontal: text = "Horizontal Construction Line: click where it goes"
             case .vertical: text = "Vertical Construction Line: click where it goes"
-            case .angle: text = "Construction Line at \(LineType.formatAngle(xlineAngle))°: click where it goes"
+            case .angle: text = "Construction Line at \(AngleStyle.text(xlineAngle, .direction)): click where it goes"
             }
             text += " · H = horizontal, V = vertical, A = angle, B = two points"
         case .matchProperties:
@@ -2057,6 +2110,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     func invalidateRenderCache() {
         renderEpoch += 1
         needsDisplay = true
+    }
+
+    /// Angles or feet and inches changed in Settings: dimensions, prompts and the value box show the new form.
+    func unitStyleChanged() {
+        invalidateRenderCache()
+        updateDynamicInput()
+        onPromptChanged?(prompt)
     }
 
     /// Zoom / pan from the wheel, trackpad or middle button: for now only the scene image is shifted.
@@ -2644,6 +2704,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        if copyWhileMoving, dragMoveBase != nil || ([.move, .rotate].contains(currentTool) && !points.isEmpty) {
+            drawCopyBadge(at: cursor.applying(transform), in: context)
+        }
+
         if let base = dragMoveBase {
             let t = CGAffineTransform(translationX: cursor.x - base.x, y: cursor.y - base.y)
             for entity in movableSelection {
@@ -2659,7 +2723,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         // rubber-band line from the last/base point
-        if expectsPoint, let last = points.last, [.arc, .move, .copy, .rotate, .scale, .mirror, .stretch].contains(currentTool),
+        if expectsPoint, let last = points.last, [.arc, .move, .copy, .rotate, .scale, .mirror, .stretch, .align].contains(currentTool),
            DrawingSafety.isFinite(last.applying(transform)), DrawingSafety.isFinite(cursor.applying(transform)) {
             context.saveGState()
             context.setStrokeColor(NSColor.gray.cgColor)
@@ -2949,7 +3013,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             guard outline.count >= 2, max(box.width, box.height) > tiny else { return [] }
             return [Polyline(vertices: outline, closed: outline.count >= 3, layer: layer)]
 
-        case .move, .copy, .rotate, .scale, .mirror:
+        case .move, .copy, .rotate, .scale, .mirror, .align:
             // Scale: preview only after the reference point is chosen
             if currentTool == .scale && points.count < 2 && !final { return [] }
             guard let base = points.first, let t = transformFor(base: base, target: end) else { return [] }
@@ -3077,9 +3141,28 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return abs(factor) > 1e-9 ? Geometry.scaling(by: factor, around: base) : nil
         case .mirror:
             return Geometry.mirror(acrossLineFrom: base, to: target)
+        case .align:
+            return CADEditorView.alignTransform(points + [target])
         default:
             return nil
         }
+    }
+
+    /// Align: [first point, its target, second point, its target]. With fewer points only the move to the first target
+    /// (the preview while the points are being picked); with all four also the turn and the scale.
+    static func alignTransform(_ p: [CGPoint]) -> CGAffineTransform? {
+        guard p.count >= 2 else { return nil }
+        let move = CGAffineTransform(translationX: p[1].x - p[0].x, y: p[1].y - p[0].y)
+        guard p.count >= 4 else { return move }
+        let source = p[2] - p[0], target = p[3] - p[1]
+        let sourceLength = hypot(source.x, source.y), targetLength = hypot(target.x, target.y)
+        guard sourceLength > 1e-9, targetLength > 1e-9 else { return nil }
+        let factor = targetLength / sourceLength
+        let turn = atan2(target.y, target.x) - atan2(source.y, source.x)
+        return CGAffineTransform(translationX: -p[0].x, y: -p[0].y)
+            .concatenating(CGAffineTransform(scaleX: factor, y: factor))
+            .concatenating(CGAffineTransform(rotationAngle: turn))
+            .concatenating(CGAffineTransform(translationX: p[1].x, y: p[1].y))
     }
 
     // MARK: Points, snap and ortho
@@ -3235,7 +3318,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if points.count + 1 >= required {
                 finishPoints(with: point)
             } else {
-                if let last = points.last, Geometry.distance(last, point) < 1e-9 { return }
+                // Align: a target may be the very point it starts from (that point stays put)
+                if currentTool != .align, let last = points.last, Geometry.distance(last, point) < 1e-9 { return }
                 points.append(point)
                 stateChanged()
             }
@@ -3374,8 +3458,161 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             copy.applyTransform(t)
             return copy
         }
-        onCommit?(originals, moved, "Move")
-        selectionManager?.select(moved)
+        if copyWhileMoving {
+            onCommit?([], moved, "Copy")
+            selectionManager?.select(moved)
+            rememberCopy(originals: originals, step: { f in CGAffineTransform(translationX: t.tx * f, y: t.ty * f) }, copies: moved, selectsCopies: true)
+        } else {
+            onCommit?(originals, moved, "Move")
+            selectionManager?.select(moved)
+        }
+    }
+
+    // MARK: Copy while moving
+
+    /// ⌥ pressed and released alone (no other key, click or scroll in between) = a tap.
+    private func trackOptionTap(_ event: NSEvent) {
+        let held = event.modifierFlags.intersection([.command, .control, .option])
+        if held == [.option] {
+            if !optionDown {
+                optionTapPending = true
+                watchOptionTap(true)
+            }
+            optionDown = true
+            return
+        }
+        let tapped = optionDown && optionTapPending && held.isEmpty
+        optionDown = held.contains(.option)
+        optionTapPending = false
+        watchOptionTap(false)
+        if tapped { toggleCopyWhileMoving() }
+    }
+
+    /// While ⌥ is held, any key, click or scroll means it is not a tap (⌥ + letter, ⌥ + digit, fast zoom…).
+    private func watchOptionTap(_ on: Bool) {
+        if on, optionTapMonitor == nil {
+            optionTapMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] event in
+                self?.optionTapPending = false
+                return event
+            }
+        } else if !on, let monitor = optionTapMonitor {
+            NSEvent.removeMonitor(monitor)
+            optionTapMonitor = nil
+        }
+    }
+
+    /// Move (or dragging a selection): switches between moving and copying.
+    private func toggleCopyWhileMoving() {
+        guard dragMoveBase != nil || ([.move, .rotate].contains(currentTool) && stage == .points) else { return }
+        copyWhileMoving.toggle()
+        onMessage?(copyWhileMoving ? "Copy ON" : "Copy OFF")
+        onPromptChanged?(dragMoveBase != nil ? dragMovePrompt : prompt)
+        needsDisplay = true
+    }
+
+    private var dragMovePrompt: String {
+        return copyWhileMoving
+            ? "Copy: drag to the place for the copy and release (snap works) · ⌥ = move instead · Esc = cancel"
+            : "Move: drag to the new position and release (snap works) · ⌥ = copy · Esc = cancel"
+    }
+
+    /// The “+” next to the cursor while moving copies.
+    private func drawCopyBadge(at point: CGPoint, in context: CGContext) {
+        guard DrawingSafety.isFinite(point) else { return }
+        let c = CGPoint(x: point.x + 14, y: point.y + 14)
+        context.saveGState()
+        context.setStrokeColor(NSColor.systemGreen.cgColor)
+        context.setLineWidth(2)
+        context.move(to: CGPoint(x: c.x - 5, y: c.y))
+        context.addLine(to: CGPoint(x: c.x + 5, y: c.y))
+        context.move(to: CGPoint(x: c.x, y: c.y - 5))
+        context.addLine(to: CGPoint(x: c.x, y: c.y + 5))
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    /// Remembers the copy just placed, for x5 / /5.
+    private func rememberCopy(originals: [CADEntity], step: @escaping (CGFloat) -> CGAffineTransform, copies: [CADEntity], selectsCopies: Bool) {
+        lastCopyRun = (originals, step, copies, selectsCopies)
+        copyCountEntry = nil
+    }
+
+    /// Keys right after a copy is placed: x, * or / starts the number of copies, digits, ⌫, ↩ and Esc finish it.
+    /// Returns false when the key is not for the copies (it then works as usual).
+    private func handleCopyCountKey(_ event: NSEvent) -> Bool {
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        let isOperator = key.count == 1 && "x×*/".contains(key)
+        guard var entry = copyCountEntry else {
+            guard isOperator, !dynamicInput.hasLockedValue else {
+                if !isOperator { lastCopyRun = nil }
+                return false
+            }
+            copyCountEntry = key
+            onPromptChanged?(prompt)
+            updateDynamicInput()
+            return true
+        }
+        if event.keyCode == 53 {                          // Esc = forget the number
+            copyCountEntry = nil
+        } else if event.keyCode == 51 {                   // ⌫
+            entry.removeLast()
+            copyCountEntry = entry.isEmpty ? nil : entry
+        } else if CADEditorView.isConfirmKey(event) {
+            applyCopyCount()
+            return true
+        } else if key.count == 1, "0123456789".contains(key) {
+            copyCountEntry = entry + key
+        } else if isOperator {
+            copyCountEntry = key
+        } else {
+            copyCountEntry = nil
+            lastCopyRun = nil
+            onPromptChanged?(prompt)
+            updateDynamicInput()
+            return false
+        }
+        onPromptChanged?(prompt)
+        updateDynamicInput()
+        return true
+    }
+
+    /// x5 / *5: the placed copy becomes five copies repeating its step; /5: five copies spread up to the placed one.
+    private func applyCopyCount() {
+        guard let run = lastCopyRun, let entry = copyCountEntry, let op = entry.first else { return }
+        copyCountEntry = nil
+        updateDynamicInput()
+        guard let count = Int(entry.dropFirst()), count >= 1,
+              count <= ArraySettings.maxCopies / max(run.originals.count, 1) else {
+            onMessage?("\u{201C}\(entry)\u{201D} is not a valid number of copies")
+            NSSound.beep()
+            onPromptChanged?(prompt)
+            return
+        }
+        // the copies must still be in the drawing (not undone or edited meanwhile)
+        let present = Set(allEntities.map { $0.id })
+        guard (run.copies + run.originals).allSatisfy({ present.contains($0.id) }) else {
+            lastCopyRun = nil
+            onMessage?("The copies have changed – type the number right after placing a copy.")
+            NSSound.beep()
+            onPromptChanged?(prompt)
+            return
+        }
+        var copies: [CADEntity] = []
+        for k in 1...count {
+            let factor = op == "/" ? CGFloat(k) / CGFloat(count) : CGFloat(k)
+            let t = run.step(factor)
+            for entity in run.originals {
+                let copy = entity.clone()
+                copy.applyTransform(t)
+                copies.append(copy)
+            }
+        }
+        onCommit?(run.copies, copies, "Copy")
+        if run.selectsCopies { selectionManager?.select(copies) }
+        lastCopyRun = (run.originals, run.step, copies, run.selectsCopies)
+        let noun = count == 1 ? "1 copy" : "\(count) copies"
+        onMessage?(op == "/" ? "\(noun) spread up to the placed one" : "\(noun) repeating the step")
+        stateChanged()
     }
 
     /// The answer to “Delete originals?” for Mirror.
@@ -3422,9 +3659,19 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         switch currentTool {
         case .copy:
             onCommit?([], transformed, "Copy")
+            rememberCopy(originals: originals, step: { f in CGAffineTransform(translationX: t.tx * f, y: t.ty * f) }, copies: transformed, selectsCopies: false)
             points = [base]      // another copy from the same base point
             stateChanged()
             return
+        case .move where copyWhileMoving, .rotate where copyWhileMoving:
+            onCommit?([], transformed, "Copy")
+            selectionManager?.select(transformed)
+            copyWhileMoving = false
+            let angle = Geometry.angle(from: base, to: target)
+            let step: (CGFloat) -> CGAffineTransform = currentTool == .rotate
+                ? { f in Geometry.rotation(by: angle * f, around: base) }
+                : { f in CGAffineTransform(translationX: t.tx * f, y: t.ty * f) }
+            rememberCopy(originals: originals, step: step, copies: transformed, selectsCopies: true)
         case .mirror:
             // question in the bottom row: delete originals?
             pendingMirror = (transformed, originals)
@@ -3629,13 +3876,21 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     /// Shows/hides the box at the cursor and updates the values in it.
     private func updateDynamicInput() {
+        // the number of copies being typed (x5, /5): the same box, filled from the keys on the drawing area
+        if let entry = copyCountEntry, let cursor = currentWorldPoint ?? lastRawPoint {
+            dynamicInput.configure(labels: [entry.first == "/" ? "Copies spread" : "Copies repeated"], kinds: [.number])
+            dynamicInput.showText(entry)
+            dynamicInput.isHidden = false
+            placeDynamicInput(at: cursor)
+            return
+        }
         let mode = inputMode
         guard mode != .none, let cursor = currentWorldPoint ?? lastRawPoint else {
             dynamicInput.configure(labels: [])
             dynamicInput.isHidden = true
             return
         }
-        dynamicInput.configure(labels: mode.labels, hint: dynamicInputHint)
+        dynamicInput.configure(labels: mode.labels, kinds: mode.kinds, hint: dynamicInputHint)
         // only while typing: the box appears once you type into it (or an entered value remains in it)
         if !valueBoxAlways && !valueBoxRequested && !dynamicInput.hasLockedValue && !dynamicInput.isEditing {
             dynamicInput.isHidden = true
@@ -3643,7 +3898,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
         dynamicInput.isHidden = false
         dynamicInput.setLiveValues(liveInputValues(cursor, mode: mode))
+        placeDynamicInput(at: cursor)
+    }
 
+    /// The box sits below right of the cursor, inside the drawing area.
+    private func placeDynamicInput(at cursor: CGPoint) {
         let size = dynamicInput.frame.size
         let screen = viewport.worldToScreen(cursor)
         var origin = CGPoint(x: screen.x + 22, y: screen.y - size.height - 22)
@@ -3730,7 +3989,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if let scale = dynamicInput.lockedValue(1) {
                 if scale > 0 { hatchScale = scale } else { onMessage?("The scale must be greater than 0.") }
             }
-            onMessage?("Hatch: angle \(LineType.formatAngle(currentHatchAngle))°, scale \(DynamicInputView.format(currentHatchScale))")
+            onMessage?("Hatch: angle \(AngleStyle.text(currentHatchAngle)), scale \(DynamicInputView.format(currentHatchScale))")
             window?.makeFirstResponder(self)
             stateChanged()
             return
@@ -3874,7 +4133,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
         case .trim, .extend:
             onToolChangeRequested?(.select)
-        case .move, .copy, .rotate, .scale, .mirror:
+        case .move, .copy, .rotate, .scale, .mirror, .align:
             if stage == .selectObjects {
                 if selectionManager?.isEmpty ?? true {
                     onMessage?("Select at least one object first.")
@@ -3882,7 +4141,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     stage = .points
                     stateChanged()
                 }
-            } else if currentTool == .copy {
+            } else if currentTool == .copy || points.isEmpty {
+                // Copy at any time, the others between two runs (no base point yet): ↩ / space ends the tool
                 onToolChangeRequested?(.select)
             }
         case .explode, .join, .hatchRebuild, .hatchCut:
@@ -4851,6 +5111,18 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
         onCommit?([], outlines, "Add Wall")
+        joinWalls(outlines)
+    }
+
+    /// A new wall is joined to the walls it touches or crosses on the same layer – as a separate Undo step,
+    /// so ⌘Z keeps the wall and only separates it again. Returns the outlines that are in the drawing now.
+    @discardableResult
+    private func joinWalls(_ outlines: [Polyline]) -> [CADEntity] {
+        let candidates = allEntities.filter { !(layerManager?.isLayerLocked($0.layer) ?? false) }
+        guard let joined = Walls.joined(outlines, with: candidates) else { return outlines }
+        onCommit?(joined.removed + outlines, joined.added, "Join Walls")
+        onMessage?("Wall joined to the walls it meets (⌘Z separates them again)")
+        return joined.added
     }
 
     /// Letters while drawing a wall; true = the letter was used.
@@ -4913,7 +5185,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
         onCommit?([], outlines, DrawingTool.wallFromCurve.title)
-        selectionManager?.select(outlines)
+        let result = joinWalls(outlines)
+        selectionManager?.select(result)
         onToolChangeRequested?(.select)
         onMessage?("Wall from Curve: \(outlines.count) outline\(outlines.count == 1 ? "" : "s"), "
                    + "\(DynamicInputView.format(wallThicknessMM)) mm, \(wallCurveAlignment.title)")
@@ -5013,7 +5286,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         default: return false
         }
         xlineKind = kind
-        onMessage?(kind == .angle ? "Construction Line: at \(LineType.formatAngle(xlineAngle))° – hold the Construction Line button to change the angle"
+        onMessage?(kind == .angle ? "Construction Line: at \(AngleStyle.text(xlineAngle, .direction)) – hold the Construction Line button to change the angle"
                    : "Construction Line: " + kind.title.lowercased())
         return true
     }
@@ -5416,8 +5689,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             // ΔX, ΔY and the angle in drawing coordinates (UCS), like the status bar
             let d = toUCSVector(p - a)
             let angle = Geometry.normalizeAngle(atan2(d.y, d.x)) * 180 / .pi
-            showMeasure(MeasureResult(path: [a, p], lines: ["Distance \(f(Geometry.distance(a, p))) \(unit)",
-                                                             "ΔX \(f(d.x)) · ΔY \(f(d.y))", "Angle \(f(angle))°"],
+            showMeasure(MeasureResult(path: [a, p], lines: ["Distance " + (LengthStyle.feetInches(Geometry.distance(a, p)) ?? "\(f(Geometry.distance(a, p))) \(unit)"),
+                                                             "ΔX \(f(d.x)) · ΔY \(f(d.y))", (AngleStyle.bearings ? "Bearing " : "Angle ") + AngleStyle.text(angle, .direction)],
                                       anchor: Geometry.midpoint(a, p)))
 
         case .angle:
@@ -5435,7 +5708,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                                           to: Geometry.angle(from: vertex, to: p)) * 180 / .pi
             let inner = min(sweep, 360 - sweep)
             showMeasure(MeasureResult(path: [first, vertex, p],
-                                      lines: ["Angle \(f(inner))°", "Outer \(f(360 - inner))°"], anchor: vertex))
+                                      lines: ["Angle " + AngleStyle.text(inner), "Outer " + AngleStyle.text(360 - inner)], anchor: vertex))
 
         case .point:
             let p = resolvedWorldPoint(for: event)
@@ -5525,13 +5798,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         switch measureKind {
         case .distance:
             let a = points[0]
-            return MeasureResult(path: [a, cursor], lines: ["\(f(Geometry.distance(a, cursor))) \(unit)"],
+            return MeasureResult(path: [a, cursor], lines: [LengthStyle.feetInches(Geometry.distance(a, cursor)) ?? "\(f(Geometry.distance(a, cursor))) \(unit)"],
                                  anchor: Geometry.midpoint(a, cursor))
         case .angle:
             guard points.count == 2 else { return MeasureResult(path: [points[0], cursor], anchor: cursor) }
             let sweep = Geometry.ccwDelta(from: Geometry.angle(from: points[0], to: points[1]),
                                           to: Geometry.angle(from: points[0], to: cursor)) * 180 / .pi
-            return MeasureResult(path: [points[1], points[0], cursor], lines: ["\(f(min(sweep, 360 - sweep)))°"], anchor: points[0])
+            return MeasureResult(path: [points[1], points[0], cursor], lines: [AngleStyle.text(min(sweep, 360 - sweep))], anchor: points[0])
         case .areaPoints:
             let polygon = points + [cursor]
             return MeasureResult(path: polygon, closed: polygon.count >= 3, fill: polygon.count >= 3 ? [polygon] : [],
@@ -5603,6 +5876,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: Mouse
 
     override func mouseDown(with event: NSEvent) {
+        lastKeyWasSpace = false
+        lastCopyRun = nil
+        copyCountEntry = nil
         window?.makeFirstResponder(self)
         // a click in the drawing ends typing – in the “only while typing” mode the box (without an entered value) hides
         valueBoxRequested = false
@@ -5798,7 +6074,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 let base = resolvedWorldPoint(for: event)
                 dragMoveBase = base
                 currentWorldPoint = base
-                onPromptChanged?("Move: drag to the new position and release (snap works) · Esc = cancel")
+                onPromptChanged?(dragMovePrompt)
                 needsDisplay = true
                 return
             }
@@ -5999,6 +6275,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             dragMoveBase = nil
             activeSnap = nil
             if dragged { finishDragMove(from: base, to: target) }
+            copyWhileMoving = false
             stateChanged()
             return
         }
@@ -6108,6 +6385,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// (square rectangle, 15° steps in Rotate and Arc, ortho).
     override func flagsChanged(with event: NSEvent) {
         super.flagsChanged(with: event)
+        trackOptionTap(event)
         let shift = event.modifierFlags.contains(.shift)
         guard shift != shiftHeld else { return }
         shiftHeld = shift
@@ -6133,6 +6411,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        lastKeyWasSpace = false
+        lastCopyRun = nil
+        copyCountEntry = nil
         // Bring Above / Send Under Object waiting for a click: right-click cancels it (like Esc) in any tool
         if let request = objectPick {
             objectPick = nil
@@ -6176,7 +6457,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
         case .trim, .extend:
             confirm()
-        case .move, .copy, .rotate, .scale, .mirror, .array, .blockCreate:
+        case .move, .copy, .rotate, .scale, .mirror, .array, .blockCreate, .align:
             if stage == .selectObjects {
                 if nothingSelected { endCurrentTool() } else { confirm() }
             } else if currentTool == .copy && !points.isEmpty {
@@ -6426,6 +6707,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+        // holding the space bar (key repeat) is not a second press
+        let secondSpace = lastKeyWasSpace && event.keyCode == 49 && !event.isARepeat && modifiers.isEmpty
+        if !event.isARepeat { lastKeyWasSpace = event.keyCode == 49 && modifiers.isEmpty }
 
         // Mirror: delete originals? (Y / A = yes, N / Enter = no, Esc = cancel)
         if pendingMirror != nil {
@@ -6494,6 +6778,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // right after a copy is placed: x5 / *5 = five copies repeating the step, /5 = five copies spread up to the placed one
+        if lastCopyRun != nil, modifiers.isEmpty, handleCopyCountKey(event) { return }
+
         // the letters inside a tool work with or without Shift (Shift may be held for Ortho) – ⌥ + a letter is a tool shortcut (⌥T, ⌥C…)
         let optioned = modifiers == [.option]
         let shifted = event.modifierFlags.contains(.shift)
@@ -6555,9 +6842,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             return
 
-        // space bar with nothing in progress = Select (in Select itself it does nothing); otherwise it confirms like ↩
+        // space bar with nothing in progress = Select; a second space right after it clears the selection; otherwise it confirms like ↩
         case 49 where !spaceConfirms:
-            if currentTool != .select { onToolChangeRequested?(.select) }
+            if currentTool != .select {
+                onToolChangeRequested?(.select)
+            } else if secondSpace, !(selectionManager?.isEmpty ?? true) {
+                selectionManager?.clearSelection()
+            }
             return
 
         case 36, 76, 49: // Return, Enter, space bar
@@ -6642,9 +6933,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
-        // Shift + letter is normally the plain letter (Shift may be held for Ortho), unless it has a shortcut of its own (⇧Z)
+        // Shift + letter is normally the plain letter (Shift may be held for Ortho). A shortcut of its own (⇧P) works only
+        // with nothing in progress, never while drawing or typing; view tools (⇧Z) work always
         var typedKey = (optioned ? "⌥" : "") + characters.uppercased()
-        if shifted, !optioned, Shortcuts.command(forKey: "⇧" + typedKey) != nil { typedKey = "⇧" + typedKey }
+        if shifted, !optioned, let command = Shortcuts.command(forKey: "⇧" + typedKey) {
+            var isViewTool = false
+            if case .tool(let tool) = command { isViewTool = tool.group == .view }
+            if isViewTool || shiftShortcutsAllowed { typedKey = "⇧" + typedKey }
+        }
         if characters.count == 1, let command = Shortcuts.command(forKey: typedKey) {
             // the Line key again while in the Line tool = continuous lines (LNC) on / off
             if command == .tool(.line), currentTool == .line, !dynamicInput.hasLockedValue {
@@ -6898,7 +7194,7 @@ final class ArrayForm: NSObject, NSTextFieldDelegate {
             row("dy", "Row spacing:", initial.rowSpacing ?? rowSpacing, suffix: unit)
         case .polar:
             row("count", "Items (incl. original):", CGFloat(initial.count))
-            row("fill", "Fill angle:", initial.fillAngle, suffix: "°")
+            row("fill", "Fill angle:", AngleStyle.shown(initial.fillAngle, .amount), suffix: AngleStyle.unit.caption)
             rotateBox.state = initial.rotateItems ? .on : .off
             rotateBox.target = self
             rotateBox.action = #selector(rotateToggled)
@@ -6939,7 +7235,7 @@ final class ArrayForm: NSObject, NSTextFieldDelegate {
             if let v = value("dy") { settings.rowSpacing = v }
         case .polar:
             if let v = integer("count"), v >= 2, v <= 10_000 { settings.count = v }
-            if let v = value("fill"), v != 0, abs(v) <= 360 { settings.fillAngle = v }
+            if let v = value("fill").map({ AngleStyle.degrees($0, .amount) }), v != 0, abs(v) <= 360 { settings.fillAngle = v }
         }
     }
 }

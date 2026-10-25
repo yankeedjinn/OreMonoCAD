@@ -493,10 +493,10 @@ enum HatchSettingsDialog {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 56))
         let angleField = NSTextField(frame: NSRect(x: 80, y: 30, width: 120, height: 22))
         let scaleField = NSTextField(frame: NSRect(x: 80, y: 2, width: 120, height: 22))
-        angleField.stringValue = LineType.format(angle)
+        angleField.stringValue = LineType.format(AngleStyle.shown(angle, .amount))
         scaleField.stringValue = scale.map { LineType.format($0) } ?? ""
         scaleField.placeholderString = "auto (\(LineType.format(drawingScale.factor)))"
-        for (caption, field, y) in [("Angle °:", angleField, CGFloat(30)), ("Scale:", scaleField, 2)] {
+        for (caption, field, y) in [(AngleStyle.caption("Angle", .amount) + ":", angleField, CGFloat(30)), ("Scale:", scaleField, 2)] {
             let label = NSTextField(labelWithString: caption)
             label.frame = NSRect(x: 0, y: y + 3, width: 74, height: 17)
             label.alignment = .right
@@ -513,13 +513,14 @@ enum HatchSettingsDialog {
                 continue
             }
             let scaleText = scaleField.stringValue.trimmingCharacters(in: .whitespaces)
-            if scaleText.isEmpty { return (CGFloat(newAngle), nil) }
+            let degrees = AngleStyle.degrees(CGFloat(newAngle), .amount)
+            if scaleText.isEmpty { return (degrees, nil) }
             guard let newScale = ExpressionEvaluator.evaluate(scaleText), newScale > 0 else {
                 alert.informativeText = "\u{201C}\(scaleText)\u{201D} is not a valid scale – enter a number greater than 0."
                 NSSound.beep()
                 continue
             }
-            return (CGFloat(newAngle), CGFloat(newScale))
+            return (degrees, CGFloat(newScale))
         }
         return nil
     }
@@ -569,7 +570,7 @@ enum HatchMenuBuilder {
 
         let settingsItem = NSMenuItem(title: "Angle & Scale…", action: actions.settings, keyEquivalent: "")
         settingsItem.target = actions.target
-        settingsItem.subtitle = "Now \(LineType.formatAngle(angle))°, scale \(scaleText)"
+        settingsItem.subtitle = "Now \(AngleStyle.text(angle)), scale \(scaleText)"
         settingsItem.image = ToolIcons.settingsImage(size: imageSize)
         menu.addItem(settingsItem)
 

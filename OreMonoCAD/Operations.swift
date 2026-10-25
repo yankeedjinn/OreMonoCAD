@@ -63,6 +63,25 @@ enum EditOperations {
     }
 
     /// Can two objects with these bounding boxes touch? Boxes that are not finite (construction lines) always can.
+    /// Can the segment from a to b touch the rectangle? (Clipping test with a small margin; an invalid box = yes.)
+    static func segmentMayTouch(_ a: CGPoint, _ b: CGPoint, _ box: CGRect) -> Bool {
+        guard DrawingSafety.isValidWorld(box) else { return true }
+        let margin = max(box.width, box.height, 1) * 1e-9
+        let r = box.insetBy(dx: -margin, dy: -margin)
+        var t0: CGFloat = 0, t1: CGFloat = 1
+        let d = b - a
+        for (p, q) in [(-d.x, a.x - r.minX), (d.x, r.maxX - a.x), (-d.y, a.y - r.minY), (d.y, r.maxY - a.y)] {
+            if p == 0 {
+                if q < 0 { return false }
+            } else {
+                let t = q / p
+                if p < 0 { t0 = max(t0, t) } else { t1 = min(t1, t) }
+                if t0 > t1 { return false }
+            }
+        }
+        return true
+    }
+
     static func mayMeet(_ a: CGRect, _ b: CGRect) -> Bool {
         guard DrawingSafety.isValidWorld(a), DrawingSafety.isValidWorld(b) else { return true }
         let margin = max(a.width, a.height, b.width, b.height, 1) * 1e-9
@@ -361,11 +380,28 @@ enum EditOperations {
     }
 
     private static func extendRaw(_ entity: CADEntity, near click: CGPoint, boundaries: [CADEntity]) -> CADEntity? {
-        var edges = boundaries.filter { $0 !== entity }.flatMap { $0.primitives() }
-        guard !edges.isEmpty || entity is Polyline else { return nil }
+        let others = boundaries.filter { $0 !== entity }
+        guard !others.isEmpty || entity is Polyline else { return nil }
+        // the polyline's own segments (it can be extended to itself)
+        var ownEdges: [Primitive] = []
+        // only the objects (and their pieces) the searched ray or arc can reach – in a large drawing on every
+        // mouse move most of them are far away (their pieces are not even computed then)
+        let boxes = others.map { $0.boundingBox() }
+        func edges(near region: Primitive) -> [Primitive] {
+            let reaches: (CGRect) -> Bool
+            switch region {
+            case let .segment(a, b, _): reaches = { segmentMayTouch(a, b, $0) }
+            case .arc: let box = region.bounds; reaches = { mayMeet($0, box) }
+            }
+            var result: [Primitive] = []
+            for (other, box) in zip(others, boxes) where box.isNull || reaches(box) {
+                result += other.primitives().filter { reaches($0.bounds) }
+            }
+            return result + ownEdges
+        }
 
         var extent = entity.boundingBox()
-        for edge in boundaries { extent = extent.union(edge.boundingBox()) }
+        for box in boxes { extent = extent.union(box) }
         var reach = (hypot(extent.width, extent.height) + 1) * 4
         // a construction line has no bounds – it can be crossed far beyond all the other objects
         if boundaries.contains(where: { $0 is ConstructionLine && $0 !== entity }) { reach = max(reach, ConstructionLine.reach) }
@@ -374,7 +410,7 @@ enum EditOperations {
         func rayHit(from: CGPoint, direction: CGPoint) -> CGPoint? {
             let ray = Primitive.segment(a: from, b: from + direction * reach, param: 0)
             let minimum = reach * 1e-10
-            let hits = edges.flatMap { ray.intersections(with: $0) }.filter { $0.param > minimum }
+            let hits = edges(near: ray).flatMap { ray.intersections(with: $0) }.filter { $0.param > minimum }
             return hits.min(by: { $0.param < $1.param })?.point
         }
 
@@ -398,11 +434,13 @@ enum EditOperations {
             guard polyline.bulge(at: extendEnd ? n - 2 : 0) == 0 else { return nil }
             // the polyline's other segments are boundaries too (it can be extended to itself)
             let own = polyline.primitives()
-            edges += own.indices.filter { $0 != (extendEnd ? own.count - 1 : 0) }.map { own[$0] }
+            ownEdges = own.indices.filter { $0 != (extendEnd ? own.count - 1 : 0) }.map { own[$0] }
             let direction = (vertices[movingIndex] - vertices[neighbourIndex]).normalized
             guard direction != .zero, let hit = rayHit(from: vertices[movingIndex], direction: direction) else { return nil }
             vertices[movingIndex] = hit
-            return Polyline(vertices: vertices, closed: false, bulges: polyline.bulges, layer: polyline.layer, color: polyline.color)
+            let extended = Polyline(vertices: vertices, closed: false, bulges: polyline.bulges, layer: polyline.layer, color: polyline.color)
+            extended.width = polyline.width
+            return extended
         }
 
         if let arc = entity as? Arc {
@@ -415,7 +453,7 @@ enum EditOperations {
             if extendEnd {
                 let end = arc.startAngle + sweep
                 let region = Primitive.arc(center: arc.center, radius: arc.radius, start: end, sweep: gap, param: 0)
-                let hits = edges.flatMap { region.intersections(with: $0) }.filter { $0.param > minimum }
+                let hits = edges(near: region).flatMap { region.intersections(with: $0) }.filter { $0.param > minimum }
                 guard let best = hits.min(by: { $0.param < $1.param }) else { return nil }
                 return Arc(center: arc.center, radius: arc.radius, startAngle: arc.startAngle,
                            endAngle: end + best.param / arc.radius, layer: arc.layer, color: arc.color)
@@ -423,7 +461,7 @@ enum EditOperations {
                 let regionStart = arc.startAngle - gap
                 let region = Primitive.arc(center: arc.center, radius: arc.radius, start: regionStart, sweep: gap, param: 0)
                 let regionLength = gap * arc.radius
-                let hits = edges.flatMap { region.intersections(with: $0) }.filter { $0.param < regionLength - minimum }
+                let hits = edges(near: region).flatMap { region.intersections(with: $0) }.filter { $0.param < regionLength - minimum }
                 guard let best = hits.max(by: { $0.param < $1.param }) else { return nil }
                 return Arc(center: arc.center, radius: arc.radius,
                            startAngle: regionStart + best.param / arc.radius,
@@ -688,6 +726,7 @@ enum EditOperations {
                 throw EditError(message: "Click the polyline on the side you want to keep.")
             }
             let piece = Polyline(vertices: vertices, closed: false, bulges: bulges, layer: polyline.layer, color: polyline.color)
+            piece.width = polyline.width
             piece.lineWeight = polyline.lineWeight
             piece.lineTypeScale = polyline.lineTypeScale
             return piece
@@ -777,6 +816,7 @@ enum EditOperations {
         let cleaned = removeDuplicateVertices(vertices, bulges, closed: polyline.closed)
         let result = Polyline(vertices: cleaned.vertices, closed: polyline.closed, bulges: cleaned.bulges,
                               layer: polyline.layer, color: polyline.color)
+        result.width = polyline.width
         result.lineWeight = polyline.lineWeight
         result.lineTypeScale = polyline.lineTypeScale
         return result
@@ -976,7 +1016,9 @@ enum EditOperations {
         case let polyline as Polyline:
             guard let points = offsetPath(polyline.vertices, closed: polyline.isClosedCurve,
                                           distance: distance, side: side) else { return nil }
-            result = Polyline(vertices: points, closed: polyline.isClosedCurve, layer: polyline.layer, color: polyline.color)
+            let offset = Polyline(vertices: points, closed: polyline.isClosedCurve, layer: polyline.layer, color: polyline.color)
+            offset.width = polyline.width
+            result = offset
 
         case let spline as Spline:
             // a spline is offset via a dense approximation – the result is a polyline that follows it faithfully;
@@ -1158,7 +1200,9 @@ enum EditOperations {
             bulges.append(0)
         }
         guard vertices.count >= 2 else { return nil }
-        return Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: polyline.layer, color: polyline.color)
+        let offset = Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: polyline.layer, color: polyline.color)
+        offset.width = polyline.width
+        return offset
     }
 
     /// Points along a curve `point(t)` for t in t0...t1, denser where the curve bends: adjacent chords turn

@@ -82,7 +82,14 @@ class CADDocument {
     /// Removes `removed` and inserts `added` at the position of the first removed entity (keeps the draw order).
     /// One for one (Move, Rotate, Properties… and their Undo): each new object takes the place of its original,
     /// so objects of the same draw order keep lying over and under each other as before.
-    func replace(_ removed: [CADEntity], with added: [CADEntity]) {
+    /// - Parameter anchors: where each added object belonged before (from `orderAnchors(of:)` when it was removed) –
+    ///   Undo of Join, Trim, Explode… puts the objects back in their own places instead of together in one place.
+    func replace(_ removed: [CADEntity], with added: [CADEntity], anchors: [OrderAnchor]? = nil) {
+        if let anchors = anchors, !added.isEmpty, anchors.count == added.count,
+           Set(anchors.map { $0.id }) == Set(added.map { $0.id }), added.allSatisfy({ entities[$0.id] == nil }) {
+            restore(added, at: anchors, removing: removed)
+            return
+        }
         if removed.count == added.count, removed.count > 1,
            removed.allSatisfy({ entities[$0.id] != nil }), added.allSatisfy({ entities[$0.id] == nil }),
            Set(added.map { $0.id }).count == added.count {
@@ -116,6 +123,50 @@ class CADDocument {
             }
         }
         if !inserted { insertAdded() }
+        entityOrder = order
+        revision += 1
+        onEntitiesChanged?()
+    }
+
+    /// The place of an object in the drawing order: the nearest preceding object that stays (nil = the start).
+    struct OrderAnchor {
+        let id: UUID
+        let after: UUID?
+    }
+
+    /// Places of the objects in the drawing order (in that order), relative to the objects that are not among them.
+    func orderAnchors(of objects: [CADEntity]) -> [OrderAnchor] {
+        let ids = Set(objects.map { $0.id })
+        guard !ids.isEmpty else { return [] }
+        var anchors: [OrderAnchor] = []
+        var previous: UUID?
+        for id in entityOrder {
+            if ids.contains(id) {
+                anchors.append(OrderAnchor(id: id, after: previous))
+            } else {
+                previous = id
+            }
+        }
+        return anchors
+    }
+
+    /// Removes `removed` and puts `added` back after their anchors (objects with the same anchor keep their order).
+    /// An anchor that is no longer in the drawing puts its objects at the end.
+    private func restore(_ added: [CADEntity], at anchors: [OrderAnchor], removing removed: [CADEntity]) {
+        let removedIds = Set(removed.map { $0.id }).filter { entities[$0] != nil }
+        for id in removedIds { entities.removeValue(forKey: id) }
+        for entity in added { entities[entity.id] = entity }
+        var following: [UUID?: [UUID]] = [:]
+        for anchor in anchors { following[anchor.after, default: []].append(anchor.id) }
+        var order: [UUID] = []
+        order.reserveCapacity(entityOrder.count + added.count)
+        order += following.removeValue(forKey: nil) ?? []
+        for id in entityOrder where !removedIds.contains(id) {
+            order.append(id)
+            if let next = following.removeValue(forKey: id) { order += next }
+        }
+        // anchors that disappeared meanwhile – keep the objects, at the end
+        for anchor in anchors where following[anchor.after] != nil { order.append(anchor.id) }
         entityOrder = order
         revision += 1
         onEntitiesChanged?()
@@ -706,6 +757,37 @@ class SnapManager {
         }
     }
 
+    /// The objects of a block (nested blocks too) near the cursor; any other object is itself.
+    private static func intersectionParts(of entity: CADEntity, near point: CGPoint, tolerance: CGFloat,
+                                          depth: Int = 0) -> [CADEntity] {
+        guard let block = entity as? BlockReference, depth < 8 else { return [entity] }
+        return block.resolvedEntities
+            .filter { $0.distance(to: point) <= tolerance }
+            .flatMap { intersectionParts(of: $0, near: point, tolerance: tolerance, depth: depth + 1) }
+    }
+
+    /// Where a polyline or spline crosses itself near the cursor. Neighbouring pieces only share a vertex,
+    /// so they are skipped (zero-length pieces of repeated vertices are left out, as in Trim).
+    private static func selfIntersections(of entity: CADEntity, near point: CGPoint, tolerance: CGFloat) -> [CGPoint] {
+        guard let curve = entity as? CurveEntity else { return [] }
+        let own = curve.primitives()
+        guard own.count >= 3 else { return [] }
+        let tiny = max(curve.curveLength, 1) * 1e-12
+        let live = own.indices.filter { own[$0].length > tiny }
+        let count = live.count
+        // only the pieces near the cursor (a dense polyline has thousands)
+        let near = live.enumerated().filter { own[$0.element].distance(to: point) <= tolerance }
+        var hits: [CGPoint] = []
+        for (m, first) in near.enumerated() {
+            for second in near[(m + 1)...] {
+                let x = first.offset, y = second.offset
+                guard abs(x - y) >= 2, !(curve.isClosedCurve && min(x, y) == 0 && max(x, y) == count - 1) else { continue }
+                hits += own[first.element].intersections(with: own[second.element]).map { $0.point }
+            }
+        }
+        return hits
+    }
+
     /// Finds the nearest snap point within tolerance (in world coordinates).
     /// `reference` = the previous point (for perpendicular and tangent).
     func findSnapPoint(near point: CGPoint, in entities: [CADEntity], tolerance: CGFloat,
@@ -739,8 +821,14 @@ class SnapManager {
         }
 
         if enabledSnaps.contains(.intersection) {
+            // a block takes part through its own objects, so lines crossing inside one block snap too
             let close = nearby.filter { $0.distance(to: point) <= tolerance }.prefix(12)
-            let candidates = Array(close)
+            let candidates = Array(close.flatMap { SnapManager.intersectionParts(of: $0, near: point, tolerance: tolerance) }.prefix(24))
+            for candidate in candidates {
+                for hit in SnapManager.selfIntersections(of: candidate, near: point, tolerance: tolerance) {
+                    consider(SnapPoint(point: hit, type: .intersection))
+                }
+            }
             for i in 0..<candidates.count {
                 let pa = candidates[i].primitives()
                 for j in (i + 1)..<max(candidates.count, i + 1) {

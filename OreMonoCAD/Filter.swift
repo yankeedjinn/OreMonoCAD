@@ -3,7 +3,8 @@
 //  OreMonoCAD
 //
 //  Edit › Filter…: selects the objects that match the properties you tick –
-//  object type, layer, color, linetype, lineweight, block name and text. An object must match all ticked ones.
+//  object type, layer, color, linetype, lineweight, block name, hatch pattern, text, text height, length and area.
+//  An object must match all ticked ones.
 //  It searches the open space (visible objects on unlocked layers) or only the current selection;
 //  the result is an ordinary selection that the other tools work with.
 //
@@ -14,6 +15,37 @@ import Cocoa
 struct FilterCriteria {
     enum Scope {
         case drawing, selection
+    }
+
+    /// A number the object's value is compared with (length, area, text height – in drawing units).
+    struct NumberCondition {
+        enum Comparison: Int, CaseIterable {
+            case atLeast, atMost, equal
+
+            var title: String {
+                switch self {
+                case .atLeast: return "at least"
+                case .atMost: return "at most"
+                case .equal: return "equal to"
+                }
+            }
+        }
+
+        var comparison: Comparison
+        var value: CGFloat
+
+        func holds(_ number: CGFloat) -> Bool {
+            switch comparison {
+            case .atLeast: return number >= value - tolerance
+            case .atMost: return number <= value + tolerance
+            case .equal: return abs(number - value) <= tolerance
+            }
+        }
+
+        /// Values are shown with 3 decimals – what rounds to the typed number counts as equal.
+        private var tolerance: CGFloat { return max(0.0005, abs(value) * 1e-9) }
+
+        var summary: String { return comparison.title + " " + LineType.format(value) }
     }
 
     var type: String?
@@ -27,13 +59,20 @@ struct FilterCriteria {
     var blockName: String?
     /// A piece of the text (texts, labels, dimension and leader texts), without regard to case.
     var text: String?
+    var hatchPattern: String?
+    /// Height of capital letters of a text, a label or a dimension text.
+    var textHeight: NumberCondition?
+    /// Length of a line, arc, polyline, spline… (a closed one: its perimeter).
+    var length: NumberCondition?
+    /// Area of a closed object or a hatch.
+    var area: NumberCondition?
     var scope: Scope = .drawing
     /// The ticked properties in words, for the message (“layer Walls, color Red”).
     var summary = ""
 
     var isEmpty: Bool {
         return type == nil && layer == nil && color == nil && lineType == nil && lineWeight == nil
-            && blockName == nil && text == nil
+            && blockName == nil && text == nil && hatchPattern == nil && textHeight == nil && length == nil && area == nil
     }
 
     func matches(_ entity: CADEntity, layers: LayerManager) -> Bool {
@@ -45,6 +84,16 @@ struct FilterCriteria {
         if let blockName = blockName, (entity as? BlockReference)?.definition.name != blockName { return false }
         if let text = text, !ObjectFilter.texts(of: entity).contains(where: { $0.localizedCaseInsensitiveContains(text) }) {
             return false
+        }
+        if let pattern = hatchPattern, (entity as? HatchEntity)?.pattern.name != pattern { return false }
+        if let condition = textHeight {
+            guard let height = ObjectFilter.textHeight(of: entity), condition.holds(height) else { return false }
+        }
+        if let condition = length {
+            guard let curve = entity as? CurveEntity, condition.holds(curve.curveLength) else { return false }
+        }
+        if let condition = area {
+            guard let measured = Measure.areaAndPerimeter(of: entity), condition.holds(measured.area) else { return false }
         }
         return true
     }
@@ -62,6 +111,12 @@ enum ObjectFilter {
         if let text = entity as? TextEntity { return [text.text] }
         if let dimension = entity as? DimensionEntity { return [dimension.text, dimension.belowText] }
         return []
+    }
+
+    static func textHeight(of entity: CADEntity) -> CGFloat? {
+        if let text = entity as? TextEntity { return text.height }
+        if let dimension = entity as? DimensionEntity { return dimension.textHeight }
+        return nil
     }
 
     static func lineWeightKey(_ weight: CGFloat?) -> String {
@@ -138,6 +193,12 @@ enum ObjectFilter {
         return result
     }
 
+    static func hatchPatternChoices(_ entities: [CADEntity]) -> [Choice] {
+        var names = Set<String>()
+        for case let hatch as HatchEntity in entities { names.insert(hatch.pattern.name) }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { Choice(title: $0, key: $0) }
+    }
+
     static func blockChoices(_ entities: [CADEntity]) -> [Choice] {
         var names = Set<String>()
         for case let reference as BlockReference in entities { names.insert(reference.definition.name) }
@@ -153,7 +214,10 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
     private static var last = FilterCriteria()
 
     private enum Property: Int, CaseIterable {
-        case type, layer, color, lineType, lineWeight, blockName, text
+        case type, layer, color, lineType, lineWeight, blockName, hatchPattern, text, textHeight, length, area
+
+        /// A number compared with the object's value (a comparison and a field instead of a list of values).
+        var isNumber: Bool { return self == .textHeight || self == .length || self == .area }
 
         var title: String {
             switch self {
@@ -163,7 +227,11 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
             case .lineType: return "Linetype (of the layer)"
             case .lineWeight: return "Lineweight"
             case .blockName: return "Block name"
+            case .hatchPattern: return "Hatch pattern"
             case .text: return "Text contains"
+            case .textHeight: return "Text height"
+            case .length: return "Length"
+            case .area: return "Area"
             }
         }
 
@@ -176,7 +244,20 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
             case .lineType: return "linetype"
             case .lineWeight: return "lineweight"
             case .blockName: return "block"
+            case .hatchPattern: return "hatch pattern"
             case .text: return "text"
+            case .textHeight: return "text height"
+            case .length: return "length"
+            case .area: return "area"
+            }
+        }
+
+        var tip: String? {
+            switch self {
+            case .textHeight: return "Height of capital letters of texts, labels and dimension texts, in drawing units"
+            case .length: return "Length of lines, arcs, polylines and other curves (of a closed one its perimeter), in drawing units"
+            case .area: return "Area of closed shapes and hatches, in square drawing units"
+            default: return nil
             }
         }
     }
@@ -184,6 +265,8 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
     private var boxes: [Property: NSButton] = [:]
     private var popups: [Property: NSPopUpButton] = [:]
     private let textField = NSTextField(string: "")
+    private var comparisons: [Property: NSPopUpButton] = [:]
+    private var numberFields: [Property: NSTextField] = [:]
     private let scopePopup = NSPopUpButton()
 
     /// nil = Cancel.
@@ -202,16 +285,46 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
             .color: ObjectFilter.colorChoices(pool),
             .lineType: ObjectFilter.lineTypeChoices(pool, layers: layers),
             .lineWeight: ObjectFilter.lineWeightChoices(pool),
-            .blockName: ObjectFilter.blockChoices(pool)
+            .blockName: ObjectFilter.blockChoices(pool),
+            .hatchPattern: ObjectFilter.hatchPatternChoices(pool)
         ]
         let last = FilterDialog.last
         let lastKeys: [Property: String?] = [.type: last.type, .layer: last.layer, .color: last.color,
-                                             .lineType: last.lineType, .lineWeight: last.lineWeight, .blockName: last.blockName]
+                                             .lineType: last.lineType, .lineWeight: last.lineWeight, .blockName: last.blockName,
+                                             .hatchPattern: last.hatchPattern]
+        let lastNumbers: [Property: FilterCriteria.NumberCondition?] = [.textHeight: last.textHeight, .length: last.length,
+                                                                        .area: last.area]
 
         var rows: [[NSView]] = []
         for property in Property.allCases {
             let box = NSButton(checkboxWithTitle: property.title, target: nil, action: nil)
+            box.toolTip = property.tip
             boxes[property] = box
+            if property.isNumber {
+                // a comparison and a number, side by side in the width of the other values
+                let comparison = NSPopUpButton()
+                for kind in FilterCriteria.NumberCondition.Comparison.allCases { comparison.addItem(withTitle: kind.title) }
+                comparison.widthAnchor.constraint(equalToConstant: 100).isActive = true
+                comparison.tag = property.rawValue
+                comparison.target = self
+                comparison.action = #selector(valueChosen(_:))
+                let field = NSTextField(string: "")
+                field.placeholderString = "number"
+                field.toolTip = (property.tip.map { $0 + "\n" } ?? "") + "Type a value or an expression (e.g. 2*25)"
+                field.delegate = self
+                field.widthAnchor.constraint(equalToConstant: 122).isActive = true
+                if let condition = lastNumbers[property] ?? nil {
+                    comparison.selectItem(at: condition.comparison.rawValue)
+                    field.stringValue = LineType.format(condition.value)
+                    box.state = .on
+                }
+                comparisons[property] = comparison
+                numberFields[property] = field
+                let pair = NSStackView(views: [comparison, field])
+                pair.spacing = 8
+                rows.append([box, pair])
+                continue
+            }
             if property == .text {
                 textField.placeholderString = "part of a text, label or dimension text"
                 textField.stringValue = last.text ?? ""
@@ -231,7 +344,7 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
                 popup.lastItem?.image = choice.image
             }
             if values.isEmpty {
-                popup.addItem(withTitle: property == .blockName ? "(no blocks here)" : "(none)")
+                popup.addItem(withTitle: property == .blockName ? "(no blocks here)" : property == .hatchPattern ? "(no hatches here)" : "(none)")
                 popup.isEnabled = false
                 box.isEnabled = false
             } else if let key = lastKeys[property] ?? nil, let index = values.firstIndex(where: { $0.key == key }) {
@@ -271,7 +384,7 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
         while alert.runModal() == .alertFirstButtonReturn {
             let criteria = read()
             guard !criteria.isEmpty else {
-                alert.informativeText = "Tick at least one property (and type the text, if Text contains is ticked)."
+                alert.informativeText = "Tick at least one property (and type the text or the number next to it)."
                 NSSound.beep()
                 continue
             }
@@ -287,9 +400,14 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
         boxes[property]?.state = .on
     }
 
-    /// Typing a text ticks Text contains.
+    /// Typing a text ticks Text contains, typing a number ticks its property.
     func controlTextDidChange(_ obj: Notification) {
-        boxes[.text]?.state = textField.stringValue.isEmpty ? .off : .on
+        guard let field = obj.object as? NSTextField else { return }
+        if field === textField {
+            boxes[.text]?.state = textField.stringValue.isEmpty ? .off : .on
+        } else if let property = numberFields.first(where: { $0.value === field })?.key {
+            boxes[property]?.state = field.stringValue.isEmpty ? .off : .on
+        }
     }
 
     private func read() -> FilterCriteria {
@@ -303,6 +421,20 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
                 parts.append("text \u{201C}\(text)\u{201D}")
                 continue
             }
+            if property.isNumber {
+                guard let field = numberFields[property],
+                      let number = ExpressionEvaluator.evaluate(field.stringValue.trimmingCharacters(in: .whitespaces)),
+                      number.isFinite else { continue }
+                let kind = FilterCriteria.NumberCondition.Comparison(rawValue: comparisons[property]?.indexOfSelectedItem ?? 0) ?? .atLeast
+                let condition = FilterCriteria.NumberCondition(comparison: kind, value: CGFloat(number))
+                switch property {
+                case .textHeight: criteria.textHeight = condition
+                case .length: criteria.length = condition
+                default: criteria.area = condition
+                }
+                parts.append(property.word + " " + condition.summary)
+                continue
+            }
             guard let item = popups[property]?.selectedItem, let key = item.representedObject as? String else { continue }
             switch property {
             case .type: criteria.type = key
@@ -311,7 +443,8 @@ final class FilterDialog: NSObject, NSTextFieldDelegate {
             case .lineType: criteria.lineType = key
             case .lineWeight: criteria.lineWeight = key
             case .blockName: criteria.blockName = key
-            case .text: break
+            case .hatchPattern: criteria.hatchPattern = key
+            case .text, .textHeight, .length, .area: break
             }
             parts.append(property.word + " " + item.title)
         }

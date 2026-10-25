@@ -257,19 +257,22 @@ final class LayoutBarView: NSView {
     override var isFlipped: Bool { return false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { return true }
 
+    /// Keeps the tooltip texts alive (AppKit does not keep them).
+    private let toolTipTexts = ToolTipTexts()
+
     func update(layoutNames: [String], selected: Int?, toolTips: [String]) {
         names = layoutNames
         self.selected = selected
         layoutRects()
-        removeAllToolTips()
+        toolTipTexts.removeAll(from: self)
         for item in rects {
             if let index = item.index {
-                _ = addToolTip(item.rect, owner: (toolTips.indices.contains(index) ? toolTips[index] : names[index]) as NSString, userData: nil)
+                toolTipTexts.add(toolTips.indices.contains(index) ? toolTips[index] : names[index], rect: item.rect, to: self)
             } else {
-                _ = addToolTip(item.rect, owner: "Model – draw in real size. Right-click for Plot…" as NSString, userData: nil)
+                toolTipTexts.add("Model – draw in real size. Right-click for Plot…", rect: item.rect, to: self)
             }
         }
-        _ = addToolTip(plusRect, owner: "New layout (a sheet of paper with a viewport onto the model)" as NSString, userData: nil)
+        toolTipTexts.add("New layout (a sheet of paper with a viewport onto the model)", rect: plusRect, to: self)
         needsDisplay = true
     }
 
@@ -615,6 +618,9 @@ final class BlockReference: CADEntity {
     var scale: CGFloat = 1 { didSet { cache = nil } }
     /// Mirrored across the block's X axis.
     var mirrored = false { didSet { cache = nil } }
+    /// The Y scale as a multiple of the X scale (`scale`) – e.g. a block from DXF scaled 2 × 1; 1 = the same in X and Y.
+    var yRatio: CGFloat = 1 { didSet { cache = nil } }
+    var isStretched: Bool { return abs(yRatio - 1) > 1e-9 }
 
     /// Drawn highlighted (selection) – internal colors are not used then.
     static var highlightDrawing = false
@@ -636,9 +642,10 @@ final class BlockReference: CADEntity {
     var typeName: String { return definition.isExternal ? "External Reference" : "Block" }
 
     var infoText: String {
-        var text = String(format: "%@ “%@”\n%@\n\nInsertion: %.3f, %.3f\nRotation:  %.2f°\nScale:     %@%@\nObjects:   %ld",
+        var text = String(format: "%@ “%@”\n%@\n\nInsertion: %.3f, %.3f\nRotation:  %@\nScale:     %@%@\nObjects:   %ld",
                           typeName, definition.name, commonInfo, position.x, position.y,
-                          Geometry.normalizeAngle(rotation) * 180 / .pi, LineType.format(scale),
+                          AngleStyle.text(Geometry.normalizeAngle(rotation) * 180 / .pi, .direction),
+                          LineType.format(scale) + (isStretched ? " × " + LineType.format(scale * yRatio) : ""),
                           mirrored ? " (mirrored)" : "", definition.entities.count)
         if let source = definition.source {
             text += "\nFile:      \(source.fileName)"
@@ -651,7 +658,7 @@ final class BlockReference: CADEntity {
     var blockTransform: CGAffineTransform {
         let s = max(abs(scale), 1e-12)
         return CGAffineTransform(translationX: -definition.basePoint.x, y: -definition.basePoint.y)
-            .concatenating(CGAffineTransform(scaleX: s, y: mirrored ? -s : s))
+            .concatenating(CGAffineTransform(scaleX: s, y: (mirrored ? -s : s) * (isStretched ? max(abs(yRatio), 1e-12) : 1)))
             .concatenating(CGAffineTransform(rotationAngle: rotation))
             .concatenating(CGAffineTransform(translationX: position.x, y: position.y))
     }
@@ -661,10 +668,12 @@ final class BlockReference: CADEntity {
         if let cache = cache, cache.version == definition.version { return cache.entities }
         let t = blockTransform
         // sorted by draw order once during the computation (not on every redraw)
-        let entities = DrawOrder.sorted(definition.entities.map { entity -> CADEntity in
+        let stretched = isStretched
+        let entities = DrawOrder.sorted(definition.entities.flatMap { entity -> [CADEntity] in
+            if stretched { return BlockReference.stretchedCopies(of: entity, by: t) }
             let copy = entity.clone()
             copy.applyTransform(t)
-            return copy
+            return [copy]
         })
         cache = (definition.version, entities)
         return entities
@@ -742,11 +751,77 @@ final class BlockReference: CADEntity {
         copy.rotation = rotation
         copy.scale = scale
         copy.mirrored = mirrored
+        copy.yRatio = yRatio
         return copyStyle(to: copy)
     }
 
     func primitives() -> [Primitive] {
         return resolvedEntities.flatMap { $0.primitives() }
+    }
+
+    /// A block object placed by a transform that stretches X and Y differently (a block scaled e.g. 2 × 1):
+    /// circles, arcs, ellipses, splines and polylines with arcs become polylines through dense points, so their shape
+    /// is exact; a text takes its height from the Y scale and its width factor from the ratio;
+    /// a nested block is placed through its own objects.
+    static func stretchedCopies(of entity: CADEntity, by t: CGAffineTransform) -> [CADEntity] {
+        if let nested = entity as? BlockReference {
+            return nested.exploded().flatMap { stretchedCopies(of: $0, by: t) }
+        }
+        if let text = entity as? TextEntity {
+            let copy = text.clone() as! TextEntity
+            copy.applyTransform(t)
+            // the text's own directions after the transform
+            let along = CGPoint(x: cos(text.rotation), y: sin(text.rotation))
+            let up = along.perpendicular
+            let sx = hypot(t.a * along.x + t.c * along.y, t.b * along.x + t.d * along.y)
+            let sy = hypot(t.a * up.x + t.c * up.y, t.b * up.x + t.d * up.y)
+            if sx > 0, sy > 0, sx.isFinite, sy.isFinite {
+                copy.height = text.height * sy
+                copy.widthFactor = text.widthFactor * sx / sy
+            }
+            return [copy]
+        }
+        let curved: Bool
+        switch entity {
+        case is Circle, is Arc, is Ellipse, is Spline: curved = true
+        case let polyline as Polyline: curved = polyline.hasArcs
+        default: curved = false
+        }
+        guard curved, let curve = entity as? CurveEntity else {
+            let copy = entity.clone()
+            copy.applyTransform(t)
+            return [copy]
+        }
+        var points: [CGPoint]
+        switch entity {
+        case let ellipse as Ellipse: points = ellipse.flattened
+        case let spline as Spline: points = spline.flattened
+        default:
+            points = []
+            for primitive in curve.primitives() {
+                switch primitive {
+                case let .segment(a, b, _):
+                    if points.isEmpty { points.append(a) }
+                    points.append(b)
+                case let .arc(c, r, start, sweep, _):
+                    let steps = max(2, Int(abs(sweep) / (.pi / 32)) + 1)
+                    for k in (points.isEmpty ? 0 : 1)...steps {
+                        points.append(Geometry.pointOnCircle(c, r, start + sweep * CGFloat(k) / CGFloat(steps)))
+                    }
+                }
+            }
+        }
+        let closed = curve.isClosedCurve
+        if closed, points.count > 2, let first = points.first, let last = points.last,
+           Geometry.distance(first, last) <= max(curve.curveLength, 1) * 1e-9 {
+            points.removeLast()
+        }
+        guard points.count >= 2 else { return [] }
+        let polyline = Polyline(vertices: points.map { $0.applying(t) }, closed: closed, layer: entity.layer, color: entity.color)
+        if let source = entity as? Polyline, source.width > 0 {
+            polyline.width = source.width * Geometry.uniformScale(of: t)
+        }
+        return [entity.copyStyle(to: polyline)]
     }
 
     /// The block's objects as separate pieces (Explode): those on layer 0 move to the block's layer.

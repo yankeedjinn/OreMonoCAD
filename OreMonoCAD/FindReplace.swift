@@ -3,12 +3,36 @@
 //  OreMonoCAD
 //
 //  Edit › Find and Replace… (⌘F): find and replace in texts, labels and dimension texts
-//  in the open space (model or layout). Replacing goes through Undo like any other change.
+//  in the whole drawing – the model, all layouts and the blocks (during a block edit only in the edited block).
+//  Replacing goes through Undo like any other change, as one step.
 //
 
 import Cocoa
 
 // MARK: - Search
+
+/// Where searched objects lie: the model, a layout (its index) or a block definition.
+enum TextPlace {
+    case model
+    case layout(Int)
+    case block(BlockDefinition)
+
+    func isSame(as other: TextPlace) -> Bool {
+        switch (self, other) {
+        case (.model, .model): return true
+        case let (.layout(a), .layout(b)): return a == b
+        case let (.block(a), .block(b)): return a === b
+        default: return false
+        }
+    }
+}
+
+/// Objects of one place, with its name for the list (“Model”, “Layout1”, “Block “Door””).
+struct TextSource {
+    let place: TextPlace
+    let name: String
+    let entities: [CADEntity]
+}
 
 /// A single match (the object and which of its fields).
 struct TextMatch {
@@ -22,6 +46,8 @@ struct TextMatch {
     let field: Field
     let value: String
     let count: Int
+    let place: TextPlace
+    let placeName: String
 
     var kind: String {
         switch field {
@@ -55,20 +81,24 @@ enum TextSearch {
         return expression.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
     }
 
-    /// All matches in the objects.
-    static func find(_ query: String, options: Options, in entities: [CADEntity]) -> [TextMatch] {
+    /// All matches in the objects of the places (in the order of the places).
+    static func find(_ query: String, options: Options, in sources: [TextSource]) -> [TextMatch] {
         guard let expression = expression(for: query, options: options) else { return [] }
         var result: [TextMatch] = []
-        for entity in entities {
-            if let text = entity as? TextEntity {
-                let n = count(in: text.text, expression)
-                if n > 0 { result.append(TextMatch(entity: text, field: .text, value: text.text, count: n)) }
-            } else if let dimension = entity as? DimensionEntity {
-                let n = count(in: dimension.text, expression)
-                if n > 0 { result.append(TextMatch(entity: dimension, field: .dimension, value: dimension.text, count: n)) }
-                let below = count(in: dimension.belowText, expression)
-                if below > 0 {
-                    result.append(TextMatch(entity: dimension, field: .belowText, value: dimension.belowText, count: below))
+        for source in sources {
+            func add(_ entity: CADEntity, _ field: TextMatch.Field, _ value: String, _ n: Int) {
+                result.append(TextMatch(entity: entity, field: field, value: value, count: n,
+                                        place: source.place, placeName: source.name))
+            }
+            for entity in source.entities {
+                if let text = entity as? TextEntity {
+                    let n = count(in: text.text, expression)
+                    if n > 0 { add(text, .text, text.text, n) }
+                } else if let dimension = entity as? DimensionEntity {
+                    let n = count(in: dimension.text, expression)
+                    if n > 0 { add(dimension, .dimension, dimension.text, n) }
+                    let below = count(in: dimension.belowText, expression)
+                    if below > 0 { add(dimension, .belowText, dimension.belowText, below) }
                 }
             }
         }
@@ -81,16 +111,17 @@ enum TextSearch {
                                                    withTemplate: NSRegularExpression.escapedTemplate(for: replacement))
     }
 
-    /// Replaces in the selected matches. Returns pairs (original object, edited copy) – each object at most once.
+    /// Replaces in the selected matches. Returns the original objects with their edited copies and places –
+    /// each object at most once.
     static func replacements(for matches: [TextMatch], query: String, replacement: String,
-                             options: Options) -> [(old: CADEntity, new: CADEntity)] {
+                             options: Options) -> [TextReplacement] {
         guard let expression = expression(for: query, options: options) else { return [] }
-        var copies: [UUID: (old: CADEntity, new: CADEntity)] = [:]
+        var copies: [UUID: TextReplacement] = [:]
         var order: [UUID] = []
         for match in matches {
             let id = match.entity.id
             if copies[id] == nil {
-                copies[id] = (match.entity, match.entity.clone())
+                copies[id] = TextReplacement(old: match.entity, new: match.entity.clone(), place: match.place)
                 order.append(id)
             }
             guard let copy = copies[id]?.new else { continue }
@@ -111,23 +142,30 @@ enum TextSearch {
     }
 }
 
+/// An object with replaced text: the original, its edited copy and where it lies.
+struct TextReplacement {
+    let old: CADEntity
+    let new: CADEntity
+    let place: TextPlace
+}
+
 // MARK: - Window
 
 /// Floating Find and Replace window. Talks to the drawing via closures (MainViewController).
 final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate,
                                    NSSearchFieldDelegate {
-    /// Objects of the open space that are searched (visible layers).
-    var entities: (() -> [CADEntity])?
+    /// The places that are searched with their objects (visible layers), the open space first.
+    var sources: (() -> [TextSource])?
     /// Can the object be changed? (locked layer = no)
     var isEditable: ((CADEntity) -> Bool)?
-    /// Space name for the status line (“Model”, “Layout1”).
+    /// What is searched, for the status line (“Drawing1” – model, layouts and blocks).
     var spaceName: (() -> String)?
-    /// Show objects in the drawing (select and zoom).
-    var onShow: (([CADEntity]) -> Void)?
-    /// Select objects (without zooming).
-    var onSelect: (([CADEntity]) -> Void)?
+    /// Show the found objects in the drawing (select and zoom; switches to their space).
+    var onShow: (([TextMatch]) -> Void)?
+    /// Select the found objects of the open space (without zooming).
+    var onSelect: (([TextMatch]) -> Void)?
     /// Perform the replacement (as a single Undo change).
-    var onReplace: (([(old: CADEntity, new: CADEntity)]) -> Void)?
+    var onReplace: (([TextReplacement]) -> Void)?
 
     private let findField = NSSearchField()
     private let replaceField = NSTextField()
@@ -144,7 +182,7 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
     private var updatingSelection = false
 
     init() {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow],
                             backing: .buffered, defer: false)
         panel.title = "Find and Replace"
@@ -152,7 +190,7 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
         panel.hidesOnDeactivate = true
         panel.becomesKeyOnlyIfNeeded = false
         panel.isReleasedWhenClosed = false
-        panel.minSize = NSSize(width: 460, height: 320)
+        panel.minSize = NSSize(width: 520, height: 320)
         super.init(window: panel)
         panel.delegate = self
         build()
@@ -199,7 +237,7 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
         label("Find:", y: y)
         findField.frame = NSRect(x: fieldX, y: y, width: width - fieldX - margin, height: 24)
         findField.autoresizingMask = [.width, .minYMargin]
-        findField.placeholderString = "Text to find in texts, labels and dimension texts"
+        findField.placeholderString = "Text to find in texts, labels and dimension texts, also on layouts and in blocks"
         findField.sendsSearchStringImmediately = true
         findField.delegate = self
         findField.target = self
@@ -257,7 +295,8 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
-        for (identifier, title, columnWidth) in [("text", "Text", 330.0), ("kind", "Kind", 80.0), ("layer", "Layer", 100.0)] {
+        for (identifier, title, columnWidth) in [("text", "Text", 300.0), ("kind", "Kind", 80.0), ("place", "Where", 110.0),
+                                                 ("layer", "Layer", 100.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
             column.title = title
             column.width = CGFloat(columnWidth)
@@ -308,7 +347,7 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
 
     private func search() {
         let query = findField.stringValue
-        let found = TextSearch.find(query, options: options, in: entities?() ?? [])
+        let found = TextSearch.find(query, options: options, in: sources?() ?? [])
         // matches that can stay selected remain selected
         let previouslySelected = Set(table.selectedRowIndexes.compactMap { index -> String? in
             index < matches.count ? key(matches[index]) : nil
@@ -381,6 +420,8 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
             cell.textField?.stringValue = single.count > 300 ? String(single.prefix(300)) + "…" : single
         case "kind":
             cell.textField?.stringValue = match.kind + (match.count > 1 ? " (\(match.count)×)" : "")
+        case "place":
+            cell.textField?.stringValue = match.placeName
         default:
             cell.textField?.stringValue = match.entity.layer + (locked ? " (locked)" : "")
         }
@@ -402,19 +443,14 @@ final class FindReplaceController: NSWindowController, NSWindowDelegate, NSTable
     @objc private func showSelectedRows(_ sender: Any?) {
         let chosen = selectedMatches
         guard !chosen.isEmpty else { return }
-        onShow?(unique(chosen.map { $0.entity }))
-    }
-
-    private func unique(_ entities: [CADEntity]) -> [CADEntity] {
-        var seen = Set<UUID>()
-        return entities.filter { seen.insert($0.id).inserted }
+        onShow?(chosen)
     }
 
     // MARK: Actions
 
     @objc private func selectAllFound(_ sender: Any?) {
         guard !matches.isEmpty else { return }
-        onSelect?(unique(matches.map { $0.entity }))
+        onSelect?(matches)
     }
 
     @objc private func replaceSelected(_ sender: Any?) {

@@ -60,15 +60,15 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             toolRows.append(Row(key: key, action: command.title))
         }
         if Shortcuts.key(for: .select) == nil { toolRows.append(Row(key: "Space", action: DrawingTool.select.title)) }
-        // Space first, then plain letters (and ⇧Z), then with ⌥
-        func rank(_ key: String) -> Int { return key == "Space" ? 0 : key.hasPrefix("⌥") ? 2 : 1 }
+        // Space first, then plain letters, then with ⇧, then with ⌥
+        func rank(_ key: String) -> Int { return key == "Space" ? 0 : key.hasPrefix("⇧") ? 2 : key.hasPrefix("⌥") ? 3 : 1 }
         func letter(_ key: String) -> String { return key.hasPrefix("⇧") ? String(key.dropFirst()) + "⇧" : key }
         toolRows.sort { (rank($0.key), letter($0.key)) < (rank($1.key), letter($1.key)) }
         sections.append(("Tools (on the drawing area – change them in Settings › Shortcuts)", toolRows))
 
         sections.append(("While drawing", [
             Row(key: "↩", action: "Confirm / finish; with nothing in progress repeat the last tool"),
-            Row(key: "Space", action: "Select when nothing is in progress; while drawing or typing a value it confirms like ↩"),
+            Row(key: "Space", action: "Select when nothing is in progress (a second Space right after clears the selection); while drawing or typing a value it confirms like ↩"),
             Row(key: "Esc", action: "Cancel the current step; again = back to Select"),
             Row(key: "0–9 . -", action: "Start typing a value (length, radius, angle…)"),
             Row(key: "Tab", action: "Jump into the value box at the cursor"),
@@ -77,7 +77,10 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             Row(key: DrawingTool.line.shortcut ?? "–", action: "In the Line tool: continuous lines (LNC) on / off"),
             Row(key: "Letters", action: "Options of the current tool, shown in the bottom line (I / C / E, H / V / A / B, T, J…) – also with Shift held for Ortho; ⌥ + letter switches the tool"),
             Row(key: "Y / N", action: "Answer a question (Mirror, Close?)"),
-            Row(key: "Shift (hold)", action: "Ortho while moving the mouse; a square in Rectangle, Wipeout and Revision Cloud; 15° steps in Rotate and Arc")
+            Row(key: "⇧ + letter", action: "Tool shortcut with Shift (e.g. ⇧P Polygon) – only with nothing in progress and nothing being typed; while drawing Shift stays Ortho (⇧Z works always)"),
+            Row(key: "Shift (hold)", action: "Ortho while moving the mouse; a square in Rectangle, Wipeout and Revision Cloud; 15° steps in Rotate and Arc"),
+            Row(key: "⌥ (tap)", action: "In Move, Rotate and while dragging a selection: switch to copying (the originals stay) and back"),
+            Row(key: "x5  /5  ↩", action: "Right after placing a copy: five copies repeating the step (distance or angle) / five copies spread up to the placed one")
         ]))
 
         sections.append(("Drawing aids (always work)", [

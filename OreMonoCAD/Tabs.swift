@@ -396,12 +396,14 @@ final class DrawingTabBarView: NSView {
 
     // MARK: Tooltip (with the file path)
 
+    private let toolTips = ToolTipTexts()
+
     private func rebuildToolTips() {
-        removeAllToolTips()
+        toolTips.removeAll(from: self)
         for i in items.indices {
-            _ = addToolTip(tabRect(i), owner: items[i].toolTip as NSString, userData: nil)
+            toolTips.add(items[i].toolTip, rect: tabRect(i), to: self)
         }
-        _ = addToolTip(plusRect, owner: "New drawing in a new tab (⌘T)" as NSString, userData: nil)
+        toolTips.add("New drawing in a new tab (⌘T)", rect: plusRect, to: self)
     }
 
     override func setFrameSize(_ newSize: NSSize) {

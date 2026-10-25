@@ -15,6 +15,8 @@ import Cocoa
 enum ExpressionEvaluator {
 
     static func evaluate(_ input: String) -> Double? {
+        // 12'-6 1/2" in a drawing in feet or inches (Units.swift)
+        if let length = LengthStyle.parse(input) { return length }
         var text = input.lowercased()
         for (from, to) in [(",", "."), ("×", "*"), ("x", "*"), ("÷", "/"), (":", "/"), ("−", "-")] {
             text = text.replacingOccurrences(of: from, with: to)
@@ -122,29 +124,55 @@ enum DynamicInputMode: Equatable {
     case hatchSettings   // hatch angle and spacing
     case polygon(PolygonMethod)  // polygon size, rotation and number of sides
 
+    /// What the fields hold, in order (angles and lengths are shown in the form chosen in Settings).
+    var kinds: [DynamicValueKind] {
+        switch self {
+        case .none: return []
+        case .coordinates: return [.length, .length]
+        case .lengthAngle, .distanceAngle: return [.length, .angle(.direction)]
+        case .radius: return [.length]
+        case .includedAngle, .angle: return [.angle(.amount)]
+        case .widthHeight: return [.length, .length]
+        case .factor: return [.number]
+        case .filletRadius: return [.length]
+        case .chamferDistances: return [.length, .length]
+        case .offsetDistance: return [.length]
+        case .hatchSettings: return [.angle(.amount), .number]
+        case .polygon: return [.length, .angle(.direction), .number]
+        }
+    }
+
     var labels: [String] {
+        let angle = { (kind: AngleKind) in AngleStyle.caption("Angle", kind) }
         switch self {
         case .none: return []
         case .coordinates: return ["X", "Y"]
-        case .lengthAngle: return ["Length", "Angle °"]
-        case .distanceAngle: return ["Distance", "Angle °"]
+        case .lengthAngle: return ["Length", angle(.direction)]
+        case .distanceAngle: return ["Distance", angle(.direction)]
         case .radius: return ["Radius"]
-        case .includedAngle: return ["Angle °"]
+        case .includedAngle: return [angle(.amount)]
         case .widthHeight: return ["Width", "Height"]
-        case .angle: return ["Angle °"]
+        case .angle: return [angle(.amount)]
         case .factor: return ["Factor"]
         case .filletRadius: return ["Fillet radius"]
         case .chamferDistances: return ["1st distance", "2nd distance"]
         case .offsetDistance: return ["Distance"]
-        case .hatchSettings: return ["Angle °", "Scale"]
+        case .hatchSettings: return [angle(.amount), "Scale"]
         case .polygon(let method):
             switch method {
-            case .inscribed: return ["Radius", "Angle °", "Sides"]
-            case .circumscribed: return ["Inner radius", "Angle °", "Sides"]
-            case .edge: return ["Side", "Angle °", "Sides"]
+            case .inscribed: return ["Radius", angle(.direction), "Sides"]
+            case .circumscribed: return ["Inner radius", angle(.direction), "Sides"]
+            case .edge: return ["Side", angle(.direction), "Sides"]
             }
         }
     }
+}
+
+/// What a field of the value box holds.
+enum DynamicValueKind: Equatable {
+    case length
+    case angle(AngleKind)
+    case number
 }
 
 // MARK: - Dynamic Input View
@@ -163,6 +191,8 @@ final class DynamicInputView: NSView, NSTextFieldDelegate {
     /// Hint below the fields (e.g. “C = close the polyline”).
     private(set) var hint: String?
     private(set) var lockedValues: [CGFloat?] = []
+    /// What the fields hold – angles are converted between degrees (inside the app) and the unit shown.
+    private var kinds: [DynamicValueKind] = []
     private var fields: [NSTextField] = []
     private var invalid: Set<Int> = []
 
@@ -197,12 +227,16 @@ final class DynamicInputView: NSView, NSTextFieldDelegate {
         return fields.contains { $0.currentEditor() === responder }
     }
 
+    /// The typed value – an angle in degrees (counter-clockwise from the X axis for a direction), whatever unit is shown.
     func lockedValue(_ index: Int) -> CGFloat? {
-        return index < lockedValues.count ? lockedValues[index] : nil
+        guard index < lockedValues.count, let value = lockedValues[index] else { return nil }
+        if index < kinds.count, case let .angle(kind) = kinds[index] { return AngleStyle.degrees(value, kind) }
+        return value
     }
 
     /// Sets the fields (only when the labels changed – otherwise keeps the values being typed).
-    func configure(labels newLabels: [String], hint newHint: String? = nil) {
+    func configure(labels newLabels: [String], kinds newKinds: [DynamicValueKind] = [], hint newHint: String? = nil) {
+        kinds = newKinds
         guard newLabels != labels || newHint != hint else { return }
         labels = newLabels
         hint = newHint
@@ -273,8 +307,22 @@ final class DynamicInputView: NSView, NSTextFieldDelegate {
         for (index, field) in fields.enumerated() where index < values.count {
             if lockedValues[index] != nil || invalid.contains(index) { continue }
             if let editing = editing, field.currentEditor() === editing { continue }
-            field.stringValue = DynamicInputView.format(values[index])
+            let kind = index < kinds.count ? kinds[index] : .number
+            switch kind {
+            case .angle(let angleKind):
+                field.stringValue = DynamicInputView.format(AngleStyle.shown(values[index], angleKind))
+            case .length:
+                field.stringValue = LengthStyle.feetInches(values[index]) ?? DynamicInputView.format(values[index])
+            case .number:
+                field.stringValue = DynamicInputView.format(values[index])
+            }
         }
+    }
+
+    /// Shows text the drawing area is collecting itself (e.g. “x5” copies) in a field, without focusing it.
+    func showText(_ text: String, fieldIndex: Int = 0) {
+        guard fieldIndex < fields.count else { return }
+        fields[fieldIndex].stringValue = text
     }
 
     /// Clears locked values and text being typed.

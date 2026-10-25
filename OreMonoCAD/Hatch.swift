@@ -53,8 +53,8 @@ final class HatchEntity: CADEntity {
     }
 
     var infoText: String {
-        var text = String(format: "Hatch\n%@\n\nPattern: %@\nAngle:   %.2f°\nScale:   %@",
-                          commonInfo, pattern.name, Double(angle * 180 / .pi), LineType.format(scale))
+        var text = String(format: "Hatch\n%@\n\nPattern: %@\nAngle:   %@\nScale:   %@",
+                          commonInfo, pattern.name, AngleStyle.text(angle * 180 / .pi), LineType.format(scale))
         if !pattern.isSolid {
             text += "\nSpacing: " + LineType.format(pattern.smallestSpacing * scale)
         }
@@ -236,20 +236,91 @@ final class HatchEntity: CADEntity {
             return HatchPatternGenerator.Output()
         }
         let edges = loops.flatMap { loop in (0..<loop.count).map { (loop[$0], loop[($0 + 1) % loop.count]) } }
+        let index = HatchEdgeIndex(edges: edges)
         var result = HatchPatternGenerator.Output()
         for (a, b) in raw.segments {
             var ts: [CGFloat] = [0, 1]
-            for (p, q) in edges {
+            // an edge in several bands may be found twice – the same cut twice gives an empty piece, which is skipped
+            for e in index.candidates(from: a, to: b) {
+                let (p, q) = edges[e]
                 if let hit = Geometry.segmentIntersection(a, b, p, q) { ts.append(hit.ta) }
             }
             ts.sort()
             for i in 0..<(ts.count - 1) where ts[i + 1] - ts[i] > 1e-9 {
                 let p = Geometry.lerp(a, b, ts[i]), q = Geometry.lerp(a, b, ts[i + 1])
-                if contains(Geometry.midpoint(p, q)) { result.segments.append((p, q)) }
+                if index.contains(Geometry.midpoint(p, q)) { result.segments.append((p, q)) }
             }
         }
-        result.dots = raw.dots.filter { contains($0) }
+        result.dots = raw.dots.filter { index.contains($0) }
         return result
+    }
+}
+
+/// The edges of a hatch's loops sorted into horizontal and vertical bands: a pattern line is compared only with
+/// the edges of the bands it passes through, and the inside test of a point only with the edges of its row
+/// (DXF export of large hatches cuts tens of thousands of pattern lines).
+struct HatchEdgeIndex {
+    private let edges: [(CGPoint, CGPoint)]
+    private let box: CGRect
+    private let bandCount: Int
+    private var rows: [[Int]] = []
+    private var columns: [[Int]] = []
+
+    init(edges: [(CGPoint, CGPoint)]) {
+        self.edges = edges
+        var box = CGRect.null
+        for (a, b) in edges {
+            box = box.union(CGRect(origin: a, size: .zero)).union(CGRect(origin: b, size: .zero))
+        }
+        self.box = box
+        bandCount = box.isNull ? 1 : max(1, min(256, Int(Double(edges.count).squareRoot())))
+        rows = Array(repeating: [], count: bandCount)
+        columns = Array(repeating: [], count: bandCount)
+        for (e, (a, b)) in edges.enumerated() {
+            for band in row(min(a.y, b.y))...row(max(a.y, b.y)) { rows[band].append(e) }
+            for band in column(min(a.x, b.x))...column(max(a.x, b.x)) { columns[band].append(e) }
+        }
+    }
+
+    private func band(_ value: CGFloat, from start: CGFloat, size: CGFloat) -> Int {
+        guard size > 0, value.isFinite else { return 0 }
+        let index = Int(((value - start) / size * CGFloat(bandCount)).rounded(.down))
+        return min(max(index, 0), bandCount - 1)
+    }
+
+    private func row(_ y: CGFloat) -> Int { return band(y, from: box.minY, size: box.height) }
+    private func column(_ x: CGFloat) -> Int { return band(x, from: box.minX, size: box.width) }
+
+    /// Edges that may cross the segment (by the fewer bands – rows or columns – it passes through).
+    func candidates(from a: CGPoint, to b: CGPoint) -> [Int] {
+        guard !box.isNull else { return Array(edges.indices) }
+        let margin = max(box.width, box.height, 1) * 1e-9
+        let segmentBox = CGRect(x: min(a.x, b.x) - margin, y: min(a.y, b.y) - margin,
+                                width: abs(b.x - a.x) + 2 * margin, height: abs(b.y - a.y) + 2 * margin)
+        guard segmentBox.intersects(box.insetBy(dx: -margin, dy: -margin)) else { return [] }
+        let rowRange = row(segmentBox.minY)...row(segmentBox.maxY)
+        let columnRange = column(segmentBox.minX)...column(segmentBox.maxX)
+        let bands = rowRange.count <= columnRange.count ? rowRange.flatMap { rows[$0] } : columnRange.flatMap { columns[$0] }
+        // a quick box test before the exact intersection
+        return bands.filter { e in
+            let (p, q) = edges[e]
+            return max(p.x, q.x) >= segmentBox.minX && min(p.x, q.x) <= segmentBox.maxX
+                && max(p.y, q.y) >= segmentBox.minY && min(p.y, q.y) <= segmentBox.maxY
+        }
+    }
+
+    /// Inside the area (even-odd over all loops – the same as HatchEntity.contains), counted with the edges of one row.
+    func contains(_ point: CGPoint) -> Bool {
+        guard !box.isNull, point.y >= box.minY, point.y <= box.maxY else { return false }
+        var inside = false
+        for e in rows[row(point.y)] {
+            let (a, b) = edges[e]
+            if (a.y > point.y) != (b.y > point.y) {
+                let x = a.x + (point.y - a.y) * (b.x - a.x) / (b.y - a.y)
+                if point.x < x { inside.toggle() }
+            }
+        }
+        return inside
     }
 }
 

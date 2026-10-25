@@ -374,6 +374,7 @@ enum NativeEntityCoder {
             r.points = polyline.vertices
             r.closed = polyline.closed
             if polyline.hasArcs { r.bulges = polyline.bulges }
+            if polyline.width > 0 { r.width = polyline.width }
         case let spline as Spline:
             r = EntityRecord(type: "spline")
             r.points = spline.controlPoints
@@ -427,6 +428,7 @@ enum NativeEntityCoder {
             r.angle = reference.rotation == 0 ? nil : reference.rotation
             r.scale = reference.scale == 1 ? nil : reference.scale
             r.mirrored = reference.mirrored ? true : nil
+            r.ratio = reference.isStretched ? reference.yRatio : nil
         case let viewport as ViewportEntity:
             r = EntityRecord(type: "viewport")
             r.points = [CGPoint(x: viewport.rect.minX, y: viewport.rect.minY), CGPoint(x: viewport.rect.maxX, y: viewport.rect.maxY)]
@@ -491,7 +493,9 @@ enum NativeEntityCoder {
             entity = Arc(center: center, radius: radius, startAngle: a1, endAngle: a2, layer: layer, color: color)
         case "polyline":
             guard let points = r.points, points.count >= 2 else { return nil }
-            entity = Polyline(vertices: points, closed: r.closed ?? false, bulges: r.bulges ?? [], layer: layer, color: color)
+            let polyline = Polyline(vertices: points, closed: r.closed ?? false, bulges: r.bulges ?? [], layer: layer, color: color)
+            if let width = r.width, width > 0, width.isFinite { polyline.width = width }
+            entity = polyline
         case "spline":
             guard let points = r.points, points.count >= 2 else { return nil }
             entity = Spline(controlPoints: points, closed: r.closed ?? false, layer: layer, color: color)
@@ -535,6 +539,7 @@ enum NativeEntityCoder {
             reference.rotation = r.angle ?? 0
             reference.scale = (r.scale ?? 1) > 0 ? (r.scale ?? 1) : 1
             reference.mirrored = r.mirrored ?? false
+            if let ratio = r.ratio, ratio > 0, ratio.isFinite { reference.yRatio = ratio }
             entity = reference
         case "viewport":
             guard let points = r.points, points.count == 2, let center = r.center else { return nil }

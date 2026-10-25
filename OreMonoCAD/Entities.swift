@@ -239,8 +239,8 @@ final class Line: CurveEntity {
 
     var infoText: String {
         let angle = Geometry.normalizeAngle(Geometry.angle(from: startPoint, to: endPoint)) * 180 / .pi
-        return String(format: "Line\n%@\n\nStart:  %.3f, %.3f\nEnd:    %.3f, %.3f\nLength: %.3f\nAngle:  %.2f°",
-                      commonInfo, startPoint.x, startPoint.y, endPoint.x, endPoint.y, length, angle)
+        return String(format: "Line\n%@\n\nStart:  %.3f, %.3f\nEnd:    %.3f, %.3f\nLength: %.3f\nAngle:  %@",
+                      commonInfo, startPoint.x, startPoint.y, endPoint.x, endPoint.y, length, AngleStyle.text(angle, .direction))
     }
 
     func makePath() -> CGPath {
@@ -411,13 +411,13 @@ final class ConstructionLine: CADEntity {
     var infoText: String {
         if isRay {
             let degrees = Geometry.normalizeAngle(angle) * 180 / .pi
-            return String(format: "Ray (construction line trimmed on one side)\n%@\n\nStart:   %.3f, %.3f\nAngle:   %.2f°",
-                          commonInfo, point.x, point.y, degrees)
+            return String(format: "Ray (construction line trimmed on one side)\n%@\n\nStart:   %.3f, %.3f\nAngle:   %@",
+                          commonInfo, point.x, point.y, AngleStyle.text(degrees, .direction))
         }
         // direction 0–180° (the line has no start or end)
         var degrees = Geometry.normalizeAngle(angle) * 180 / .pi
         if degrees >= 180 { degrees -= 180 }
-        return String(format: "Construction Line\n%@\n\nThrough: %.3f, %.3f\nAngle:   %.2f°", commonInfo, point.x, point.y, degrees)
+        return String(format: "Construction Line\n%@\n\nThrough: %.3f, %.3f\nAngle:   %@", commonInfo, point.x, point.y, AngleStyle.text(degrees, .direction))
     }
 
     /// Parameter (distance from point `point` along the line) where the line starts: a ray at 0, otherwise “−infinity”.
@@ -618,9 +618,10 @@ final class Arc: CurveEntity {
     var midPoint: CGPoint { return Geometry.pointOnCircle(center, radius, startAngle + sweep / 2) }
 
     var infoText: String {
-        return String(format: "Arc\n%@\n\nCenter: %.3f, %.3f\nRadius: %.3f\nStart:  %.2f°\nEnd:    %.2f°\nAngle:  %.2f°\nLength: %.3f",
+        return String(format: "Arc\n%@\n\nCenter: %.3f, %.3f\nRadius: %.3f\nStart:  %@\nEnd:    %@\nAngle:  %@\nLength: %.3f",
                       commonInfo, center.x, center.y, radius,
-                      startAngle * 180 / .pi, endAngle * 180 / .pi, sweep * 180 / .pi, sweep * radius)
+                      AngleStyle.text(startAngle * 180 / .pi, .direction), AngleStyle.text(endAngle * 180 / .pi, .direction),
+                      AngleStyle.text(sweep * 180 / .pi), sweep * radius)
     }
 
     func makePath() -> CGPath {
@@ -700,6 +701,8 @@ final class Polyline: CurveEntity {
     /// (for a closed one also to the last segment back to the start). 0 = straight segment,
     /// positive = counterclockwise arc, tan(central angle / 4). An empty array = all straight.
     var bulges: [CGFloat]
+    /// Width of the whole polyline in drawing units (a wide line, e.g. from DXF); 0 = a thin line drawn with its lineweight.
+    var width: CGFloat = 0
 
     init(vertices: [CGPoint], closed: Bool = false, bulges: [CGFloat] = [], layer: String = "0", color: NSColor? = nil) {
         self.vertices = vertices
@@ -713,8 +716,10 @@ final class Polyline: CurveEntity {
 
     var infoText: String {
         let arcs = (0..<segmentCount).filter { bulge(at: $0) != 0 }.count
-        return String(format: "Polyline\n%@\n\nVertices: %ld\nArcs:     %ld\nClosed:   %@\nLength:   %.3f",
-                      commonInfo, vertices.count, arcs, closed ? "Yes" : "No", curveLength)
+        var text = String(format: "Polyline\n%@\n\nVertices: %ld\nArcs:     %ld\nClosed:   %@\nLength:   %.3f",
+                          commonInfo, vertices.count, arcs, closed ? "Yes" : "No", curveLength)
+        if width > 0 { text += String(format: "\nWidth:    %.3f", width) }
+        return text
     }
 
     // MARK: Segments
@@ -772,19 +777,46 @@ final class Polyline: CurveEntity {
         return path
     }
 
+    /// A wide polyline is drawn as a band of its width (scaled with the view) with square ends, as in DXF;
+    /// a thinner screen line than the lineweight is never used.
+    func draw(in context: CGContext, transform: CGAffineTransform, style: StrokeStyle) {
+        guard width > 0 else {
+            strokeWorldPath(makePath(), in: context, transform: transform, style: style)
+            return
+        }
+        var t = transform
+        let path = makePath()
+        guard !path.isEmpty, let screenPath = path.copy(using: &t) else { return }
+        let box = screenPath.boundingBoxOfPath
+        guard DrawingSafety.isDrawable(box) else { return }
+        context.saveGState()
+        context.setStrokeColor(style.color.cgColor)
+        context.setLineWidth(max(width * Geometry.uniformScale(of: transform), style.lineWidth))
+        context.setLineCap(.butt)
+        context.setLineJoin(.miter)
+        if !style.dash.isEmpty && DrawingSafety.canDash(box) {
+            context.setLineDash(phase: 0, lengths: style.dash)
+        }
+        context.addPath(screenPath)
+        context.strokePath()
+        context.restoreGState()
+    }
+
     func boundingBox() -> CGRect {
         guard let first = vertices.first else { return .null }
+        let half = width / 2
         if hasArcs {
             let box = makePath().boundingBoxOfPath
-            if !box.isNull { return box }
+            if !box.isNull { return box.insetBy(dx: -half, dy: -half) }
         }
         var rect = CGRect(origin: first, size: .zero)
         for v in vertices.dropFirst() { rect = rect.union(CGRect(origin: v, size: .zero)) }
-        return rect
+        return rect.insetBy(dx: -half, dy: -half)
     }
 
     func distance(to point: CGPoint) -> CGFloat {
-        return distanceToPrimitives(point)
+        // a click anywhere on a wide band hits it
+        return max(distanceToPrimitives(point) - width / 2, 0)
     }
 
     func snapPoints() -> [SnapPoint] {
@@ -824,10 +856,16 @@ final class Polyline: CurveEntity {
         vertices = vertices.map { $0.applying(transform) }
         // mirroring reverses the direction of arcs
         if Geometry.isMirroring(transform) { bulges = bulges.map { -$0 } }
+        if width > 0 {
+            let k = Geometry.uniformScale(of: transform)
+            if k.isFinite, k > 0 { width *= k }
+        }
     }
 
     func clone() -> CADEntity {
-        return copyStyle(to: Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: layer, color: color))
+        let copy = Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: layer, color: color)
+        copy.width = width
+        return copyStyle(to: copy)
     }
 
     func primitives() -> [Primitive] {
@@ -895,7 +933,9 @@ final class Polyline: CurveEntity {
         }
         guard points.count >= 2 else { return nil }
         newBulges.append(0)
-        return Polyline(vertices: points, closed: false, bulges: newBulges, layer: layer, color: color)
+        let piece = Polyline(vertices: points, closed: false, bulges: newBulges, layer: layer, color: color)
+        piece.width = width
+        return piece
     }
 
     /// Polyline points between two parameters (for a closed curve also past the start).
@@ -1189,14 +1229,14 @@ final class Ellipse: CurveEntity {
     var area: CGFloat { return .pi * majorRadius * minorRadius }
 
     var infoText: String {
-        var text = String(format: "%@\n%@\n\nCenter:   %.3f, %.3f\nMajor r.: %.3f\nMinor r.: %.3f\nRotation: %.2f°",
+        var text = String(format: "%@\n%@\n\nCenter:   %.3f, %.3f\nMajor r.: %.3f\nMinor r.: %.3f\nRotation: %@",
                           typeName, commonInfo, center.x, center.y, majorRadius, minorRadius,
-                          Geometry.normalizeAngle(rotation) * 180 / .pi)
+                          AngleStyle.text(Geometry.normalizeAngle(rotation) * 180 / .pi, .direction))
         if isFull {
             text += String(format: "\nArea:     %.3f\nCircumf.: %.3f", area, curveLength)
         } else {
-            text += String(format: "\nStart:    %.2f°\nEnd:      %.2f°\nLength:   %.3f",
-                           startParam * 180 / .pi, endParam * 180 / .pi, curveLength)
+            text += String(format: "\nStart:    %@\nEnd:      %@\nLength:   %.3f",
+                           AngleStyle.text(startParam * 180 / .pi), AngleStyle.text(endParam * 180 / .pi), curveLength)
         }
         return text
     }
@@ -1477,12 +1517,13 @@ final class DimensionEntity: CADEntity {
         }
     }
 
-    /// Measured value with a prefix (R, Ø) or °.
+    /// Measured value with a prefix (R, Ø) or the angle unit; in feet and inches 12'-6 1/2" (2 decimals = 1/16").
     var measuredText: String {
-        let value = String(format: "%.\(precision)f", Double(measurement))
+        let value = LengthStyle.feetInches(measurement, precision: precision + 2)
+            ?? String(format: "%.\(precision)f", Double(measurement))
         switch kind {
         case .linear, .aligned: return value
-        case .angular: return value + "°"
+        case .angular: return AngleStyle.dimensionText(measurement, precision: precision)
         case .radius: return "R" + value
         case .diameter: return "Ø" + value
         case .leader: return text
@@ -1977,8 +2018,12 @@ enum TextRenderer {
         let fontSize = height * scale / FontLibrary.capRatio(family: "", face: "Regular")
         guard fontSize >= 3, fontSize < 2000 else { return }
 
+        // laid out at a fixed size and scaled when drawn, so the text follows the zoom exactly
+        // (the system font changes its letter spacing with the point size)
+        let reference: CGFloat = 100
+        let s = fontSize / reference
         let attributed = NSAttributedString(string: string, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize),
+            .font: NSFont.systemFont(ofSize: reference),
             .foregroundColor: color
         ])
         let size = attributed.size()
@@ -1992,8 +2037,9 @@ enum TextRenderer {
         case .center: x = -size.width / 2
         case .right: x = -size.width
         }
-        // above the line / below the line / centered
-        let y = below ? -gap * scale - size.height : (above ? gap * scale : -size.height / 2)
+        // above the line / below the line / centered (gap converted to the reference size)
+        let g = gap * scale / s
+        let y = below ? -g - size.height : (above ? g : -size.height / 2)
 
         // on-screen angle (for a rotated view the rotation is added to the drawing angle)
         let screenAngle = atan2(transform.b * cos(angle) + transform.d * sin(angle),
@@ -2001,6 +2047,7 @@ enum TextRenderer {
         context.saveGState()
         context.translateBy(x: screenAnchor.x, y: screenAnchor.y)
         context.rotate(by: screenAngle)
+        context.scaleBy(x: s, y: s)
         attributed.draw(at: CGPoint(x: x, y: y))
         context.restoreGState()
     }

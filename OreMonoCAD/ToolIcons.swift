@@ -349,6 +349,16 @@ enum ToolIcons {
             p.line(13.5, 13.5, 16.6, 16.6)
             p.arrowhead(17.4, 17.4, 0.707, 0.707)
             p.dot(3.5, 3.5)
+        case .align:
+            // the original, its two points led to two target points: the copy moved, turned and enlarged
+            p.rect(2.5, 2.5, 7, 7)
+            p.polyline([(12, 9), (20.5, 12.1), (17.4, 20.6), (8.9, 17.5)], closed: true, accent: true)
+            p.line(2.5, 2.5, 12, 9, dashed: true)
+            p.line(9.5, 2.5, 20.5, 12.1, dashed: true)
+            p.ring(2.5, 2.5)
+            p.dot(9.5, 2.5)
+            p.ring(12, 9, accent: true)
+            p.dot(20.5, 12.1, accent: true)
         case .mirror:
             p.line(12, 2.5, 12, 21.5, dashed: true)
             p.polyline([(2.5, 5), (9, 5), (9, 19)], closed: true)
