@@ -190,7 +190,7 @@ final class GroupDragGhost {
     }
 }
 
-/// Vertical tool panel on the left – icons in two columns, by section (Favorites and the tool groups).
+/// Vertical tool panel on the left – icons in 1 to 4 columns, by section (Favorites and the tool groups).
 /// Holding (or right-clicking) the Arc tool opens a menu of arc construction methods.
 /// A section is moved by dragging its heading and hidden from the heading's menu;
 /// a tool is added to Favorites from its right-click menu.
@@ -213,7 +213,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     var onToolsDroppedOutside: (([DrawingTool], NSPoint) -> Void)?
     /// A whole section dragged out of the panel by its heading and released elsewhere in the window.
     var onSectionDroppedOutside: ((ToolPanelSection, [DrawingTool], NSPoint) -> Void)?
-    /// Reset All Palettes to Default View was chosen – the window resets the panel and the palettes together.
+    /// Reset Tool Panel and Palettes was chosen – the window resets the panel and the palettes together.
     var onLayoutReset: (() -> Void)?
     /// A section was shown in the panel again from its menu – it leaves the palette holding it.
     var onSectionShown: ((ToolPanelSection) -> Void)?
@@ -308,7 +308,31 @@ final class ToolbarView: NSView, NSMenuDelegate {
     override func setFrameSize(_ newSize: NSSize) {
         let heightChanged = newSize.height != frame.height
         super.setFrameSize(newSize)
-        if heightChanged && ToolbarView.addsColumns { rebuild() }
+        // while the window is resized: laid out again only when a group moves to another column
+        if heightChanged && ToolbarView.addsColumns && columnBreaks(height: bounds.height) != builtColumnBreaks { rebuild() }
+    }
+
+    /// The sections that started a new column in the last layout.
+    private var builtColumnBreaks: [Int] = []
+
+    /// The sections (by their place among the shown ones) that start a new column at this height – as `rebuild` lays them out.
+    private func columnBreaks(height: CGFloat) -> [Int] {
+        let icons = ToolbarView.iconsPerRow
+        var y: CGFloat = 8
+        var result: [Int] = []
+        for (index, section) in visibleSections.enumerated() {
+            let sectionHeight = 14 + CGFloat((tools(in: section).count + icons - 1) / icons) * (buttonSize.height + 2) + 8
+            if y > 8 {
+                if y + 4 + sectionHeight > height {
+                    result.append(index)
+                    y = 8
+                } else {
+                    y += 4
+                }
+            }
+            y += sectionHeight
+        }
+        return result
     }
 
     /// Sections shown on the panel, in the user's order (an empty Favorites is not shown).
@@ -328,6 +352,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
     /// Lays the panel out again from the saved layout (order, hidden sections, favorites).
     private func rebuild() {
         hideTip()
+        builtColumnBreaks = ToolbarView.addsColumns ? columnBreaks(height: bounds.height) : []
         content.subviews.forEach { $0.removeFromSuperview() }
         buttons = [:]
         sectionSpans = []
@@ -382,16 +407,6 @@ final class ToolbarView: NSView, NSMenuDelegate {
             sectionSpans.append((section, left, top, y))
         }
         contentHeight = max(contentHeight, y)
-        if sections.isEmpty {
-            // everything hidden – say how to get the groups back
-            let hint = NSTextField(wrappingLabelWithString: "All tool groups are hidden. Right-click here to show them.")
-            hint.font = NSFont.systemFont(ofSize: 10)
-            hint.textColor = Theme.textHint
-            hint.alignment = .center
-            hint.frame = NSRect(x: 4, y: y, width: columnWidth - 8, height: 80)
-            content.addSubview(hint)
-            contentHeight = y + 84
-        }
         dropMarker.boxType = .custom
         dropMarker.borderWidth = 0
         dropMarker.fillColor = Theme.accent
@@ -709,7 +724,7 @@ final class ToolbarView: NSView, NSMenuDelegate {
         columns.state = ToolbarView.addsColumns ? .on : .off
         columns.subtitle = "Otherwise the panel scrolls"
         menu.addItem(columns)
-        let reset = NSMenuItem(title: "Reset All Palettes to Default View", action: #selector(layoutReset(_:)),
+        let reset = NSMenuItem(title: "Reset Tool Panel and Palettes", action: #selector(layoutReset(_:)),
                                keyEquivalent: "")
         reset.target = self
         reset.subtitle = "The tool panel and all palettes as at the start"
@@ -1428,12 +1443,12 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     var onSelectLayerObjects: ((String) -> Void)?
     /// Layers that the selected objects lie on (the ○ mark in the compact panel).
     var selectedObjectLayers: (() -> Set<String>)?
-    /// Detach into its own window / return to the right panel / maximize the window.
+    /// Detach into its own window / return to the side panel / maximize the window.
     var onDetach: (() -> Void)?
     var onAttach: (() -> Void)?
     var onToggleMaximize: (() -> Void)?
 
-    /// tray = in the right panel (compact rows, the panel has the heading), otherwise a full table with its own header.
+    /// tray = in the side panel (compact rows, the panel has the heading), otherwise a full table with its own header.
     enum Mode { case popover, window, maximized, tray }
 
     private var headerButtons: [NSButton] = []
@@ -1608,7 +1623,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         setMode(.popover)
     }
 
-    /// Columns according to the mode (compact rows in the right panel, full table in a window).
+    /// Columns according to the mode (compact rows in the side panel, full table in a window).
     private func configureColumns() {
         for column in tableView.tableColumns { tableView.removeTableColumn(column) }
         for column in compact ? Column.compact : Column.full {
@@ -1637,7 +1652,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         headerButtons.removeAll()
         compact = mode == .tray
 
-        // in the right panel the heading is in the panel header
+        // in the side panel the heading is in the panel header
         titleLabel.isHidden = compact
         bottomButtons.forEach { $0.isHidden = compact }
         compactButtons.forEach { $0.isHidden = !compact }
@@ -1670,10 +1685,10 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             items = [("macwindow.on.rectangle", "Detach into its own window", #selector(detachClicked)),
                      ("arrow.up.left.and.arrow.down.right", "Maximize", #selector(maximizeClicked))]
         case .window:
-            items = [("rectangle.righthalf.inset.filled", "Dock to the right panel", #selector(attachClicked)),
+            items = [("rectangle.righthalf.inset.filled", "Dock to the side panel", #selector(attachClicked)),
                      ("arrow.up.left.and.arrow.down.right", "Maximize", #selector(maximizeClicked))]
         case .maximized:
-            items = [("rectangle.righthalf.inset.filled", "Dock to the right panel", #selector(attachClicked)),
+            items = [("rectangle.righthalf.inset.filled", "Dock to the side panel", #selector(attachClicked)),
                      ("arrow.down.right.and.arrow.up.left", "Restore the window size", #selector(maximizeClicked))]
         }
         var x = bounds.width - 8
@@ -3880,7 +3895,10 @@ final class StatusBarView: NSView {
     // MARK: Right click on GRID / POLAR: presets, custom values, Custom…
 
     private static let gridPresets: [CGFloat] = [0.1, 0.5, 1, 2, 5, 10, 25, 50, 100, 500, 1000]
-    private static let polarPresets: [CGFloat] = [1, 5, 10, 15, 22.5, 30, 45, 90]
+    /// The polar steps offered (in degrees) – in gons the same round values as in Document Settings.
+    private static var polarPresets: [CGFloat] {
+        return AngleStyle.unit == .gons ? [1, 5, 10, 12.5, 25, 50, 100].map { $0 * 360 / 400 } : [1, 5, 10, 15, 22.5, 30, 45, 90]
+    }
     private static let customGridKey = "OreMonoCAD.customGridSizes"
     private static let customPolarKey = "OreMonoCAD.customPolarSteps"
 
@@ -4275,7 +4293,7 @@ enum DocumentSettingsDialog {
         snapCheck.frame = NSRect(x: 128, y: y, width: 190, height: 18)
         snapCheck.state = gridSnap ? .on : .off
         view.addSubview(snapCheck)
-        let showCheck = NSButton(checkboxWithTitle: "Show grid  (F7)", target: nil, action: nil)
+        let showCheck = NSButton(checkboxWithTitle: "Show grid  (⌥2, F7)", target: nil, action: nil)
         y -= 20
         showCheck.frame = NSRect(x: 128, y: y, width: 190, height: 18)
         showCheck.state = showGrid ? .on : .off
@@ -4319,7 +4337,7 @@ enum DocumentSettingsDialog {
 final class DockablePanelView: NSView {
     enum HeaderButton { case collapse, detach, dock, close, fold }
 
-    /// Folded to the header (in the right panel) – changes the arrow of the fold button.
+    /// Folded to the header (in the side panel) – changes the arrow of the fold button.
     var isFolded = false {
         didSet { headerButtons.first { $0.tag == 4 }?.image = foldImage }
     }
@@ -4409,7 +4427,7 @@ final class DockablePanelView: NSView {
     }
 }
 
-/// A narrow handle for resizing (edge of the right panel, divider between panels).
+/// A narrow handle for resizing (edge of the side panel, divider between panels).
 final class DragHandleView: NSView {
     var cursor: NSCursor = .resizeLeftRight
     /// A horizontal divider draws a fine line in the middle.
@@ -4484,7 +4502,7 @@ final class PanelHeaderView: NSView {
     }
 }
 
-/// Collapsed right panel: a narrow strip with an arrow and vertical panel names; click to expand.
+/// Collapsed side panel: a narrow strip with an arrow and vertical panel names; click to expand.
 final class CollapsedStripView: NSView {
     var onExpand: (() -> Void)?
     var titles: [String] = [] { didSet { needsDisplay = true } }

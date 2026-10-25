@@ -614,7 +614,7 @@ private struct SegmentGrid {
             }
             return
         }
-        // a long segment: only the cells along it and their neighbours (its whole box would be far too many cells)
+        // a long segment: only the cells along it and their neighbors (its whole box would be far too many cells)
         let steps = Int((Geometry.distance(a, b) / (cellSize / 2)).rounded(.up))
         guard steps > 0, steps < 4_000_000 else { return }
         long.insert(index)

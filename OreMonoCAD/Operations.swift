@@ -32,8 +32,8 @@ enum EditOperations {
                 }
             }
         }
-        // a polyline or spline that crosses itself is cut there too (neighbouring segments only share a vertex;
-        // zero-length segments of repeated vertices are left out, so the segments around them count as neighbours)
+        // a polyline or spline that crosses itself is cut there too (neighboring segments only share a vertex;
+        // zero-length segments of repeated vertices are left out, so the segments around them count as neighbors)
         let tiny = max(curve.curveLength, 1) * 1e-12
         let live = own.indices.filter { own[$0].length > tiny }
         let count = live.count
@@ -62,7 +62,6 @@ enum EditOperations {
         return unique
     }
 
-    /// Can two objects with these bounding boxes touch? Boxes that are not finite (construction lines) always can.
     /// Can the segment from a to b touch the rectangle? (Clipping test with a small margin; an invalid box = yes.)
     static func segmentMayTouch(_ a: CGPoint, _ b: CGPoint, _ box: CGRect) -> Bool {
         guard DrawingSafety.isValidWorld(box) else { return true }
@@ -82,6 +81,7 @@ enum EditOperations {
         return true
     }
 
+    /// Can two objects with these bounding boxes touch? Boxes that are not finite (construction lines) always can.
     static func mayMeet(_ a: CGRect, _ b: CGRect) -> Bool {
         guard DrawingSafety.isValidWorld(a), DrawingSafety.isValidWorld(b) else { return true }
         let margin = max(a.width, a.height, b.width, b.height, 1) * 1e-9
@@ -248,7 +248,7 @@ enum EditOperations {
         let start = xline.startParameter
         guard let own = xline.primitives().first else { return nil }
         // intersections as a distance from the line's point along the line's direction (measured from the point itself –
-        // the far ends of the line lie 1e7 away, which would round neighbouring cuts together)
+        // the far ends of the line lie 1e7 away, which would round neighboring cuts together)
         var cuts: [CGFloat] = []
         let d = xline.direction
         for edge in edges where edge !== xline {
@@ -374,8 +374,8 @@ enum EditOperations {
     /// The end nearer to the click point is extended.
     static func extend(_ entity: CADEntity, near click: CGPoint, boundaries: [CADEntity]) -> CADEntity? {
         let result = extendRaw(entity, near: click, boundaries: boundaries)
-        result?.lineWeight = entity.lineWeight
-        result?.lineTypeScale = entity.lineTypeScale
+        // lineweight, line type scale, draw order and group, as after the other edits
+        _ = result?.withStyle(of: entity)
         return result
     }
 
@@ -429,13 +429,13 @@ enum EditOperations {
             let n = vertices.count
             let extendEnd = Geometry.distance(click, vertices[n - 1]) < Geometry.distance(click, vertices[0])
             let movingIndex = extendEnd ? n - 1 : 0
-            let neighbourIndex = extendEnd ? n - 2 : 1
+            let neighborIndex = extendEnd ? n - 2 : 1
             // an end arc segment is not extended
             guard polyline.bulge(at: extendEnd ? n - 2 : 0) == 0 else { return nil }
             // the polyline's other segments are boundaries too (it can be extended to itself)
             let own = polyline.primitives()
             ownEdges = own.indices.filter { $0 != (extendEnd ? own.count - 1 : 0) }.map { own[$0] }
-            let direction = (vertices[movingIndex] - vertices[neighbourIndex]).normalized
+            let direction = (vertices[movingIndex] - vertices[neighborIndex]).normalized
             guard direction != .zero, let hit = rayHit(from: vertices[movingIndex], direction: direction) else { return nil }
             vertices[movingIndex] = hit
             let extended = Polyline(vertices: vertices, closed: false, bulges: polyline.bulges, layer: polyline.layer, color: polyline.color)
@@ -960,6 +960,9 @@ enum EditOperations {
             let style = current.sources[0]
             let polyline = Polyline(vertices: points, closed: closed, bulges: bulges, layer: style.layer, color: style.color)
             _ = polyline.withStyle(of: style)      // lineweight, line type scale, draw order, group
+            // a wide polyline stays wide when everything joined to it had the same width
+            let widths = current.sources.map { ($0 as? Polyline)?.width ?? 0 }
+            if let width = widths.first, width > 0, widths.allSatisfy({ $0 == width }) { polyline.width = width }
             removed.append(contentsOf: current.sources)
             added.append(polyline)
         }
@@ -1426,8 +1429,10 @@ enum Measure {
 
     /// Radius of the object under the cursor (circle, arc, arc segment of a polyline, ellipse).
     static func radiusText(of entity: CADEntity, near point: CGPoint, unit: String) -> (text: String, center: CGPoint, onCurve: CGPoint)? {
+        // feet and inches when the drawing uses them (Settings › Units), otherwise the number and the unit
+        func length(_ value: CGFloat) -> String { return LengthStyle.feetInches(value) ?? "\(format(value)) \(unit)" }
         func circleText(_ r: CGFloat) -> String {
-            return "Radius \(format(r)) \(unit) · Diameter \(format(2 * r)) \(unit) · Circumference \(format(2 * .pi * r)) \(unit)"
+            return "Radius \(length(r)) · Diameter \(length(2 * r)) · Circumference \(length(2 * .pi * r))"
         }
         switch entity {
         case let circle as Circle:
@@ -1435,9 +1440,9 @@ enum Measure {
             return (circleText(circle.radius), circle.center, p)
         case let arc as Arc:
             let p = Geometry.pointOnCircle(arc.center, arc.radius, Geometry.angle(from: arc.center, to: point))
-            return (circleText(arc.radius) + " · Arc length \(format(arc.curveLength)) \(unit)", arc.center, p)
+            return (circleText(arc.radius) + " · Arc length \(length(arc.curveLength))", arc.center, p)
         case let ellipse as Ellipse:
-            return ("Major radius \(format(ellipse.majorRadius)) \(unit) · Minor radius \(format(ellipse.minorRadius)) \(unit)",
+            return ("Major radius \(length(ellipse.majorRadius)) · Minor radius \(length(ellipse.minorRadius))",
                     ellipse.center, ellipse.point(at: 0))
         case let polyline as Polyline:
             let index = EditOperations.nearestSegment(of: polyline, to: point)

@@ -111,7 +111,7 @@ enum DrawingTool: Int, CaseIterable {
     static let help: [DrawingTool: (summary: String, usage: String)] = [
         .select: (
             summary: "Selects objects so you can edit, move or delete them.",
-            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position) · hold the right button (or Control-click) for the context menu."),
+            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position) · hold the right button (or Control-click) for the context menu · Space switches to Select from any tool, a second Space clears the selection."),
         .line: (
             summary: "A straight line between two points.",
             usage: "Click the start and the end (or drag). Type length and angle in the box at the cursor. With LNC on (⌥7, or the Line key again while drawing), lines continue from the last end – ↩/Esc ends, C closes."),
@@ -144,7 +144,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the points of the wall line · ↩, Esc, right-click or double-click finishes · C or a click on the first point closes it into a ring · ⌫ removes the last point · T = thickness in mm (remembered, 300 at first) · J = where the wall lies: centered on the line, to its left or to its right. The result is closed polylines (an open wall = one outline with its ends, a ring = the outer and the inner face), ready for a hatch. A wall that touches or crosses another wall on the same layer is joined to it (T, L and X joints) – ⌘Z separates them again."),
         .wallFromCurve: (
             summary: "Turns selected lines, arcs, polylines, splines, circles and ellipses into walls – both faces at the wall thickness along the curve.",
-            usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay."),
+            usage: "Select the curves (before or after starting the tool) – the green preview shows the walls · T = thickness in mm (the same as for Wall) · J = where the wall lies: centered on the curve, outside or inside it (for an open curve, inside = the side it bends toward) · ↩ or right-click creates the walls, Esc cancels. Curves whose ends touch become one wall with mitered corners. The result is closed polylines, as with Wall; the curves themselves stay. A new wall that touches or crosses another wall on the same layer is joined to it – ⌘Z separates them again."),
         .hatch: (
             summary: "Fills or hatches a closed area – found automatically from whatever surrounds it.",
             usage: "Move over an area to see it highlighted, click to hatch it. Hold the button (or right-click it) for patterns, custom patterns, settings, Rebuild Hatch and Cut Out of Hatch; type angle and scale at the cursor. Gaps up to 3 px are bridged. Exactly the clicked area is filled: shapes inside it are left out as islands, and nothing inside those islands is filled."),
@@ -167,7 +167,7 @@ enum DrawingTool: Int, CaseIterable {
             summary: "Copies the look of one object – layer, color, lineweight, and for texts, dimensions and hatches their style – onto other objects.",
             usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (or click its two corners; left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
         .filter: (
-            summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name or a piece of text.",
+            summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name, hatch pattern, a piece of text, text height, length or area.",
             usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Whole drawing = its visible objects on unlocked layers, Current selection = all selected objects; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
         .fillet: (
             summary: "Rounds the corner between two lines or polyline segments with an arc.",
@@ -195,13 +195,13 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the object where it should be split (snaps work, e.g. to an intersection or a midpoint). A closed polyline is opened at that point."),
         .move: (
             summary: "Moves the selected objects.",
-            usage: "Select objects (↩), click a base point, then the target – or type distance and angle. Tap ⌥ while moving to copy instead (the originals stay, a green + shows it); right after placing the copy type x5 + ↩ for five copies in a row (or around, in Rotate) or /5 + ↩ for five copies spread up to it. With Select you can also simply drag a selected object (⌥ works there too)."),
+            usage: "Select objects (↩), click a base point, then the target – or type distance and angle. Tap ⌥ while moving to copy instead (the originals stay, a green + shows it); right after placing the copy type x5 + ↩ for five copies in a row or /5 + ↩ for five copies spread between the original and the copy. With Select you can also simply drag a selected object (⌥ works there too)."),
         .copy: (
             summary: "Copies the selected objects, as many times as you like.",
-            usage: "Select objects (↩), click a base point, then click every place for a copy. Right after a copy, x5 + ↩ = five copies in a row, /5 + ↩ = five copies spread between the original and it. Esc ends."),
+            usage: "Select objects (↩), click a base point, then click every place for a copy. Right after a copy, x5 + ↩ = five copies in a row, /5 + ↩ = five copies spread between the original and the copy. Esc ends."),
         .rotate: (
             summary: "Rotates the selected objects around a point.",
-            usage: "Select objects (↩), click the center of rotation, then click or type the angle (°). Hold Shift for 15° steps. Tap ⌥ while rotating to copy instead (the originals stay); right after placing the copy type x5 + ↩ for five copies, each turned by the same angle, or /5 + ↩ for five copies spread over the angle."),
+            usage: "Select objects (↩), click the center of rotation, then click or type the angle. Hold Shift for 15° steps. Tap ⌥ while rotating to copy instead (the originals stay); right after placing the copy type x5 + ↩ for five copies, each turned by the same angle, or /5 + ↩ for five copies spread over the angle."),
         .scale: (
             summary: "Enlarges or shrinks the selected objects.",
             usage: "Select objects (↩), click the base point (it stays put), then click a grip point on the objects and pull it: at the dashed circle = 1×, closer = smaller (down to 0.01), farther = larger, past the base point = negative (turned 180°). Or type any factor – 0.01, 10, -1, 1/3 – and press ↩."),
@@ -255,10 +255,10 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Choose the file, then click where its origin (0,0) should go. The reference cannot be edited here; Block Manager reloads it, finds a moved file or binds it into the drawing as an ordinary block."),
         .image: (
             summary: "Places a scan, photo or map into the drawing to trace over – it is stored inside the drawing.",
-            usage: "Choose the picture and the scale it is drawn at (a 1:1000 map → 1:1000), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
+            usage: "Choose the picture and the scale it is drawn at (a 1:1000 map → 1:1000), then click where its lower-left corner goes. Fit it onto the drawing with Align (two of its points onto their places), or with Move, Rotate and Scale, or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
         .pdfReference: (
             summary: "Places a page of a PDF into the drawing to trace over – it is stored inside the drawing.",
-            usage: "Choose the PDF, the page (if it has more) and the scale it is drawn at (a page of drawings → its scale), then click where its lower-left corner goes. Fit it onto the drawing with Move, Rotate and Scale (Scale: base point, a point of the picture, then where that point belongs) or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
+            usage: "Choose the PDF, the page (if it has more) and the scale it is drawn at (a page of drawings → its scale), then click where its lower-left corner goes. Fit it onto the drawing with Align (two of its points onto their places), or with Move, Rotate and Scale, or by dragging a corner grip. Properties sets the opacity. It lies under the lines, its frame is not printed, and it is not exported to DXF."),
         .zoomIn: (
             summary: "Shows the drawing larger (closer).",
             usage: "Click it – the view zooms in around its center. Also ⌘=, the mouse wheel or pinching on the trackpad (zooms to the cursor). The current tool keeps working."),
@@ -340,7 +340,6 @@ enum DrawingTool: Int, CaseIterable {
         case .spline: return "⌥N"
         case .copy: return "⌥C"
         case .mirror: return "I"
-        case .explode: return "X"
         case .editPoints: return "V"
         case .dimLinear: return "D"
         case .text: return "U"
@@ -353,7 +352,8 @@ enum DrawingTool: Int, CaseIterable {
         case .wipeout: return "⌥X"
         case .polygon: return "⇧P"
         case .breakObject: return "⌥T"
-        case .breakAtPoint: return "⌥E"
+        case .explode: return "⌥E"
+        case .breakAtPoint: return "⌥K"
         case .revisionCloud: return "⌥R"
         case .wall: return "⌥L"
         case .wallFromCurve: return "⌥P"
@@ -483,11 +483,11 @@ enum ArcMethod: Int, CaseIterable {
         case .startCenterEnd:
             return ["start point", "center", "end point (counter-clockwise)"]
         case .startCenterAngle:
-            return ["start point", "center", "included angle (counter-clockwise, type ° or click)"]
+            return ["start point", "center", "included angle (counter-clockwise, type the angle or click)"]
         case .centerStartEnd:
             return ["center", "start point (sets the radius)", "end point (counter-clockwise)"]
         case .centerStartAngle:
-            return ["center", "start point (sets the radius)", "included angle (counter-clockwise, type ° or click)"]
+            return ["center", "start point (sets the radius)", "included angle (counter-clockwise, type the angle or click)"]
         case .startEndRadius:
             return ["start point", "end point", "radius (type it, or click – the arc bulges toward the cursor)"]
         case .startEndAngle:
@@ -786,7 +786,6 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     /// The previous key was the space bar (no other key or click since) – a second space in Select clears the selection.
     private var lastKeyWasSpace = false
 
-    /// Repeat the last tool? Only in the Select tool when nothing is running (otherwise Enter / right click confirm).
     /// Does the space bar confirm (something is in progress or waits for ↩), or switch to Select?
     private var spaceConfirms: Bool {
         if isBusy || !selectedPoints.isEmpty || inlineText != nil || viewportPan != nil || pickRequest != nil { return true }
@@ -796,6 +795,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         return hasSelection && currentTool != .select
     }
 
+    /// Repeat the last tool? Only in the Select tool when nothing is running (otherwise Enter / right click confirm).
     private func repeatLastTool() -> Bool {
         guard AppSettings.repeatLastTool, currentTool == .select, !isBusy, pickRequest == nil, inlineText == nil, viewportPan == nil,
               let tool = lastTool, tool != .select else { return false }
@@ -1831,7 +1831,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     : "Measure area: next corner · ↩, right-click or click the first corner = finish · ⌫ = undo corner"
             case .length:
                 text = measureObjects.isEmpty ? MeasureKind.length.prompt
-                    : "Measure length: \(measureObjects.count) object\(measureObjects.count == 1 ? "" : "s"), total \(Measure.format(measureTotal)) \(drawingUnits.suffix) · click more · Esc = start over"
+                    : "Measure length: \(measureObjects.count) object\(measureObjects.count == 1 ? "" : "s"), total \(LengthStyle.feetInches(measureTotal) ?? "\(Measure.format(measureTotal)) \(drawingUnits.suffix)") · click more · Esc = start over"
             default: text = measureKind.prompt
             }
             text += " · hold the Measure button for other measurements"
@@ -1928,8 +1928,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                         : "Move: second point (or distance + ↩) · ⌥ = copy"
                 case .copy: text = "Copy: second point (or distance + ↩) · Esc = done"
                 case .rotate:
-                    text = copyWhileMoving ? "Rotate (copy): angle point (or angle in ° + ↩) · hold Shift = 15° steps · ⌥ = rotate instead"
-                        : "Rotate: angle point (or angle in ° + ↩) · hold Shift = 15° steps · ⌥ = copy"
+                    text = copyWhileMoving ? "Rotate (copy): angle point (or angle + ↩) · hold Shift = 15° steps · ⌥ = rotate instead"
+                        : "Rotate: angle point (or angle + ↩) · hold Shift = 15° steps · ⌥ = copy"
                 case .scale:
                     text = points.count < 2
                         ? "Scale: click the grip point – a point of the objects you will pull (or type a factor + ↩)"
@@ -1986,7 +1986,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .image, .pdfReference:
             if let source = pendingImage {
                 text = "\(source.isPDF ? "PDF" : "Image") Reference “\(source.fileName)” (\(source.scale.title)): click where its lower-left corner goes"
-                    + " · then fit it with Move, Rotate and Scale · Esc = cancel"
+                    + " · then fit it with Align (or Move, Rotate and Scale) · Esc = cancel"
             } else {
                 text = "\(currentTool.title): choose the file first"
             }
@@ -2565,7 +2565,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         lastRawPoint = base
         onPromptChanged?(items.count > 1
             ? "Move \(items.count) points: click or drag to the new position · or type distance and angle + ↩ · Esc = cancel"
-            : "Stretch: click or drag to the new position · or type distance and angle + ↩ · Esc = cancel")
+            : "Move Point: click or drag to the new position · or type distance and angle + ↩ · Esc = cancel")
         updateDynamicInput()
         needsDisplay = true
     }
@@ -2609,7 +2609,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if Geometry.distance(grip.base, target) > 1e-12 {
             let results = gripResults(grip, target: target)
             if !results.isEmpty {
-                onCommit?(results.map { $0.original }, results.map { $0.edited }, grip.items.count > 1 ? "Move Points" : "Stretch")
+                onCommit?(results.map { $0.original }, results.map { $0.edited }, grip.items.count > 1 ? "Move Points" : "Move Point")
                 // carry the marking of points and objects over to the edited objects
                 var newID: [UUID: UUID] = [:]
                 for result in results { newID[result.original.id] = result.edited.id }
@@ -3135,7 +3135,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .move, .copy, .stretch:
             return CGAffineTransform(translationX: target.x - base.x, y: target.y - base.y)
         case .rotate:
-            return Geometry.rotation(by: Geometry.angle(from: base, to: target), around: base)
+            // the angle counts from the X axis of the UCS, as it is shown and typed (0° along that axis = no turn)
+            return Geometry.rotation(by: Geometry.angle(from: base, to: target) - ucsAngle, around: base)
         case .scale:
             let factor = scaleFactor(base: base, target: target)
             return abs(factor) > 1e-9 ? Geometry.scaling(by: factor, around: base) : nil
@@ -3488,6 +3489,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if tapped { toggleCopyWhileMoving() }
     }
 
+    /// A key the window handled itself (⌥ + digit) while ⌥ was held: releasing ⌥ is then not a tap.
+    func cancelOptionTap() {
+        optionTapPending = false
+    }
+
     /// While ⌥ is held, any key, click or scroll means it is not a tap (⌥ + letter, ⌥ + digit, fast zoom…).
     private func watchOptionTap(_ on: Bool) {
         if on, optionTapMonitor == nil {
@@ -3601,9 +3607,16 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         for k in 1...count {
             let factor = op == "/" ? CGFloat(k) / CGFloat(count) : CGFloat(k)
             let t = run.step(factor)
+            // every copy of a group is a group of its own (not one group of all the copies)
+            var groups: [UUID: UUID] = [:]
             for entity in run.originals {
                 let copy = entity.clone()
                 copy.applyTransform(t)
+                if let group = copy.groupID {
+                    let fresh = groups[group] ?? UUID()
+                    groups[group] = fresh
+                    copy.groupID = fresh
+                }
                 copies.append(copy)
             }
         }
@@ -3667,7 +3680,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             onCommit?([], transformed, "Copy")
             selectionManager?.select(transformed)
             copyWhileMoving = false
-            let angle = Geometry.angle(from: base, to: target)
+            // the angle of the turn for x5 and /5: counter-clockwise 0…360° (270° is not −90°, so /5 spreads
+            // the copies the right way round); a negative typed angle turns clockwise
+            var angle = Geometry.normalizeAngle(Geometry.angle(from: base, to: target) - ucsAngle)
+            if let typed = dynamicInput.lockedValue(0), typed < 0, angle > 0 { angle -= 2 * .pi }
             let step: (CGFloat) -> CGAffineTransform = currentTool == .rotate
                 ? { f in Geometry.rotation(by: angle * f, around: base) }
                 : { f in CGAffineTransform(translationX: t.tx * f, y: t.ty * f) }
@@ -3720,7 +3736,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .rectangle: return .widthHeight
         case .revisionCloud, .wipeout: return outlineShape == .rectangle ? .widthHeight : .lengthAngle
         case .move, .copy: return .distanceAngle
-        case .rotate, .mirror: return .angle
+        case .rotate: return .angle
+        case .mirror: return .direction
         case .scale: return .factor
         case .dimLinear, .dimAligned, .dimAngular: return .coordinates
         default: return .none
@@ -3799,7 +3816,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             return corner + fromUCSVector(CGPoint(x: w, y: h))
 
-        case .angle:
+        case .angle, .direction:
             guard let base = points.first, let angle = first else { return p }
             let r = max(Geometry.distance(base, p), 1)
             return Geometry.pointOnCircle(base, r, angle * .pi / 180 + ucsAngle)
@@ -3852,7 +3869,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             var d = currentTool == .rectangle ? rectangleDiagonal(from: corner, to: p).diagonal : toUCSVector(p - corner)
             if drawsOutline && squareByShift { d = CADEditorView.squared(d) }
             return [abs(d.x), abs(d.y)]
-        case .angle:
+        case .angle, .direction:
             guard let base = points.first else { return [] }
             return [CADEditorView.degrees(Geometry.angle(from: base, to: p) - ucsAngle)]
         case .factor:
@@ -4274,6 +4291,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if let extended = EditOperations.extend(target, near: point, boundaries: cuttingEdges) {
             onCommit?([target], [extended], "Extend")
             replaceEdge(target, with: [extended])
+        } else if let polyline = target as? Polyline, polyline.vertices.count >= 2,
+                  polyline.bulge(at: Geometry.distance(point, polyline.vertices[polyline.vertices.count - 1])
+                                      < Geometry.distance(point, polyline.vertices[0]) ? polyline.vertices.count - 2 : 0) != 0 {
+            onMessage?("The polyline ends with an arc here – only a straight end can be extended.")
         } else {
             onMessage?("No boundary found in that direction.")
         }
@@ -4502,7 +4523,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private func offsetClick(at point: CGPoint) {
         if picked.isEmpty {
             guard let source = entity(at: point, where: { EditOperations.canOffset($0) }) else {
-                onMessage?("Click a line, circle, arc, polyline or spline.")
+                onMessage?("Click a line, circle, arc, ellipse, polyline or spline.")
                 return
             }
             picked = [(source, point)]
@@ -4774,7 +4795,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         pendingImage = nil
         onToolChangeRequested?(.select)
         selectionManager?.select([image])
-        onMessage?("\(image.typeName) “\(source.fileName)” placed – fit it with Move, Rotate and Scale; Properties sets the opacity")
+        onMessage?("\(image.typeName) “\(source.fileName)” placed – fit it with Align (or Move, Rotate and Scale); Properties sets the opacity")
     }
 
     // MARK: Scale bar and north arrow (ScaleBar.swift)
@@ -5676,6 +5697,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let unit = drawingUnits.suffix
         let raw = viewport.screenToWorld(convert(event.locationInWindow, from: nil))
         let f: (CGFloat) -> String = { Measure.format($0) }
+        // a length in feet and inches when the drawing uses them (Settings › Units), otherwise the number and the unit
+        let length: (CGFloat) -> String = { LengthStyle.feetInches($0) ?? "\(f($0)) \(unit)" }
         switch measureKind {
         case .distance:
             let p = resolvedWorldPoint(for: event)
@@ -5689,8 +5712,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             // ΔX, ΔY and the angle in drawing coordinates (UCS), like the status bar
             let d = toUCSVector(p - a)
             let angle = Geometry.normalizeAngle(atan2(d.y, d.x)) * 180 / .pi
-            showMeasure(MeasureResult(path: [a, p], lines: ["Distance " + (LengthStyle.feetInches(Geometry.distance(a, p)) ?? "\(f(Geometry.distance(a, p))) \(unit)"),
-                                                             "ΔX \(f(d.x)) · ΔY \(f(d.y))", (AngleStyle.bearings ? "Bearing " : "Angle ") + AngleStyle.text(angle, .direction)],
+            showMeasure(MeasureResult(path: [a, p], lines: ["Distance " + length(Geometry.distance(a, p)),
+                                                             "ΔX \(LengthStyle.feetInches(d.x) ?? f(d.x)) · ΔY \(LengthStyle.feetInches(d.y) ?? f(d.y))", (AngleStyle.bearings ? "Bearing " : "Angle ") + AngleStyle.text(angle, .direction)],
                                       anchor: Geometry.midpoint(a, p)))
 
         case .angle:
@@ -5744,7 +5767,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             }
             let area = Measure.area(ofLoops: loops)
             let perimeter = loops.reduce(0) { $0 + Measure.perimeter($1, closed: true) }
-            var lines = ["Area \(f(area)) \(unit)²", "Perimeter \(f(perimeter)) \(unit)"]
+            var lines = ["Area \(f(area)) \(unit)²", "Perimeter " + length(perimeter)]
             if loops.count > 1 { lines.append("\(loops.count - 1) island\(loops.count - 1 == 1 ? "" : "s") left out") }
             showMeasure(MeasureResult(fill: loops, lines: lines, anchor: raw))
 
@@ -5756,7 +5779,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 return
             }
             showMeasure(MeasureResult(fill: info.outline, lines: ["Area \(f(info.area)) \(unit)²",
-                                                                   "Perimeter \(f(info.perimeter)) \(unit)",
+                                                                   "Perimeter " + length(info.perimeter),
                                                                    target.typeName], anchor: raw))
 
         case .length:
@@ -5772,7 +5795,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 measureTotal += target.curveLength
             }
             measureResult = nil
-            onMessage?("Length \(f(measureTotal)) \(unit) (\(measureObjects.count) object\(measureObjects.count == 1 ? "" : "s"))")
+            onMessage?("Length \(length(measureTotal)) (\(measureObjects.count) object\(measureObjects.count == 1 ? "" : "s"))")
             stateChanged()
         }
     }
@@ -5786,7 +5809,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let box = HatchEntity.box(of: polygon)
         showMeasure(MeasureResult(path: polygon, closed: true, fill: [polygon],
                                   lines: ["Area \(Measure.format(Measure.polygonArea(polygon))) \(unit)²",
-                                          "Perimeter \(Measure.format(Measure.perimeter(polygon, closed: true))) \(unit)"],
+                                          "Perimeter " + (LengthStyle.feetInches(Measure.perimeter(polygon, closed: true)) ?? "\(Measure.format(Measure.perimeter(polygon, closed: true))) \(unit)")],
                                   anchor: CGPoint(x: box.midX, y: box.midY)))
     }
 

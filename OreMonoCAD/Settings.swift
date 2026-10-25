@@ -361,7 +361,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             check("Smooth lines and text (antialiasing)", AppSettings.smoothLines,
                   tip: "Also in View › Smooth Lines (Antialiasing)") { AppSettings.smoothLines = $0 },
             check("Ask to close polylines and splines", AppSettings.askToClose,
-                  tip: "Default for the CLS button (⌥4)") { AppSettings.askToClose = $0 },
+                  tip: "Default for the CLS button (⌥4, F4)") { AppSettings.askToClose = $0 },
             valueBoxCheck,
             note("These settings apply to the whole app and all drawings. Units, grid and polar angles of one drawing are in Format › Document Settings… (⌥⌘,).")
         ])
@@ -453,7 +453,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             backupRow,
             note("Auto-save keeps your unsaved changes in OreMonoCAD's own folder (your drawing file is not touched) and deletes them once you save or close the drawing. If OreMonoCAD quits unexpectedly, it offers to recover them at the next launch. A backup of the previous version is made when you save over a drawing – at most one every 10 minutes; File › Open Backup… opens one as a copy."),
             reset,
-            note("Removes your custom grid sizes and polar steps, the size of the right panel and the last export settings. Drawings are not affected.")
+            note("Removes your custom grid sizes and polar steps, the size of the side panel and the last export settings. Drawings are not affected.")
         ])
 
         // Styles (text, dimensions and hatches)
@@ -785,7 +785,8 @@ final class SnapSettingsPanel: NSViewController {
 // MARK: - Custom keyboard shortcuts
 //
 // One shared table for tools and hatch patterns (including custom ones). A shortcut = a single letter A–Z,
-// alone (“F”) or with Option (“⌥F”). Shift is left for Ortho, digits for entering values, ⌥ + digit and F-keys for modes.
+// alone (“F”), with Option (“⌥F”) or with Shift (“⇧F”, only with nothing in progress – otherwise Shift = Ortho).
+// Digits are left for entering values, ⌥ + digit and F-keys for modes.
 
 /// A command that can be assigned a shortcut.
 enum ShortcutCommand: Hashable {
@@ -947,7 +948,7 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
 
         let reset = NSButton(title: "Reset All to Defaults", target: self, action: #selector(resetAll))
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a key cell and type one letter (A–Z), or Alt and a letter for ⌥ + letter (Alt F, Opt F or ⌥F), or Shift and a letter for ⇧ + letter (Shift F or ⇧F – works only with nothing in progress); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥ + digit and F1–F12 (modes, Keyboard Shortcuts, Info Panel), Shift = Ortho, digits start typed values, Space = Select, ↩ or right-click repeats the last tool. Help › Keyboard Shortcuts… (F1) lists them all.")
+            "Click a key cell and type one letter (A–Z), or Option and a letter for ⌥ + letter (⌥F, Option F or Alt F), or Shift and a letter for ⇧ + letter (Shift F or ⇧F – works only with nothing in progress); empty = no shortcut. A key used elsewhere moves to the new command. Fixed keys: ⌥ + digit and F1–F12 (modes, Keyboard Shortcuts, Info Panel), Shift = Ortho, digits start typed values, Space = Select, ↩ or right-click repeats the last tool. Help › Keyboard Shortcuts… (F1) lists them all.")
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 540
@@ -982,12 +983,13 @@ final class ShortcutsPane: NSObject, NSTableViewDataSource, NSTableViewDelegate,
             field.isEditable = true
             field.alignment = .center
             field.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-            field.placeholderString = "–"
+            // Select has no letter of its own – the space bar always switches to it
+            field.placeholderString = command == .tool(.select) ? "Space" : "–"
             field.tag = row
             field.delegate = self
             return field
         case "default":
-            let label = NSTextField(labelWithString: command.defaultKey ?? "")
+            let label = NSTextField(labelWithString: command.defaultKey ?? (command == .tool(.select) ? "Space" : ""))
             label.alignment = .center
             label.textColor = .secondaryLabelColor
             return label

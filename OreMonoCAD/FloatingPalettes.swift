@@ -9,8 +9,8 @@
 //  when its palette closes or is dragged back onto the tool panel.
 //  A palette brought to an edge goes to the palette bar of that edge: at the top above the drawing tabs,
 //  at the bottom under the drawing (above the layout tabs), at the left and right edge of the window
-//  (beyond the tool panel and the right panel – a palette dropped on the right panel goes to the right bar).
-//  The side bars look like the tool panel: two columns of buttons, all groups of one width. Dragging the right or bottom edge
+//  (beyond the tool panel and the side panel – a palette dropped on the side panel goes to the bar on its side).
+//  The side bars look like the tool panel: 1 to 4 columns of buttons, all groups of one width. Dragging the right or bottom edge
 //  of a palette changes the number of columns.
 //  The buttons come from the tool panel, so they look and behave the same.
 //
@@ -94,15 +94,28 @@ enum FloatingPaletteStore {
             if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: key) }
         }
     }
+
+    /// Drops the saved palettes none of whose tools exist any more (`records` already leaves them out);
+    /// their sections are shown in the tool panel again. True = a section came back.
+    static func dropUnusable() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let all = try? JSONDecoder().decode([FloatingPaletteRecord].self, from: data) else { return false }
+        let unusable = all.filter { $0.drawingTools.isEmpty }
+        guard !unusable.isEmpty else { return false }
+        let sections = unusable.flatMap { $0.sections ?? [] }.compactMap { ToolPanelSection(title: $0) }
+        ToolPanelLayout.hidden.subtract(sections)
+        records = all.filter { !$0.drawingTools.isEmpty }
+        return !sections.isEmpty
+    }
 }
 
 /// Where a dragged palette is over: the window parts it can be dropped on.
 private enum PaletteDropZone {
     /// The palette bar at the top or the drawing tabs below it.
     case topBar
-    /// The palette bar at the right edge of the window or the right panel next to it.
+    /// The palette bar at the right edge of the window or the side panel next to it.
     case sideBar
-    /// The palette bar at the left edge of the window (or the right panel moved to the left).
+    /// The palette bar at the left edge of the window (or the side panel moved to the left).
     case leftBar
     /// The palette bar under the drawing or the layout tabs below it.
     case bottomBar
@@ -169,6 +182,7 @@ final class FloatingPaletteLayer: NSView {
 
     /// Builds all palettes again from the saved records.
     func reload() {
+        if FloatingPaletteStore.dropUnusable() { onPanelLayoutChanged?() }
         // palettes in a side bar have as many icons in a row as the bar is set to
         var records = FloatingPaletteStore.records
         let wrong: (FloatingPaletteRecord) -> Bool = { record in
@@ -254,6 +268,8 @@ final class FloatingPaletteLayer: NSView {
             ToolPanelLayout.hidden.insert(section)
             onPanelLayoutChanged?()
         }
+        // a section whose tools have all left its palette is shown in the panel again
+        releaseEmptySections(&records)
         // a palette left without tools gives its sections back to the panel
         giveBack(records.filter { $0.tools.isEmpty })
         records.removeAll { $0.tools.isEmpty }
@@ -396,12 +412,12 @@ final class FloatingPaletteLayer: NSView {
         } else if point.x < 0 {
             return .toolPanel
         }
-        // left of the drawing (the right panel moved to the left, or no tool panel): the left palette bar
+        // left of the drawing (the side panel moved to the left, or no tool panel): the left palette bar
         if leftBar != nil && point.x < 0 && point.y >= -DrawingTabBarView.height && point.y <= bounds.maxY { return .leftBar }
         // the layout tabs lie right under the drawing (and under the bottom palette bar)
         let below = point.y - bounds.maxY - (bottomBar?.frame.height ?? 0)
         if below > 0 && below < LayoutBarView.height && point.x <= bounds.maxX { return .bottomBar }
-        // the right panel lies between the drawing and the right palette bar
+        // the side panel lies between the drawing and the right palette bar
         if point.x > bounds.maxX && point.y >= -DrawingTabBarView.height && point.y <= bounds.maxY { return .sideBar }
         return .none
     }
@@ -425,7 +441,7 @@ final class FloatingPaletteLayer: NSView {
 
     /// Moving a palette by its background. On the drawing it follows the mouse and remembers the place;
     /// close to another palette that one lights up and on release the two merge; close to an edge the edge
-    /// lights up and on release the palette snaps to it (to the top or right = into that palette bar).
+    /// lights up and on release the palette snaps to it (into the palette bar of that edge).
     /// In a palette bar it moves along the bar. Outside its own area a picture of it follows the mouse:
     /// released on the tool panel the palette closes and its groups go back to the panel.
     private func paletteDragged(_ palette: FloatingPaletteView, phase: ToolDragPhase, offset: CGSize, event: NSEvent) {
@@ -586,7 +602,7 @@ final class FloatingPaletteLayer: NSView {
         FloatingPaletteStore.records = records
     }
 
-    /// Changing the number of columns by the grip: the palette keeps the corner it is held to,
+    /// Changing the number of columns by dragging the right or bottom edge: the palette keeps the corner it is held to,
     /// on release the new layout is remembered.
     private func paletteResized(_ palette: FloatingPaletteView, phase: ToolDragPhase) {
         layoutPalettes()
@@ -608,10 +624,11 @@ final class FloatingPaletteLayer: NSView {
         close.target = self
         close.representedObject = palette.record.id.uuidString
         menu.addItem(close)
-        let reset = NSMenuItem(title: "Reset All Palettes to Default View", action: #selector(resetAllPalettes(_:)),
+        let reset = NSMenuItem(title: "Reset Tool Panel and Palettes", action: #selector(resetAllPalettes(_:)),
                                keyEquivalent: "")
         reset.target = self
         reset.subtitle = "The tool panel and all palettes as at the start"
+        reset.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: nil)
         menu.addItem(reset)
         menu.addItem(.separator())
         if palette.superview === sideBar || palette.superview === leftBar {
@@ -643,7 +660,7 @@ final class FloatingPaletteLayer: NSView {
         DispatchQueue.main.async { [weak self] in self?.reload() }
     }
 
-    /// Reset All Palettes to Default View was chosen – the window resets the tool panel and the palettes together.
+    /// Reset Tool Panel and Palettes was chosen – the window resets the tool panel and the palettes together.
     var onResetAll: (() -> Void)?
 
     @objc private func resetAllPalettes(_ sender: NSMenuItem) {
@@ -651,12 +668,12 @@ final class FloatingPaletteLayer: NSView {
     }
 
     /// Closes all palettes (their groups go back to the tool panel) and sets their options back:
-    /// no compact view, two icons in a row and another column in the side bars.
+    /// no compact view, two icons in a row and scrolling side bars.
     func resetPalettes() {
         closePalettes { _ in true }
         FloatingPaletteLayer.isCompact = false
         for edge in [PaletteEdge.left, .right] { PaletteDockBar.setIconsPerRow(2, for: edge) }
-        PaletteDockBar.sideBarsAddColumns = true
+        PaletteDockBar.sideBarsAddColumns = false
         DispatchQueue.main.async { [weak self] in self?.reload() }
     }
 
@@ -689,6 +706,27 @@ final class FloatingPaletteLayer: NSView {
         reload()
     }
 
+    /// Forgets the sections none of whose tools are in their palette any more and shows them in the tool panel again
+    /// (otherwise a section emptied tool by tool would stay hidden in the panel with its tools nowhere).
+    private func releaseEmptySections(_ records: inout [FloatingPaletteRecord]) {
+        var released: [ToolPanelSection] = []
+        for index in records.indices {
+            guard let titles = records[index].sections else { continue }
+            let tools = Set(records[index].tools)
+            let kept = titles.filter { title in
+                guard let section = ToolPanelSection(title: title) else { return false }
+                let sectionTools = section.buttonTools.flatMap { $0.paletteFamily ?? [$0] }.map { $0.title }
+                if sectionTools.contains(where: { tools.contains($0) }) { return true }
+                released.append(section)
+                return false
+            }
+            records[index].sections = kept.isEmpty ? nil : kept
+        }
+        guard !released.isEmpty else { return }
+        ToolPanelLayout.hidden.subtract(released)
+        onPanelLayoutChanged?()
+    }
+
     /// Shows the sections of these palettes in the tool panel again (at their old places).
     private func giveBack(_ records: [FloatingPaletteRecord]) {
         let sections = records.flatMap { $0.sections ?? [] }.compactMap { ToolPanelSection(title: $0) }
@@ -698,14 +736,14 @@ final class FloatingPaletteLayer: NSView {
     }
 }
 
-/// A bar for the palettes held to an edge of the window: at the top above the drawing tabs (a row),
-/// or at the right edge beyond the right panel (a column). The palettes stand one after another
+/// A bar for the palettes held to an edge of the window: at the top above the drawing tabs or at the bottom
+/// under the drawing (a row), or at the left or right edge of the window (a column). The palettes stand one after another
 /// (in more rows or columns when they don't fit); without palettes the bar has no thickness.
 final class PaletteDockBar: NSView {
     /// .top = a row above the drawing tabs, .left / .right = a column at the left / right edge of the window,
     /// .bottom = a row under the drawing.
     let edge: PaletteEdge
-    /// The bar's thickness (height of the top bar, width of the right one) changed –
+    /// The bar's thickness (height of a top or bottom bar, width of a side bar) changed –
     /// the window lays out its parts again.
     var onThicknessChanged: ((CGFloat) -> Void)?
     /// Lit up while a palette is brought to this edge – on release it goes into the bar.
@@ -723,7 +761,7 @@ final class PaletteDockBar: NSView {
     /// The side bars, when their palettes don't fit the height: true = another column, false = they scroll
     /// (kept in the app's settings; the top and bottom bars always go on in another row).
     static var sideBarsAddColumns: Bool {
-        get { return UserDefaults.standard.object(forKey: "RightPaletteBarAddsColumns") as? Bool ?? true }
+        get { return UserDefaults.standard.object(forKey: "RightPaletteBarAddsColumns") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "RightPaletteBarAddsColumns") }
     }
 
@@ -750,7 +788,7 @@ final class PaletteDockBar: NSView {
     init(edge: PaletteEdge, frame: NSRect) {
         self.edge = edge
         super.init(frame: frame)
-        // palettes scrolled out of the bar must not show over its neighbours
+        // palettes scrolled out of the bar must not show over its neighbors
         clipsToBounds = true
     }
 
@@ -767,7 +805,7 @@ final class PaletteDockBar: NSView {
     override var isFlipped: Bool { return true }
 
     /// Takes over the palettes held to this edge (in the order of their saved places).
-    /// In the right bar they look like the groups of the tool panel: all of the same width, two columns
+    /// In a side bar they look like the groups of the tool panel: all of the same width, 1 to 4 columns
     /// of buttons, no resizing.
     func setPalettes(_ newPalettes: [FloatingPaletteView]) {
         palettes = newPalettes.sorted { $0.record.dx < $1.record.dx }
@@ -790,7 +828,7 @@ final class PaletteDockBar: NSView {
         layoutPalettes()
     }
 
-    /// Puts the palettes one after another from the start of the bar (left, or top for the right bar),
+    /// Puts the palettes one after another from the start of the bar (left, or top for a side bar),
     /// going on in a new row (column) when the bar is full.
     func layoutPalettes() {
         let vertical = isSide
@@ -832,7 +870,7 @@ final class PaletteDockBar: NSView {
         // a line along the side facing the drawing, an accent one while a palette is brought here
         (isHighlighted ? Theme.accent : Theme.panelBorder).setFill()
         let width: CGFloat = isHighlighted ? 3 : 1
-        // a thin line between neighbouring palettes of one row (column), like the separators of the tool panel
+        // a thin line between neighboring palettes of one row (column), like the separators of the tool panel
         NSColor.separatorColor.setFill()
         let shown = palettes.filter { $0.superview === self }
         for (previous, next) in zip(shown, shown.dropFirst()) {
@@ -917,7 +955,7 @@ final class FloatingPaletteView: NSView, NSTextFieldDelegate {
     var onRename: ((String) -> Void)?
     /// Dragging: offset in window coordinates since the drag started, and the mouse event.
     var onDrag: ((ToolDragPhase, CGSize, NSEvent) -> Void)?
-    /// Resizing by the grip: called after every change of the column count and on release.
+    /// Resizing by dragging the right or bottom edge: called after every change of the column count and on release.
     var onResize: ((ToolDragPhase) -> Void)?
     var menuProvider: (() -> NSMenu?)?
     var isMoving = false

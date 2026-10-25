@@ -703,6 +703,8 @@ final class Polyline: CurveEntity {
     var bulges: [CGFloat]
     /// Width of the whole polyline in drawing units (a wide line, e.g. from DXF); 0 = a thin line drawn with its lineweight.
     var width: CGFloat = 0
+    /// An outline drawn by the Wall tools: only these are joined with a new wall (Walls.joined).
+    var isWall = false
 
     init(vertices: [CGPoint], closed: Bool = false, bulges: [CGFloat] = [], layer: String = "0", color: NSColor? = nil) {
         self.vertices = vertices
@@ -865,6 +867,7 @@ final class Polyline: CurveEntity {
     func clone() -> CADEntity {
         let copy = Polyline(vertices: vertices, closed: closed, bulges: bulges, layer: layer, color: color)
         copy.width = width
+        copy.isWall = isWall
         return copyStyle(to: copy)
     }
 

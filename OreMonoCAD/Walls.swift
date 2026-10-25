@@ -6,7 +6,7 @@
 //  draws both faces at the wall thickness, with mitered corners. The result is ordinary closed polylines –
 //  an open wall is one outline (both faces and the ends), a closed wall gives two (the outer and the inner face).
 //  A new wall is joined to the walls it touches or crosses (T, L and X joints): their outlines on the same layer
-//  are merged into one, as a separate Undo step.
+//  are merged into one, as a separate Undo step. Only outlines drawn by the Wall tools are joined (Polyline.isWall).
 //  Wall from Curve builds the same outlines along selected lines, arcs, polylines and splines.
 //
 
@@ -69,11 +69,15 @@ enum Walls {
         let offsets = faceOffsets(thickness: thickness, justification: justification)
         let left = face(of: points, closed: isClosed, offset: offsets.left)
         let right = face(of: points, closed: isClosed, offset: offsets.right)
+        let result: [Polyline]
         if isClosed {
-            return [Polyline(vertices: left, closed: true, layer: layer), Polyline(vertices: right, closed: true, layer: layer)]
+            result = [Polyline(vertices: left, closed: true, layer: layer), Polyline(vertices: right, closed: true, layer: layer)]
+        } else {
+            // one outline: along the left face, across the end, back along the right face and across the start
+            result = [Polyline(vertices: left + right.reversed(), closed: true, layer: layer)]
         }
-        // one outline: along the left face, across the end, back along the right face and across the start
-        return [Polyline(vertices: left + right.reversed(), closed: true, layer: layer)]
+        for outline in result { outline.isWall = true }
+        return result
     }
 
     /// Longest miter on the outer side of a corner, as a multiple of the offset; a sharper corner is beveled.
@@ -232,8 +236,9 @@ extension AppSettings {
 // MARK: - Joining walls
 
 extension Walls {
-    /// Joins new wall outlines with the walls they touch or cross: closed straight polylines on the same layer
-    /// (and the faces nested in them – the inner face of a closed wall). Returns the merged outlines
+    /// Joins new wall outlines with the walls they touch or cross: wall outlines (`isWall`) on the same layer
+    /// (and the wall faces nested in them – the inner face of a closed wall). Other closed polylines – furniture,
+    /// room outlines – are left alone. Returns the merged outlines
     /// and the objects they replace; nil = the new walls touch nothing.
     static func joined(_ new: [Polyline], with existing: [CADEntity]) -> (removed: [Polyline], added: [Polyline])? {
         guard let style = new.first else { return nil }
@@ -243,7 +248,7 @@ extension Walls {
         guard !newBox.isNull else { return nil }
         let tolerance = max(newBox.width, newBox.height, 1) * 1e-7
         let others = existing.compactMap { $0 as? Polyline }.filter { polyline in
-            polyline.closed && !polyline.hasArcs && polyline.vertices.count >= 3 && polyline.layer == style.layer
+            polyline.isWall && polyline.closed && !polyline.hasArcs && polyline.vertices.count >= 3 && polyline.layer == style.layer
                 && !new.contains { $0 === polyline }
         }
         // the walls the new ones touch or cross
@@ -271,6 +276,7 @@ extension Walls {
         guard !loops.isEmpty else { return nil }
         let merged = loops.map { loop -> Polyline in
             let polyline = Polyline(vertices: loop, closed: true, layer: style.layer, color: style.color)
+            polyline.isWall = true
             return polyline.withStyle(of: style)
         }
         return (touched, merged)
@@ -326,12 +332,18 @@ extension Walls {
             return pool.count - 1
         }
 
+        // the edges' bounds (a little larger): edges whose bounds don't meet can't cut each other – a quick test
+        // before the exact one keeps joining fast with hundreds of walls on the layer
+        let boxes = edges.map { edge in
+            CGRect(x: min(edge.0.x, edge.1.x) - tolerance, y: min(edge.0.y, edge.1.y) - tolerance,
+                   width: abs(edge.1.x - edge.0.x) + 2 * tolerance, height: abs(edge.1.y - edge.0.y) + 2 * tolerance)
+        }
         var pieces: [(from: Int, to: Int)] = []
         var seen = Set<Int64>()
         for (i, (a, b)) in edges.enumerated() {
             let length = Geometry.distance(a, b)
             var ts: [CGFloat] = [0, 1]
-            for (j, (c, d)) in edges.enumerated() where j != i {
+            for (j, (c, d)) in edges.enumerated() where j != i && boxes[i].intersects(boxes[j]) {
                 if let hit = Geometry.segmentIntersection(a, b, c, d) { ts.append(hit.ta) }
                 // the ends of an edge lying on this one (overlapping faces)
                 for q in [c, d] where Geometry.distance(from: q, toSegmentFrom: a, to: b) <= tolerance {
@@ -369,7 +381,7 @@ extension Walls {
             }
             guard pieces[current].to == pieces[start].from else { continue }      // not closed
             var points = loop.map { pool[$0] }
-            // straight runs: a vertex in line with its neighbours is dropped
+            // straight runs: a vertex in line with its neighbors is dropped
             var changed = true
             while changed && points.count > 3 {
                 changed = false

@@ -12,3 +12,6 @@ DXF/
 DATA/
 CODE*.txt
 .git-stare/
+
+# Temporary files left by FUSE mounts
+.fuse_hidden*

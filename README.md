@@ -6,19 +6,19 @@ It is a personal project: built for one architect's everyday drawing, kept delib
 
 ## Features
 
-- Lines, polylines, rectangles, arcs, circles, ellipses, polygons, splines, construction lines
-- Move, Copy, Rotate, Scale, Mirror, Array, Edit Points, Match Properties
+- Lines, polylines (with a constant width), rectangles, arcs, circles, ellipses, polygons, splines, construction lines
+- Move, Copy, Rotate, Scale, Mirror, Align, Array, Edit Points, Match Properties
 - Trim, MagicTrim (drag across parts to remove them, click to extend), Extend, Break, Fillet, Chamfer, Offset, Join, Explode
 - Dimensions (linear, aligned, continue, angular, radius, diameter), text, leaders
 - Hatches with a pick-inside-area fill, Rebuild Hatch and Cut Out of Hatch
-- Walls and Wall from Curve, room labels with floor area, revision clouds, wipeouts, scale bar and north arrow
+- Walls and Wall from Curve (a new wall joins the walls it touches or crosses), room labels with floor area, revision clouds, wipeouts, scale bar and north arrow
 - Image and PDF underlays, external references, groups, Filter, Select Similar
 - Copy and paste between drawings, Draw Order (kept in DXF export)
 - Plot / print, PDF and image export, plot style tables (.ctb)
 - Layers, blocks with in-place editing, layouts with viewports, named views
 - DXF import and export, native `.oremono` format (drawings saved by older versions as `.ohmycad` still open)
-- Drawing units: mm, cm, m, inches and feet, with conversion of an existing drawing; text, dimension and lineweight sizes in paper millimeters
-- Survey support: geodetic base point (S-JTSK), point list import, rotated view / UCS
+- Drawing units: mm, cm, m, inches and feet (lengths shown and typed as 12'-6 1/2"), with conversion of an existing drawing; text, dimension and lineweight sizes in paper millimeters
+- Survey support: geodetic base point (S-JTSK), point list import, rotated view / UCS, angles in degrees or gons, directions as bearings
 - Snaps, Snap Tracking, ortho, polar angles, grid, the value box next to the cursor, Find and Replace
 - Shift modifiers (square rectangles, 15° steps for Rotate and Arc), a context menu on a held right mouse button, selection window by dragging or by two clicks
 - A customizable tool panel: Favorites, groups that can be moved or hidden, floating palettes

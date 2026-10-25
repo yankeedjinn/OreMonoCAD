@@ -370,7 +370,7 @@ final class HatchPatternEditor: NSObject, NSTextViewDelegate {
     private let preview = HatchPatternPreviewView(frame: NSRect(x: 0, y: 0, width: 130, height: 130))
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
 
-    /// Shows the dialog; returns the new pattern, or nil if cancelled. `basedOn` pre-fills the definition.
+    /// Shows the dialog; returns the new pattern, or nil if canceled. `basedOn` pre-fills the definition.
     func run(basedOn template: HatchPattern? = nil) -> HatchPattern? {
         let alert = NSAlert()
         alert.messageText = "Custom Hatch Pattern"

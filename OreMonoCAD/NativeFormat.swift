@@ -311,6 +311,9 @@ nonisolated struct EntityRecord: Codable {
     var widthFactor: CGFloat?
     var belowText: String?
 
+    // polyline: an outline drawn by the Wall tools (nil = no)
+    var wall: Bool?
+
     // ellipse: center, end = major semi-axis vector, ratio, startAngle / endAngle = parameters
     var ratio: CGFloat?
 
@@ -375,6 +378,7 @@ enum NativeEntityCoder {
             r.closed = polyline.closed
             if polyline.hasArcs { r.bulges = polyline.bulges }
             if polyline.width > 0 { r.width = polyline.width }
+            if polyline.isWall { r.wall = true }
         case let spline as Spline:
             r = EntityRecord(type: "spline")
             r.points = spline.controlPoints
@@ -495,6 +499,7 @@ enum NativeEntityCoder {
             guard let points = r.points, points.count >= 2 else { return nil }
             let polyline = Polyline(vertices: points, closed: r.closed ?? false, bulges: r.bulges ?? [], layer: layer, color: color)
             if let width = r.width, width > 0, width.isFinite { polyline.width = width }
+            polyline.isWall = r.wall ?? false
             entity = polyline
         case "spline":
             guard let points = r.points, points.count >= 2 else { return nil }

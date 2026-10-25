@@ -525,6 +525,16 @@ final class BlockDefinition {
     }
 
     func markChanged() { version += 1 }
+
+    /// The version together with those of the blocks nested in it (versions only grow, so the sum changes
+    /// with any of them) – a stretched reference draws the nested blocks' objects itself.
+    func deepVersion(visited: Set<ObjectIdentifier> = []) -> Int {
+        var seen = visited
+        guard seen.insert(ObjectIdentifier(self)).inserted else { return 0 }
+        var result = version
+        for case let reference as BlockReference in entities { result &+= reference.definition.deepVersion(visited: seen) }
+        return result
+    }
 }
 
 final class BlockLibrary {
@@ -665,17 +675,19 @@ final class BlockReference: CADEntity {
 
     /// The block's objects placed in the drawing (computed once and remembered).
     var resolvedEntities: [CADEntity] {
-        if let cache = cache, cache.version == definition.version { return cache.entities }
+        let stretched = isStretched
+        // a stretched reference explodes the nested blocks, so their changes count too
+        let version = stretched ? definition.deepVersion() : definition.version
+        if let cache = cache, cache.version == version { return cache.entities }
         let t = blockTransform
         // sorted by draw order once during the computation (not on every redraw)
-        let stretched = isStretched
         let entities = DrawOrder.sorted(definition.entities.flatMap { entity -> [CADEntity] in
             if stretched { return BlockReference.stretchedCopies(of: entity, by: t) }
             let copy = entity.clone()
             copy.applyTransform(t)
             return [copy]
         })
-        cache = (definition.version, entities)
+        cache = (version, entities)
         return entities
     }
 

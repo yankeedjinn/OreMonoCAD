@@ -116,7 +116,8 @@ enum DynamicInputMode: Equatable {
     case radius
     case includedAngle   // arc angle
     case widthHeight     // rectangle
-    case angle           // rotate, mirror
+    case angle           // rotate (by how much)
+    case direction       // mirror (the direction of the mirror line)
     case factor          // scale
     case filletRadius
     case chamferDistances  // chamfer distances on the first and second object
@@ -132,6 +133,7 @@ enum DynamicInputMode: Equatable {
         case .lengthAngle, .distanceAngle: return [.length, .angle(.direction)]
         case .radius: return [.length]
         case .includedAngle, .angle: return [.angle(.amount)]
+        case .direction: return [.angle(.direction)]
         case .widthHeight: return [.length, .length]
         case .factor: return [.number]
         case .filletRadius: return [.length]
@@ -153,6 +155,7 @@ enum DynamicInputMode: Equatable {
         case .includedAngle: return [angle(.amount)]
         case .widthHeight: return ["Width", "Height"]
         case .angle: return [angle(.amount)]
+        case .direction: return [angle(.direction)]
         case .factor: return ["Factor"]
         case .filletRadius: return ["Fillet radius"]
         case .chamferDistances: return ["1st distance", "2nd distance"]

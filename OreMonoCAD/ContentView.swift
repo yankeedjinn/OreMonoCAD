@@ -52,7 +52,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private(set) var editorView: CADEditorView!
     private var toolbarView: ToolbarView!
     private var layerPanel: LayerPanelView!
-    /// Where layer management is: in the right panel, in its own window, or hidden.
+    /// Where layer management is: in the side panel, in its own window, or hidden.
     private enum LayersMode { case tray, window, hidden }
     private var layersMode: LayersMode = .tray
     private var layersContainer: DockablePanelView!
@@ -61,7 +61,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var trayResizeHandle: DragHandleView!
     /// Dividers between expanded panels (at most three panels stacked → two dividers).
     private var traySplitHandles: [DragHandleView] = []
-    /// Panels of the right panel and their order from top to bottom (the user changes it by dragging the header).
+    /// Panels of the side panel and their order from top to bottom (the user changes it by dragging the header).
     private enum TrayPanel: String, CaseIterable { case info, properties, layers }
     private var trayOrder: [TrayPanel] = TrayPanel.allCases
     /// Height shares of the expanded panels.
@@ -71,9 +71,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var infoContainer: DockablePanelView!
     private var infoShown = true
     private var infoFolded = false
-    /// The whole right panel collapsed into a narrow strip.
+    /// The whole side panel collapsed into a narrow strip.
     private var trayCollapsed = false
-    /// The right panel moved to the left edge, next to the tool panel (kept in the app's settings).
+    /// The side panel moved to the left edge, next to the tool panel (kept in the app's settings).
     private var trayOnLeft = UserDefaults.standard.bool(forKey: "OreMonoCAD.trayOnLeft")
     private var propertiesFolded = false
     private var layersFolded = false
@@ -114,13 +114,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var paletteDockBar: PaletteDockBar!
     /// Width of the palette bar at the right edge of the window (0 when no palette is held to the right).
     private var sideDockWidth: CGFloat = 0
-    /// The bar at the right edge of the window, beyond the right panel, for the palettes held to the right.
+    /// The bar at the right edge of the window, beyond the side panel, for the palettes held to the right.
     private var paletteSideBar: PaletteDockBar!
     /// Height of the palette bar under the drawing (0 when no palette is held to the bottom).
     private var bottomDockHeight: CGFloat = 0
     /// The bar under the drawing, above the layout tabs, for the palettes held to the bottom.
     private var paletteBottomBar: PaletteDockBar!
-    /// Width of the tool panel on the left – none when all its groups are hidden or moved to palettes.
     /// Width of the palette bar at the left edge of the window (0 when no palette is held to the left).
     private var leftDockWidth: CGFloat = 0
     /// The bar at the left edge of the window, beyond the tool panel, for the palettes held to the left.
@@ -130,6 +129,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return leftDockWidth + paletteWidth
     }
 
+    /// Width of the tool panel on the left – none when all its groups are hidden or moved to palettes.
     private var paletteWidth: CGFloat {
         guard let toolbarView = toolbarView else { return ToolbarView.preferredWidth }
         return toolbarView.isEmpty ? 0 : toolbarView.panelWidth
@@ -289,7 +289,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.paletteLayer.leftBar = paletteLeftBar
         editorView.paletteLayer.reload()
 
-        // right panel: Properties and Layers stacked, both collapsible
+        // side panel: Properties and Layers stacked, both collapsible
         trayBackground = NSView(frame: .zero)
         trayBackground.wantsLayer = true
         trayBackground.layer?.backgroundColor = Theme.trayBackground.cgColor
@@ -344,7 +344,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         view.addSubview(toast, positioned: .above, relativeTo: nil)
         statusBar.onMessage = { [weak self] message in self?.showToast(message) }
 
-        // handles: the right panel width and the divider between Properties and Layers
+        // handles: the side panel width and the divider between Properties and Layers
         if let saved = UserDefaults.standard.object(forKey: "OreMonoCAD.trayWidth") as? Double { trayWidth = CGFloat(saved) }
         if let saved = UserDefaults.standard.stringArray(forKey: "OreMonoCAD.trayOrder") {
             let order = saved.compactMap { TrayPanel(rawValue: $0) }
@@ -378,7 +378,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         layoutTray()
     }
 
-    // MARK: Right panel (tray)
+    // MARK: Side panel (tray)
 
     private func container(for kind: TrayPanel) -> DockablePanelView {
         switch kind {
@@ -388,7 +388,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// Panels currently in the right panel (top to bottom) and whether they are folded to the header.
+    /// Panels currently in the side panel (top to bottom) and whether they are folded to the header.
     private var traySections: [(kind: TrayPanel, panel: DockablePanelView, folded: Bool)] {
         var sections: [(kind: TrayPanel, panel: DockablePanelView, folded: Bool)] = []
         for kind in trayOrder {
@@ -404,13 +404,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return sections
     }
 
-    /// The width the right panel takes next to the drawing area.
+    /// The width the side panel takes next to the drawing area.
     private var trayOccupiedWidth: CGFloat {
         if traySections.isEmpty { return 0 }
         return trayCollapsed ? collapsedWidth : trayWidth
     }
 
-    /// Lays out the panels in the right panel, the handles and the drawing area.
+    /// Lays out the panels in the side panel, the handles and the drawing area.
     private func layoutTray() {
         let b = view.bounds
         let top = b.height - toolbarHeight, bottom = statusBarHeight
@@ -422,8 +422,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                       width: collapsedWidth, height: top - bottom)
         collapsedStrip.titles = sections.map { $0.kind.rawValue.capitalized }
 
-        // remove panels that should not be in the right panel (or when it is collapsed)
-        // (Properties outside the right panel are floating / in a window – they stay where they are)
+        // remove panels that should not be in the side panel (or when it is collapsed)
+        // (Properties outside the side panel are floating / in a window – they stay where they are)
         for kind in TrayPanel.allCases {
             let panel = container(for: kind)
             let inTray = sections.contains { $0.kind == kind }
@@ -540,13 +540,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// The dragged panel and the top edge the drag started from.
     private var trayDrag: (kind: TrayPanel, startTop: CGFloat)?
 
-    /// The panel whose header is dragged sideways to move the whole right panel to the other side.
+    /// The panel whose header is dragged sideways to move the whole side panel to the other side.
     private var traySideDrag: TrayPanel?
 
-    /// How far (points) a header must be dragged toward the other side to move the right panel there.
+    /// How far (points) a header must be dragged toward the other side to move the side panel there.
     private let traySideDistance: CGFloat = 150
 
-    /// Where the right panel will lie when the dragged header is released now: an accent area on the other side.
+    /// Where the side panel will lie when the dragged header is released now: an accent area on the other side.
     private lazy var traySidePreview: NSView = {
         let preview = NSView()
         preview.wantsLayer = true
@@ -563,7 +563,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return preview
     }()
 
-    /// Shows (or hides) the place on the other side where the right panel will move.
+    /// Shows (or hides) the place on the other side where the side panel will move.
     private func showTraySidePreview(_ shown: Bool) {
         guard shown else {
             traySidePreview.removeFromSuperview()
@@ -579,7 +579,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         if traySidePreview.superview !== view { view.addSubview(traySidePreview, positioned: .above, relativeTo: nil) }
     }
 
-    /// Panel header in the right panel: dragging up / down changes the order,
+    /// Panel header in the side panel: dragging up / down changes the order,
     /// any panel (Info, Properties, Layers) dragged far toward the other side of the window moves the whole panel there.
     private func dragTrayPanel(_ kind: TrayPanel, _ offset: CGPoint, finished: Bool) {
         if kind == .properties && propertiesMode != .docked {
@@ -593,7 +593,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let panel = container(for: kind)
         if trayDrag == nil && (traySideDrag == kind || (traySideDrag == nil && towardDrawing && sideways)) {
             traySideDrag = kind
-            // the panel follows the mouse sideways; released far enough, the right panel changes sides
+            // the panel follows the mouse sideways; released far enough, the side panel changes sides
             let x = trayOnLeft ? leftInset : view.bounds.width - sideDockWidth - trayWidth
             panel.frame.origin.x = x + offset.x
             panel.layer?.zPosition = 10
@@ -647,7 +647,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// Moves the right panel to the left edge (next to the tool panel) or back to the right.
+    /// Moves the side panel to the left edge (next to the tool panel) or back to the right.
     private func setTrayOnLeft(_ left: Bool) {
         trayOnLeft = left
         UserDefaults.standard.set(left, forKey: "OreMonoCAD.trayOnLeft")
@@ -655,12 +655,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         layoutTray()
     }
 
-    /// View › Right Panel on the Left.
+    /// View › Side Panel on the Left.
     @objc func toggleTraySide(_ sender: Any?) {
         setTrayOnLeft(!trayOnLeft)
     }
 
-    /// View › Reset Right Panel Layout: Info, Properties, Layers stacked, default heights.
+    /// View › Reset Side Panel Layout: Info, Properties, Layers stacked, default heights.
     @objc func resetTrayLayout(_ sender: Any?) {
         trayOrder = TrayPanel.allCases
         trayWeights = [.info: 0.25, .properties: 0.4, .layers: 0.35]
@@ -732,8 +732,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func ucsByAngle(_ sender: Any?) {
         guard ucsAvailable,
               let degrees = askAngle(title: "Rotate Drawing Coordinates",
-                                     message: "Angle of the X axis in degrees (counter-clockwise, 0 = world). The origin stays.",
-                                     initial: Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi) else { return }
+                                     message: AngleStyle.bearings
+                                        ? "Bearing of the X axis in \(angleUnitWord) (clockwise from north, \(AngleStyle.text(0, .direction)) = world). The origin stays."
+                                        : "Angle of the X axis in \(angleUnitWord) (counter-clockwise, 0 = world). The origin stays.",
+                                     initial: Geometry.normalizeAngle(editorView.ucsAngle) * 180 / .pi, kind: .direction) else { return }
         setUCS(origin: editorView.ucsOrigin, angle: degrees * .pi / 180,
                message: "Drawing coordinates rotated \(AngleStyle.text(degrees))")
     }
@@ -746,8 +748,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func rotateViewByAngle(_ sender: Any?) {
         guard ucsAvailable,
               let degrees = askAngle(title: "Rotate View",
-                                     message: "Turn the drawing on screen by this angle in degrees (counter-clockwise). The objects don't move.",
-                                     initial: Geometry.normalizeAngle(editorView.viewport.rotation) * 180 / .pi) else { return }
+                                     message: "Turn the drawing on screen by this angle in \(angleUnitWord) (counter-clockwise). The objects don't move.",
+                                     initial: Geometry.normalizeAngle(editorView.viewport.rotation) * 180 / .pi, kind: .amount) else { return }
         setViewRotation(degrees * .pi / 180)
     }
 
@@ -770,24 +772,29 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         statusBar.showMessage(abs(degrees) < 1e-9 ? "View not rotated" : "View rotated \(AngleStyle.text(degrees)) – the objects keep their coordinates")
     }
 
-    private func askAngle(title: String, message: String, initial: CGFloat) -> CGFloat? {
+    /// “degrees” or “gons” – the unit angles are typed in (Settings › Drawing), for the angle dialogs.
+    private var angleUnitWord: String { return AngleStyle.unit == .gons ? "gons" : "degrees" }
+
+    /// Asks for an angle in the unit (and for a direction, the bearings) of Settings › Drawing; `initial` and the result are degrees.
+    private func askAngle(title: String, message: String, initial: CGFloat, kind: AngleKind) -> CGFloat? {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
-        field.stringValue = LineType.format(initial)
+        field.stringValue = LineType.format(AngleStyle.shown(initial, kind))
         field.placeholderString = "e.g. 30 or -12.5"
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "°", with: "")
+            .replacingOccurrences(of: "gon", with: "")
         guard let value = ExpressionEvaluator.evaluate(text.trimmingCharacters(in: .whitespaces)), value.isFinite else {
             NSSound.beep()
             return nil
         }
-        return CGFloat(value)
+        return AngleStyle.degrees(CGFloat(value), kind)
     }
 
     // MARK: Info panel
@@ -823,12 +830,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         saveTrayLayout()
     }
 
-    // MARK: Properties panel – in the right panel, floating, detached, closed
+    // MARK: Properties panel – in the side panel, floating, detached, closed
 
     private func setPropertiesMode(_ mode: PanelMode) {
         let previous = propertiesMode
         if previous == .detached && mode != .detached { detachedPanel?.orderOut(nil) }
-        // “collapse” = collapse the whole right panel into a strip
+        // “collapse” = collapse the whole side panel into a strip
         if mode == .collapsed {
             propertiesMode = .docked
             trayCollapsed = true
@@ -902,7 +909,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return panel
     }
 
-    /// The close button of the detached window = close the panel (⌘2 again), for layers = return to the right panel.
+    /// The close button of the detached window = close the panel (⌘2 again), for layers = return to the side panel.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === detachedPanel {
             setPropertiesMode(.closed)
@@ -915,7 +922,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         return true
     }
 
-    // MARK: Layer management – in the right panel, in its own window, maximized
+    // MARK: Layer management – in the side panel, in its own window, maximized
 
     private var isLayerWindowMaximized: Bool {
         return layerWindowRestoreFrame != nil
@@ -1058,7 +1065,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     private func finishPropertiesDrag() {
         dragStartFrame = nil
-        // pulled to the edge where the right panel lies = return to it
+        // pulled to the edge where the side panel lies = return to it
         let atPanel = trayOnLeft ? propertiesContainer.frame.minX <= leftInset + 24
                                  : propertiesContainer.frame.maxX >= view.bounds.width - sideDockWidth - 24
         if propertiesMode == .floating && atPanel {
@@ -1088,7 +1095,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// Reset All Palettes to Default View: all palettes close and lose their options, the tool panel
+    /// Reset Tool Panel and Palettes: all palettes close and lose their options, the tool panel
     /// shows all its groups in the default order again.
     private func resetToolLayout() {
         editorView.paletteLayer.resetPalettes()
@@ -1099,9 +1106,13 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     /// or changes its width, the drawing moves. (The groups come back from View › Tool Panel or when their
     /// palettes close.)
     private func toolPanelShapeChanged() {
+        // the last group just left the panel: say where the groups come back from, so the panel doesn't vanish silently
+        if toolbarView.isEmpty && !toolbarView.isHidden && infoContainer != nil {
+            statusBar.showMessage("Tool panel hidden – View › Tool Panel shows its groups again")
+        }
         toolbarView.isHidden = toolbarView.isEmpty
         toolbarView.frame.size.width = paletteWidth
-        // while the window is still being built the right panel is not there yet – it is laid out later
+        // while the window is still being built the side panel is not there yet – it is laid out later
         if infoContainer != nil { layoutTray() }
     }
 
@@ -1123,24 +1134,24 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let b = view.bounds
         paletteLeftBar.frame = NSRect(x: 0, y: statusBarHeight, width: width, height: b.height - toolbarHeight - statusBarHeight)
         toolbarView.frame.origin.x = width
-        // while the window is still being built the right panel is not there yet – it is laid out later
+        // while the window is still being built the side panel is not there yet – it is laid out later
         if infoContainer != nil { layoutTray() }
     }
 
-    /// The palette bar at the right edge got wider or narrower: the right panel and the drawing move aside.
+    /// The palette bar at the right edge got wider or narrower: the side panel and the drawing move aside.
     private func paletteSideBarChanged(_ width: CGFloat) {
         sideDockWidth = width
         let b = view.bounds
         paletteSideBar.frame = NSRect(x: b.width - width, y: statusBarHeight, width: width,
                                       height: b.height - toolbarHeight - statusBarHeight)
-        // while the window is still being built the right panel is not there yet – it is laid out later
+        // while the window is still being built the side panel is not there yet – it is laid out later
         if infoContainer != nil { layoutTray() }
     }
 
     /// The palette bar under the drawing got taller or lower: the drawing gets lower or taller.
     private func paletteBottomBarChanged(_ height: CGFloat) {
         bottomDockHeight = height
-        // while the window is still being built the right panel is not there yet – it is laid out later
+        // while the window is still being built the side panel is not there yet – it is laid out later
         if infoContainer != nil { updateEditorViewFrame() }
     }
 
@@ -1162,6 +1173,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         // block editing: the bar gets its own strip above the drawing, so it never covers the place you click
         let barStrip = blockEditStripHeight
         frame.size.height -= barStrip
+        // a small window with wide side columns: the drawing shrinks to nothing, never to a negative size
+        frame.size.width = max(frame.size.width, 0)
+        frame.size.height = max(frame.size.height, 0)
         editorView.frame = frame
         tabBar?.frame = NSRect(x: frame.minX, y: frame.maxY + barStrip, width: frame.width, height: DrawingTabBarView.height)
         layoutBar?.frame = NSRect(x: frame.minX, y: frame.minY - bottomDock - LayoutBarView.height, width: frame.width,
@@ -1375,7 +1389,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// View › Layers Panel (⌘1): shows the layers in the right panel (or their window); a second press collapses them.
+    /// View › Layers Panel (⌘1): shows the layers in the side panel (or their window); a second press collapses them.
     private func showLayerManager() {
         switch layersMode {
         case .window:
@@ -1966,8 +1980,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     func toolbarDidSelectXLineKind(_ kind: XLineKind) {
         if kind == .angle {
             guard let degrees = askAngle(title: "Construction Line – Angle",
-                                         message: "Angle in degrees from the X axis of the drawing coordinates (counter-clockwise).",
-                                         initial: editorView.xlineAngle) else { return }
+                                         message: AngleStyle.bearings
+                                            ? "Bearing in \(angleUnitWord), clockwise from the Y axis (north) of the drawing coordinates."
+                                            : "Angle in \(angleUnitWord) from the X axis of the drawing coordinates (counter-clockwise).",
+                                         initial: editorView.xlineAngle, kind: .direction) else { return }
             editorView.xlineAngle = degrees
         }
         if currentTool != .xline { selectTool(.xline) }
@@ -4005,7 +4021,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                 case let .layout(index): activateSpace(index)
                 case .block: break
                 }
-                guard isOpenSpace(first.place) else { return }      // the switch was cancelled
+                guard isOpenSpace(first.place) else { return }      // the switch was canceled
             }
             let entities = uniqueEntities(matches.filter { $0.place.isSame(as: first.place) }.map { $0.entity })
             selectionManager.select(entities)
@@ -4238,7 +4254,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         }
     }
 
-    /// Collapses / expands the whole right panel into a narrow strip.
+    /// Collapses / expands the whole side panel into a narrow strip.
     @objc func collapseProperties() {
         trayCollapsed.toggle()
         layoutTray()
@@ -4298,6 +4314,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             mode = nil
         }
         guard let key = mode else { return false }
+        // the key is swallowed here, so the drawing area would not learn that ⌥ was used with it
+        editorView.cancelOptionTap()
         toggleMode(key)
         return true
     }
@@ -5020,7 +5038,7 @@ extension MainViewController {
             menuItem.toolTip = property.detail
         }
         let filter = item(editMenu, "Filter…", #selector(filterObjects(_:)), modifiers: [], target: self)
-        filter.toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, text"
+        filter.toolTip = "Selects the objects that match chosen properties – type, layer, color, linetype, lineweight, block, hatch pattern, text, text height, length, area"
         filter.image = DrawingTool.filter.icon(pointSize: 13)
         editMenu.addItem(.separator())
         let orderMenu = submenu("Draw Order", in: editMenu, image: symbol("square.3.layers.3d"))
@@ -5157,9 +5175,9 @@ extension MainViewController {
             toolPanelItem.image = icon(.toolPanel)
             viewMenu.addItem(toolPanelItem)
         }
-        item(viewMenu, "Reset Right Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
-        item(viewMenu, "Collapse the Right Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
-        item(viewMenu, "Right Panel on the Left", #selector(toggleTraySide(_:)), target: self).image = symbol("sidebar.left")
+        item(viewMenu, "Reset Side Panel Layout", #selector(resetTrayLayout(_:)), modifiers: [], target: self).image = symbol("rectangle.split.3x1")
+        item(viewMenu, "Collapse Side Panel", #selector(collapseProperties), "0", target: self).image = symbol("sidebar.right")
+        item(viewMenu, "Side Panel on the Left", #selector(toggleTraySide(_:)), target: self).image = symbol("sidebar.left")
         item(viewMenu, "Properties in a Separate Window", #selector(detachProperties), target: self).image = symbol("macwindow.on.rectangle")
         // Enter Full Screen (⌃⌘F) is added to the View menu by macOS itself
         viewMenu.addItem(.separator())

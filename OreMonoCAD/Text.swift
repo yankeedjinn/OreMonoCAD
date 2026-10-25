@@ -690,7 +690,7 @@ final class TextFormatPanel: NSViewController {
         facePopup.action = #selector(changed)
 
         setupNumber(heightField, format.height)
-        setupNumber(rotationField, AngleStyle.shown(format.rotationDegrees, .amount))
+        setupNumber(rotationField, AngleStyle.shown(format.rotationDegrees, .direction))
         setupNumber(widthField, format.boxWidth)
         setupNumber(spacingField, format.lineSpacing, width: 48)
         widthField.placeholderString = "no wrap"
@@ -715,7 +715,7 @@ final class TextFormatPanel: NSViewController {
             field.textColor = .secondaryLabelColor
             return field
         }
-        let sizeRow = NSStackView(views: [heightField, unit(unitName), label(AngleStyle.caption("Rotation", .amount)), rotationField])
+        let sizeRow = NSStackView(views: [heightField, unit(unitName), label(AngleStyle.caption("Rotation", .direction)), rotationField])
         sizeRow.spacing = 5
         let widthRow = NSStackView(views: [widthField, unit(unitName), label("Spacing"), spacingField])
         widthRow.spacing = 5
@@ -779,7 +779,7 @@ final class TextFormatPanel: NSViewController {
         f.family = selectedFamily
         f.face = facePopup.titleOfSelectedItem ?? f.face
         if let height = number(heightField), height > 0 { f.height = height } else { heightField.stringValue = LineType.format(f.height) }
-        f.rotationDegrees = number(rotationField).map { AngleStyle.degrees($0, .amount) } ?? 0
+        f.rotationDegrees = number(rotationField).map { AngleStyle.degrees($0, .direction) } ?? 0
         f.justify = TextJustify.allCases[max(0, justifyControl.selectedSegment)]
         f.underline = underlineBox.state == .on
         f.boxWidth = number(widthField).flatMap { $0 > 0 ? $0 : nil }

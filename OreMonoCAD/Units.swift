@@ -146,7 +146,10 @@ enum LengthStyle {
     static func feetInches(_ length: CGFloat, precision: Int = 4) -> String? {
         guard isActive, let perUnit = inchesPerUnit, length.isFinite else { return nil }
         let denominator = 1 << max(0, min(precision, 6))
-        var steps = Int((abs(length) * perUnit * CGFloat(denominator)).rounded())
+        let raw = (abs(length) * perUnit * CGFloat(denominator)).rounded()
+        // an absurd length (a broken file) would not fit a whole number – it is shown as a plain number then
+        guard raw < 1e15 else { return nil }
+        var steps = Int(raw)
         let sign = length < 0 && steps > 0 ? "-" : ""
         let feet = steps / (12 * denominator)
         steps -= feet * 12 * denominator

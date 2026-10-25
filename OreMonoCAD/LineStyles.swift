@@ -327,7 +327,7 @@ final class LineTypeEditor: NSObject, NSTextFieldDelegate {
     private let preview = LineTypePreviewView(frame: NSRect(x: 0, y: 0, width: 360, height: 70))
     private let errorLabel = NSTextField(labelWithString: "")
 
-    /// Shows the dialog; returns the new line type, or nil if cancelled.
+    /// Shows the dialog; returns the new line type, or nil if canceled.
     func run(suggestedName: String = "") -> LineType? {
         let alert = NSAlert()
         alert.messageText = "Custom Linetype"
