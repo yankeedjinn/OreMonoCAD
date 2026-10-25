@@ -159,7 +159,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the part to remove – every object cuts by default. Shift-click picks specific cutting edges. The red preview shows what will go. Construction lines can be trimmed too: cut on one side they become rays, on both sides ordinary lines."),
         .extend: (
             summary: "Lengthens a line, an arc or an open polyline up to the nearest object in its way.",
-            usage: "Click near the end you want to extend. Shift-click picks specific boundaries. The green preview shows the result."),
+            usage: "Click near the end you want to extend. Shift-click picks specific boundaries. The green preview shows the result. ⌥-click two lines (or the two end segments of one polyline, which then closes) to make a sharp corner: both are extended or shortened to the point where they would meet, the clicked sides stay."),
         .offset: (
             summary: "Creates a parallel copy of a line, circle, arc, ellipse, polyline or spline at a given distance.",
             usage: "Type the distance (or 0 = through a point), click the object, then click the side. Repeats until Esc. Without a distance the copy goes through the clicked point. An ellipse or a spline gives a polyline that follows it closely."),
@@ -171,7 +171,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Whole drawing = its visible objects on unlocked layers, Current selection = all selected objects; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
         .fillet: (
             summary: "Rounds the corner between two lines or polyline segments with an arc.",
-            usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; a polyline end + a line are joined into one polyline."),
+            usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; the first and the last segment of an open polyline close it; a polyline end + a line are joined into one polyline."),
         .chamfer: (
             summary: "Cuts off (bevels) the corner between two lines or polyline segments with a straight line.",
             usage: "Type the two distances (Tab = next field; one value = both the same, 0 and 0 = sharp corner), then click both lines on the sides you want to keep – the first distance is measured on the first line from the corner. Two neighboring segments of one polyline are beveled inside the polyline; a polyline end + a line are joined into one polyline."),
@@ -186,7 +186,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click a point or drag a box around points (or click its two corners) · Shift-click adds or removes · drag a selected point (or click it, then click the target) to move all selected points · snap, ortho and typed distance work."),
         .magicTrim: (
             summary: "Trims many parts with one stroke; a click extends an object like Extend.",
-            usage: "Drag a freehand line across the parts to remove. A part ends at the nearest intersection or polyline corner, so one side of a polyline can be removed; an object that crosses nothing is removed whole. Construction lines work too – trimmed on both sides they become ordinary lines. Click near the end of a line, arc or open polyline to extend it to the nearest object."),
+            usage: "Drag a freehand line across the parts to remove. A part ends at the nearest intersection or polyline corner, so one side of a polyline can be removed; an object that crosses nothing is removed whole. Construction lines work too – trimmed on both sides they become ordinary lines. Click near the end of a line, arc or open polyline to extend it to the nearest object. ⌥-click two lines (or the two end segments of one polyline, which then closes) to make a sharp corner where they would meet – the clicked sides stay."),
         .breakObject: (
             summary: "Removes the part of a line, arc, circle, ellipse, polyline or spline between two points – opens a gap.",
             usage: "Click the object at the first break point, then the second point (snaps work; the point is taken on the object). On a circle, an ellipse or a closed polyline the part counter-clockwise from the first to the second point is removed. Clicking the same point twice splits the object without a gap."),
@@ -1151,7 +1151,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         return AppSettings.cadCrosshair ? CADEditorView.invisibleCursor : .crosshair
     }
 
-    /// After a change in Settings › Cursor & Mouse.
+    /// After a change in Settings › Cursor or Mouse.
     func applyCursorSettings() {
         crosshair.isHidden = !AppSettings.cadCrosshair
         crosshair.needsLayout = true
@@ -1397,7 +1397,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: State
 
     private let backgroundColor = Theme.canvasBackground
-    /// Click selection tolerance (px) – half of the pick box from Settings › Cursor & Mouse.
+    /// Click selection tolerance (px) – half of the pick box from Settings › Cursor.
     private var pickTolerance: CGFloat { return max(3, AppSettings.pickboxSize / 2 + 1) }
     private let snapTolerance: CGFloat = 12     // px
 
@@ -1866,11 +1866,17 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 ? "Trim: click the part to remove (all objects cut) · Shift-click = use only chosen cutting edges"
                 : "Trim: click the part to remove · cutting edges: \(edges.count) · Shift-click = change · Esc = clear"
         case .extend:
-            text = edges.isEmpty
-                ? "Extend: click near the end of a line, arc or open polyline (extends to the nearest object) · Shift-click = choose boundaries"
-                : "Extend: click near the end of a line, arc or open polyline · boundaries: \(edges.count) · Shift-click = change · Esc = clear"
+            if !picked.isEmpty {
+                text = cornerPrompt
+            } else {
+                text = edges.isEmpty
+                    ? "Extend: click near the end of a line, arc or open polyline (extends to the nearest object) · Shift-click = choose boundaries · ⌥-click two lines = corner"
+                    : "Extend: click near the end of a line, arc or open polyline · boundaries: \(edges.count) · Shift-click = change · Esc = clear"
+            }
         case .magicTrim:
-            text = "MagicTrim: drag across the parts to remove · click near an end to extend it"
+            text = picked.isEmpty
+                ? "MagicTrim: drag across the parts to remove · click near an end to extend it · ⌥-click two lines = corner"
+                : cornerPrompt
         case .breakObject:
             text = picked.isEmpty
                 ? "Break: click the object at the first break point (snaps work)"
@@ -2762,7 +2768,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     hoverRemoved = detail.removed
                 }
             case .extend, .magicTrim:
-                if let target = entity(at: worldPoint, where: { CADEditorView.isExtendable($0) }),
+                if let first = picked.first {
+                    // the corner the second click would make
+                    if let target = entity(at: worldPoint, where: { EditOperations.canFillet($0) }),
+                       let result = try? EditOperations.fillet(first.entity, click1: first.click, target, click2: worldPoint, radius: 0) {
+                        hoverAdded = result.added
+                    }
+                } else if let target = entity(at: worldPoint, where: { CADEditorView.isExtendable($0) }),
                    let extended = EditOperations.extend(target, near: worldPoint, boundaries: cuttingEdges) {
                     hoverAdded = [extended]
                 }
@@ -4298,6 +4310,32 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         } else {
             onMessage?("No boundary found in that direction.")
         }
+    }
+
+    private var cornerPrompt: String {
+        return "\(currentTool.title) – corner: click the second line or polyline segment on the side to keep · Esc = cancel"
+    }
+
+    /// ⌥-click in Extend or MagicTrim: two lines (or straight polyline segments) are extended or shortened
+    /// to their (apparent) intersection – the same as Fillet with radius 0. The clicked side of each one stays.
+    private func cornerClick(at point: CGPoint) {
+        guard let target = entity(at: point, where: { EditOperations.canFillet($0) }) else {
+            onMessage?("A corner needs lines or straight polyline segments – click one of them.")
+            return
+        }
+        guard let first = picked.first else {
+            picked = [(target, point)]
+            stateChanged()
+            return
+        }
+        picked.removeAll()
+        do {
+            let result = try EditOperations.fillet(first.entity, click1: first.click, target, click2: point, radius: 0)
+            onCommit?(result.removed, result.added, "Corner")
+        } catch {
+            onMessage?(error.localizedDescription)
+        }
+        stateChanged()
     }
 
     private func magicTrimFence(_ screenPoints: [CGPoint]) {
@@ -6124,6 +6162,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         case .measure:
             measureClick(event)
 
+        case .extend where event.modifierFlags.contains(.option) || !picked.isEmpty:
+            cornerClick(at: worldPoint)
+            updateHover(at: worldPoint)
+
+        case .magicTrim where event.modifierFlags.contains(.option) || !picked.isEmpty:
+            cornerClick(at: worldPoint)
+            updateHover(at: worldPoint)
+
         case .trim, .extend:
             if event.modifierFlags.contains(.shift) {
                 // Shift+click = select/deselect a cutting edge or boundary
@@ -6505,7 +6551,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Waits until the right button is released or the hold time (Settings › Cursor & Mouse) has passed;
+    /// Waits until the right button is released or the hold time (Settings › Mouse) has passed;
     /// true = it is still held. A shorter click finishes or repeats commands.
     private func isRightButtonHeld() -> Bool {
         let release = window?.nextEvent(matching: .rightMouseUp, until: Date(timeIntervalSinceNow: AppSettings.contextMenuHoldTime),

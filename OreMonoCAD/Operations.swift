@@ -758,6 +758,15 @@ enum EditOperations {
         let n = polyline.vertices.count
         let s1 = nearestSegment(of: polyline, to: click1)
         let s2 = nearestSegment(of: polyline, to: click2)
+        // the first and the last segment of an open polyline: its two ends meet and it closes
+        // (with only two segments a sharp corner can only mean the ends – their shared vertex is sharp already)
+        if !polyline.closed, count >= 2, Set([s1, s2]) == Set([0, count - 1]), count > 2 || shape.isSharp {
+            // the first chamfer distance belongs to the segment that was clicked first
+            var endsShape = shape
+            if s1 != 0, case let .bevel(first, second) = shape { endsShape = .bevel(first: second, second: first) }
+            return try polylineEndsCorner(polyline, startClick: s1 == 0 ? click1 : click2,
+                                          endClick: s1 == 0 ? click2 : click1, shape: endsShape)
+        }
         // shared vertex k: segment (k−1) ends at k, segment k starts there
         let k: Int
         if s2 == s1 + 1 { k = s2 }
@@ -816,6 +825,51 @@ enum EditOperations {
         let cleaned = removeDuplicateVertices(vertices, bulges, closed: polyline.closed)
         let result = Polyline(vertices: cleaned.vertices, closed: polyline.closed, bulges: cleaned.bulges,
                               layer: polyline.layer, color: polyline.color)
+        result.width = polyline.width
+        result.lineWeight = polyline.lineWeight
+        result.lineTypeScale = polyline.lineTypeScale
+        return result
+    }
+
+    /// Fillet / chamfer / sharp corner between the first and the last segment of an open polyline:
+    /// both ends are extended or shortened towards their (apparent) intersection and the polyline is closed.
+    private static func polylineEndsCorner(_ polyline: Polyline, startClick: CGPoint, endClick: CGPoint,
+                                           shape: CornerShape) throws -> Polyline {
+        let name = shape.name
+        let n = polyline.vertices.count
+        let last = polyline.segmentCount - 1
+        guard polyline.bulge(at: 0) == 0, polyline.bulge(at: last) == 0 else {
+            throw EditError(message: "\(name) needs straight segments – one of them is an arc.")
+        }
+        let (a1, b1) = polyline.segmentEnds(0)
+        let (a2, b2) = polyline.segmentEnds(last)
+        let parts = try cornerParts(a1, b1, click1: startClick, a2, b2, click2: endClick, shape: shape)
+        // the first segment keeps its second vertex, the last one its last-but-one vertex
+        let tolerance = max(Geometry.distance(a1, b1), Geometry.distance(a2, b2), 1) * 1e-7
+        guard let kept1 = parts.kept1, let kept2 = parts.kept2 else {
+            throw EditError(message: "\(name) would remove a whole end segment of the polyline.")
+        }
+        guard Geometry.distance(kept1.end, b1) <= tolerance, Geometry.distance(kept2.start, a2) <= tolerance else {
+            throw EditError(message: "Click the polyline on the side you want to keep.")
+        }
+
+        var vertices = polyline.vertices
+        var bulges = (0..<n).map { polyline.bulge(at: $0) }
+        vertices[0] = kept1.start
+        vertices[n - 1] = kept2.end
+        if Geometry.distance(kept1.start, kept2.end) <= tolerance {
+            // sharp corner: the last vertex is the first one – the original last segment becomes the closing one
+            vertices.removeLast()
+            bulges.removeLast()
+        } else if let arc = parts.arc {
+            // the closing segment runs from the new last vertex to the new first one
+            let arcStart = arc.center + CGPoint(x: cos(arc.start), y: sin(arc.start)) * arc.radius
+            let sweep = Geometry.ccwDelta(from: arc.start, to: arc.end)
+            bulges[n - 1] = Polyline.bulge(forSweep: Geometry.distance(arcStart, kept2.end) <= tolerance ? sweep : -sweep)
+        } else {
+            bulges[n - 1] = 0
+        }
+        let result = Polyline(vertices: vertices, closed: true, bulges: bulges, layer: polyline.layer, color: polyline.color)
         result.width = polyline.width
         result.lineWeight = polyline.lineWeight
         result.lineTypeScale = polyline.lineTypeScale

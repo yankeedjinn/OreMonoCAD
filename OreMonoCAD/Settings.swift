@@ -276,7 +276,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var actions: [MenuAction] = []
 
     init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 560),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Settings"
         window.isReleasedWhenClosed = false
@@ -553,7 +553,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let row = { (caption: String, views: [NSView]) -> NSView in
             let label = NSTextField(labelWithString: caption)
             label.alignment = .right
-            label.widthAnchor.constraint(equalToConstant: 110).isActive = true
+            label.widthAnchor.constraint(equalToConstant: 150).isActive = true
             let stack = NSStackView(views: [label] + views)
             stack.spacing = 8
             return stack
@@ -577,9 +577,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         speedSlider.isContinuous = true
         speedSlider.numberOfTickMarks = 9
         let speedLabel = NSTextField(labelWithString: "")
-        let toCursor = NSButton(checkboxWithTitle: "Zoom toward the cursor (otherwise toward the middle of the drawing area)", target: nil, action: nil)
+        let toCursor = NSButton(checkboxWithTitle: "Zoom toward the cursor", target: nil, action: nil)
         toCursor.state = AppSettings.zoomToCursor ? .on : .off
-        let trackpad = NSButton(checkboxWithTitle: "Trackpad and Magic Mouse: two-finger scrolling zooms (otherwise it pans)", target: nil, action: nil)
+        let trackpad = NSButton(checkboxWithTitle: "Two-finger scrolling zooms (trackpad, Magic Mouse)", target: nil, action: nil)
         trackpad.state = AppSettings.trackpadScrollZooms ? .on : .off
         let holdSlider = NSSlider(value: AppSettings.contextMenuHoldTime, minValue: 0.25, maxValue: 1.5, target: nil, action: nil)
         holdSlider.widthAnchor.constraint(equalToConstant: 260).isActive = true
@@ -609,20 +609,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let mouseRow = { (caption: String, views: [NSView]) -> NSView in
             let label = NSTextField(labelWithString: caption)
             label.alignment = .right
-            label.widthAnchor.constraint(equalToConstant: 110).isActive = true
+            label.widthAnchor.constraint(equalToConstant: 150).isActive = true
             let stack = NSStackView(views: [label] + views)
             stack.spacing = 8
             return stack
         }
-        let cursorMouse = pane(cursorViews + [
-            separator(),
+        // two tabs – together they don't fit the window's height
+        let cursor = pane(cursorViews)
+        let mouse = pane([
             mouseRow("Wheel direction:", [direction]),
             mouseRow("Zoom speed:", [speedSlider, speedLabel]),
             mouseRow("", [toCursor]),
             mouseRow("", [trackpad]),
             mouseRow("Context menu hold time:", [holdSlider, holdLabel]),
             note("Hold the right button this long in the drawing (with the Select tool) for the context menu – Cut, Copy, Paste, Draw Order and more; Control-click opens it at once. A shorter right-click finishes or repeats commands as before."),
-            note("While zooming with the wheel: hold Shift for fine steps (¼ speed), Option for fast zoom (3×). With a trackpad, ⌘ + two-finger scroll always zooms and pinching zooms too. If the wheel zooms the wrong way, choose Reversed. Double-click the middle button for Zoom Extents.")
+            note("While zooming with the wheel: hold Shift for fine steps (¼ speed), Option for fast zoom (3×). With a trackpad, ⌘ + two-finger scroll always zooms and pinching zooms too. If the wheel zooms the wrong way, choose Reversed. Double-click the middle button for Zoom Extents. Without Zoom toward the cursor the view zooms toward the middle of the drawing area; without two-finger zooming, two-finger scrolling pans the view.")
         ])
 
         // Object snap
@@ -636,7 +637,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let keys = shortcutsPane!.view
 
         for (title, view) in [("General", general), ("Drawing", drawing), ("Styles", styles),
-                              ("Cursor & Mouse", cursorMouse), ("Snap", snap), ("Shortcuts", keys)] {
+                              ("Cursor", cursor), ("Mouse", mouse), ("Snap", snap), ("Shortcuts", keys)] {
             let item = NSTabViewItem(identifier: title)
             item.label = title
             item.view = view

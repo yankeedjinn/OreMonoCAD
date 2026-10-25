@@ -261,8 +261,18 @@ final class ToolbarView: NSView, NSMenuDelegate {
     override var isFlipped: Bool { return true }   // laid out from top to bottom
 
     /// Panel content in a scroll view – on a small screen the panel can be scrolled with the wheel.
-    private let scroll = NSScrollView()
+    private let scroll = OverlayScrollView()
     private let content = FlippedToolbarContent()
+
+    /// Always keeps the thin overlay scroller. With a mouse connected macOS switches scroll views
+    /// to a wide, always visible scroller (and switches them back on its own whenever the setting
+    /// changes), which would cover the right column of icons and cut off the group captions.
+    private final class OverlayScrollView: NSScrollView {
+        override var scrollerStyle: NSScroller.Style {
+            get { super.scrollerStyle }
+            set { super.scrollerStyle = .overlay }
+        }
+    }
 
     private final class FlippedToolbarContent: NSView {
         var menuProvider: (() -> NSMenu?)?
