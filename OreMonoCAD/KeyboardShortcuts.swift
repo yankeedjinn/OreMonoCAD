@@ -80,7 +80,8 @@ final class KeyboardShortcutsWindowController: NSWindowController {
             Row(key: "⇧ + letter", action: "Tool shortcut with Shift (e.g. ⇧P Polygon) – only with nothing in progress and nothing being typed; while drawing Shift stays Ortho (⇧Z works always)"),
             Row(key: "Shift (hold)", action: "Ortho while moving the mouse; a square in Rectangle, Wipeout and Revision Cloud; 15° steps in Rotate and Arc"),
             Row(key: "⌥ (tap)", action: "In Move, Rotate and while dragging a selection: switch to copying (the originals stay) and back"),
-            Row(key: "x5  /5  ↩", action: "Right after placing a copy: five copies repeating the step (distance or angle) / five copies spread up to the placed one")
+            Row(key: "⌥ + click", action: "In Extend and MagicTrim: click two lines (or the two end segments of one polyline) for a sharp corner where they meet"),
+            Row(key: "x5  /5  ↩", action: "Right after placing a copy: five copies repeating the step (distance or angle) / five copies spread between the original and the copy")
         ]))
 
         sections.append(("Drawing aids (always work)", [

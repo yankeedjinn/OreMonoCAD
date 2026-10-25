@@ -826,6 +826,8 @@ enum EditOperations {
         let result = Polyline(vertices: cleaned.vertices, closed: polyline.closed, bulges: cleaned.bulges,
                               layer: polyline.layer, color: polyline.color)
         result.width = polyline.width
+        // a wall keeps being a wall (it is joined with new walls); one with an arc corner is left out of joining anyway
+        result.isWall = polyline.isWall
         result.lineWeight = polyline.lineWeight
         result.lineTypeScale = polyline.lineTypeScale
         return result

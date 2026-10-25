@@ -637,6 +637,10 @@ final class TextFormatPanel: NSViewController {
     var onChange: ((TextFormat) -> Void)?
     private(set) var format: TextFormat
     private let unitName: String
+    /// The UCS angle in degrees: the rotation is shown and typed relative to it, as in Properties.
+    private let ucsDegrees: CGFloat
+    /// The rotation as first shown – while the field still says it, the exact rotation is kept (no rounding drift).
+    private var shownRotation = ""
 
     private let familyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let facePopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -648,9 +652,10 @@ final class TextFormatPanel: NSViewController {
     private let widthField = NSTextField()
     private let spacingField = NSTextField()
 
-    init(format: TextFormat, unitName: String) {
+    init(format: TextFormat, unitName: String, ucsDegrees: CGFloat = 0) {
         self.format = format
         self.unitName = unitName
+        self.ucsDegrees = ucsDegrees
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -690,7 +695,8 @@ final class TextFormatPanel: NSViewController {
         facePopup.action = #selector(changed)
 
         setupNumber(heightField, format.height)
-        setupNumber(rotationField, AngleStyle.shown(format.rotationDegrees, .direction))
+        setupNumber(rotationField, AngleStyle.shown(format.rotationDegrees - ucsDegrees, .direction))
+        shownRotation = rotationField.stringValue
         setupNumber(widthField, format.boxWidth)
         setupNumber(spacingField, format.lineSpacing, width: 48)
         widthField.placeholderString = "no wrap"
@@ -779,7 +785,10 @@ final class TextFormatPanel: NSViewController {
         f.family = selectedFamily
         f.face = facePopup.titleOfSelectedItem ?? f.face
         if let height = number(heightField), height > 0 { f.height = height } else { heightField.stringValue = LineType.format(f.height) }
-        f.rotationDegrees = number(rotationField).map { AngleStyle.degrees($0, .direction) } ?? 0
+        if rotationField.stringValue != shownRotation {
+            f.rotationDegrees = number(rotationField).map { AngleStyle.degrees($0, .direction) + ucsDegrees } ?? ucsDegrees
+            shownRotation = rotationField.stringValue
+        }
         f.justify = TextJustify.allCases[max(0, justifyControl.selectedSegment)]
         f.underline = underlineBox.state == .on
         f.boxWidth = number(widthField).flatMap { $0 > 0 ? $0 : nil }

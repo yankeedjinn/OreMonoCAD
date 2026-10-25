@@ -119,7 +119,9 @@ nonisolated struct RGBARecord: Codable {
     }
 
     var color: NSColor {
-        return NSColor(srgbRed: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a))
+        // a damaged file can hold “nan” – such a component would stop the app where colors become numbers (plot styles)
+        func clean(_ value: Double, _ fallback: Double) -> CGFloat { return CGFloat(value.isFinite ? min(max(value, 0), 1) : fallback) }
+        return NSColor(srgbRed: clean(r, 0), green: clean(g, 0), blue: clean(b, 0), alpha: clean(a, 1))
     }
 }
 
@@ -214,7 +216,7 @@ nonisolated struct LayerRecord: Codable {
                      isLocked: locked ?? false,
                      isPrintable: printable ?? true,
                      lineType: lineType?.lineType ?? .continuous,
-                     lineWeight: lineWeight ?? LineWeights.defaultWeight)
+                     lineWeight: lineWeight.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? LineWeights.defaultWeight)
     }
 }
 
@@ -477,7 +479,7 @@ enum NativeEntityCoder {
             guard let corners = r.points, corners.count == 3, let data = r.imageData, !data.isEmpty else { return nil }
             let image = ImageEntity(data: data, isPDF: r.kind == "pdf", page: max(r.page ?? 1, 1), fileName: r.text ?? "",
                                     origin: corners[0], xCorner: corners[1], yCorner: corners[2], layer: layer, color: color)
-            image.opacity = min(max(r.opacity ?? 1, 0.05), 1)
+            image.opacity = min(max(r.opacity.flatMap { $0.isFinite ? $0 : nil } ?? 1, 0.05), 1)
             entity = image
         case "wipeout":
             guard let corners = r.points, corners.count >= 3 else { return nil }
@@ -511,10 +513,11 @@ enum NativeEntityCoder {
         case "dimension":
             guard let kindName = r.kind, let kind = DimensionKind(rawValue: kindName),
                   let points = r.points, !points.isEmpty else { return nil }
+            let height = r.textHeight.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 2.5
             let dimension = DimensionEntity(kind: kind, points: points, radius: r.radius ?? 0, text: r.text ?? "",
-                                            textHeight: r.textHeight ?? 2.5, layer: layer, color: color)
-            if let arrow = r.arrowSize { dimension.arrowSize = arrow }
-            if let precision = r.precision { dimension.precision = precision }
+                                            textHeight: height, layer: layer, color: color)
+            if let arrow = r.arrowSize, arrow.isFinite, arrow >= 0 { dimension.arrowSize = arrow }
+            if let precision = r.precision { dimension.precision = min(max(precision, 0), 8) }
             dimension.belowText = r.belowText ?? ""
             dimension.arrowStyle = r.arrowStyle.flatMap { DimArrowStyle(rawValue: $0) } ?? .arrow
             dimension.fixedAngle = r.dimAngle
@@ -534,7 +537,7 @@ enum NativeEntityCoder {
             text.justify = r.justify.flatMap { TextJustify(rawValue: $0) } ?? .left
             text.underline = r.underline ?? false
             text.boxWidth = r.width.flatMap { $0 > 0 ? $0 : nil }
-            text.lineSpacing = r.lineSpacing ?? 1
+            text.lineSpacing = r.lineSpacing.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1
             text.widthFactor = r.widthFactor.flatMap { $0 > 0.05 && $0 < 20 ? $0 : nil } ?? 1
             text.isRoomLabel = r.kind == "room"
             entity = text
@@ -561,8 +564,9 @@ enum NativeEntityCoder {
         default:
             entity = nil
         }
-        entity?.lineWeight = r.lineWeight
-        entity?.lineTypeScale = r.lineTypeScale
+        // nil = by layer / 1; an invalid number from a damaged file counts as not set
+        entity?.lineWeight = r.lineWeight.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        entity?.lineTypeScale = r.lineTypeScale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         entity?.drawOrder = r.drawOrder ?? 0
         entity?.groupID = r.group
         return entity

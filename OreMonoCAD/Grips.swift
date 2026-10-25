@@ -332,6 +332,7 @@ enum Grips {
     private static func rebuilt(_ polyline: Polyline, _ vertices: [CGPoint], _ bulges: [CGFloat]) -> Polyline {
         let copy = Polyline(vertices: vertices, closed: polyline.closed, bulges: bulges, layer: polyline.layer, color: polyline.color)
         copy.width = polyline.width
+        copy.isWall = polyline.isWall
         return polyline.copyStyle(to: copy)
     }
 

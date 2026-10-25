@@ -174,7 +174,7 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; the first and the last segment of an open polyline close it; a polyline end + a line are joined into one polyline."),
         .chamfer: (
             summary: "Cuts off (bevels) the corner between two lines or polyline segments with a straight line.",
-            usage: "Type the two distances (Tab = next field; one value = both the same, 0 and 0 = sharp corner), then click both lines on the sides you want to keep – the first distance is measured on the first line from the corner. Two neighboring segments of one polyline are beveled inside the polyline; a polyline end + a line are joined into one polyline."),
+            usage: "Type the two distances (Tab = next field; one value = both the same, 0 and 0 = sharp corner), then click both lines on the sides you want to keep – the first distance is measured on the first line from the corner. Two neighboring segments of one polyline are beveled inside the polyline; the first and the last segment of an open polyline close it; a polyline end + a line are joined into one polyline."),
         .explode: (
             summary: "Breaks polylines (and rectangles) into separate lines and arcs, and blocks into the objects they are made of.",
             usage: "Select the polylines or blocks and press ↩ – or select them first and then pick Explode."),
@@ -997,7 +997,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     private func showInlineFormatPanel() {
         guard let session = inlineText else { return }
-        let panel = TextFormatPanel(format: session.format, unitName: drawingUnits.suffix)
+        let panel = TextFormatPanel(format: session.format, unitName: drawingUnits.suffix,
+                                    ucsDegrees: Geometry.normalizeAngle(ucsAngle) * 180 / .pi)
         panel.onChange = { [weak self] format in
             guard let self = self, let session = self.inlineText else { return }
             session.format = format
@@ -3594,7 +3595,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         return true
     }
 
-    /// x5 / *5: the placed copy becomes five copies repeating its step; /5: five copies spread up to the placed one.
+    /// x5 / *5: the placed copy becomes five copies repeating its step; /5: five copies spread between the original and the placed one.
     private func applyCopyCount() {
         guard let run = lastCopyRun, let entry = copyCountEntry, let op = entry.first else { return }
         copyCountEntry = nil
@@ -3636,7 +3637,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if run.selectsCopies { selectionManager?.select(copies) }
         lastCopyRun = (run.originals, run.step, copies, run.selectsCopies)
         let noun = count == 1 ? "1 copy" : "\(count) copies"
-        onMessage?(op == "/" ? "\(noun) spread up to the placed one" : "\(noun) repeating the step")
+        onMessage?(op == "/" ? "\(noun) spread between the original and the copy" : "\(noun) repeating the step")
         stateChanged()
     }
 
@@ -4332,6 +4333,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         do {
             let result = try EditOperations.fillet(first.entity, click1: first.click, target, click2: point, radius: 0)
             onCommit?(result.removed, result.added, "Corner")
+            // a chosen boundary that was reshaped stays a boundary
+            if result.removed.contains(where: { r in edges.contains { $0 === r } }) {
+                edges.removeAll { e in result.removed.contains { $0 === e } }
+                edges.append(contentsOf: result.added)
+            }
         } catch {
             onMessage?(error.localizedDescription)
         }
@@ -6847,7 +6853,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return
         }
 
-        // right after a copy is placed: x5 / *5 = five copies repeating the step, /5 = five copies spread up to the placed one
+        // right after a copy is placed: x5 / *5 = five copies repeating the step, /5 = five copies spread between the original and the placed one
         if lastCopyRun != nil, modifiers.isEmpty, handleCopyCountKey(event) { return }
 
         // the letters inside a tool work with or without Shift (Shift may be held for Ortho) – ⌥ + a letter is a tool shortcut (⌥T, ⌥C…)

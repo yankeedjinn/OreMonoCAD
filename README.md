@@ -8,7 +8,7 @@ It is a personal project: built for one architect's everyday drawing, kept delib
 
 - Lines, polylines (with a constant width), rectangles, arcs, circles, ellipses, polygons, splines, construction lines
 - Move, Copy, Rotate, Scale, Mirror, Align, Array, Edit Points, Match Properties
-- Trim, MagicTrim (drag across parts to remove them, click to extend), Extend, Break, Fillet, Chamfer, Offset, Join, Explode
+- Trim, MagicTrim (drag across parts to remove them, click to extend), Extend, Break, Fillet, Chamfer, Offset, Join, Explode – in Extend and MagicTrim ⌥-click two lines for a sharp corner
 - Dimensions (linear, aligned, continue, angular, radius, diameter), text, leaders
 - Hatches with a pick-inside-area fill, Rebuild Hatch and Cut Out of Hatch
 - Walls and Wall from Curve (a new wall joins the walls it touches or crosses), room labels with floor area, revision clouds, wipeouts, scale bar and north arrow

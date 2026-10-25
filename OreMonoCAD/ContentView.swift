@@ -789,8 +789,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "°", with: "")
-            .replacingOccurrences(of: "gon", with: "")
+            .replacingOccurrences(of: "gons", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "gon", with: "", options: .caseInsensitive)
         guard let value = ExpressionEvaluator.evaluate(text.trimmingCharacters(in: .whitespaces)), value.isFinite else {
+            statusBar.showMessage("\u{201C}\(field.stringValue)\u{201D} is not a valid angle.")
             NSSound.beep()
             return nil
         }
@@ -5721,8 +5723,12 @@ extension MainViewController {
     }
 
     /// Start editing a block. `reference` = in place of this insertion (nil = standalone).
-    func beginBlockEdit(definition: BlockDefinition, reference: BlockReference?) {
+    func beginBlockEdit(definition: BlockDefinition, reference requested: BlockReference?) {
         let tab = activeTab
+        // a copy stretched differently in X and Y (from DXF) cannot be edited in place: circles, arcs and texts
+        // would not stay what they are – the block is edited on its own then, in its own coordinates
+        let stretched = requested?.isStretched ?? false
+        let reference = stretched ? nil : requested
         if let session = tab.blockEdit {
             statusBar.showMessage("The block \u{201C}\(session.definition.name)\u{201D} is being edited \u{2013} save or discard it first "
                                   + "(blocks inside it can be edited afterwards)")
@@ -5769,7 +5775,8 @@ extension MainViewController {
         editorView.needsDisplay = true
         view.window?.makeFirstResponder(editorView)
         let copies = blockUseCount(definition)
-        statusBar.showMessage("Editing the block \u{201C}\(definition.name)\u{201D} \u{2013} all tools work \u{00B7} Save Block Changes "
+        statusBar.showMessage((stretched ? "This copy is stretched, so the block is edited on its own \u{00B7} " : "")
+                              + "Editing the block \u{201C}\(definition.name)\u{201D} \u{2013} all tools work \u{00B7} Save Block Changes "
                               + "updates \(copies == 1 ? "its copy" : "all \(copies) copies") \u{00B7} Discard Block Changes leaves it as it was")
         Log.info("Edit block: \(definition.name) (\(reference == nil ? "on its own" : "in place"), \(definition.entities.count) objects)")
     }

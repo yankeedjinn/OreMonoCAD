@@ -190,6 +190,8 @@ enum LengthStyle {
             }
         }
         let total = (feet * 12 + inches) / Double(perUnit)
+        // “1e400'” or “nan"” is not a length
+        guard total.isFinite else { return nil }
         return negative ? -total : total
     }
 }
