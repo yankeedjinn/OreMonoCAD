@@ -29,6 +29,8 @@ final class DrawingTab {
     var changeCount = 0
     var autosavedChangeCount = 0
     var lastAutosave = Date()
+    /// An auto-save of the current unsaved work exists (false after saving, opening or closing).
+    var hasAutosave = false
     /// Name of a recovered drawing or a backup that does not have its own file yet.
     var customTitle: String?
     /// Where to offer saving (recovered drawing, opened backup) – Save asks and pre-fills this location.

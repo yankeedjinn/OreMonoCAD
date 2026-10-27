@@ -368,6 +368,13 @@ final class DynamicInputView: NSView, NSTextFieldDelegate {
 
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
+        // the space bar confirms the typed value like ↩ (it is never part of a value)
+        if field.stringValue.contains(" ") {
+            field.stringValue = field.stringValue.replacingOccurrences(of: " ", with: "")
+            valueChanged(in: field)
+            onCommit?()
+            return
+        }
         valueChanged(in: field)
     }
 

@@ -1787,7 +1787,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             let isOn = isVisibleColumn ? layer.isVisible : layer.isLocked
             let symbol = isVisibleColumn ? (isOn ? "eye" : "eye.slash") : (isOn ? "lock.fill" : "lock.open")
             let tip = isVisibleColumn
-                ? (isOn ? "Visible – click to hide · ⌥-click = show only this layer" : "Hidden – click to show")
+                ? (isOn ? "Visible – click to hide · ⌥-click = show only this layer (again = show all)" : "Hidden – click to show · ⌥-click = show only this layer")
                 : (isOn ? "Locked – click to unlock" : "Unlocked – click to lock (objects cannot be selected or edited)")
             let button = NSButton(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
@@ -1951,7 +1951,19 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
     @objc private func toggleVisible(_ sender: NSButton) {
         guard let name = layerName(forTag: sender.tag) else { return }
+        if optionClick {
+            isolate(name)
+            return
+        }
         applyChange(to: name) { $0.isVisible = sender.state == .on }
+    }
+
+    /// Was the click that sent the action made with ⌥ held? (The click event itself, with the live keyboard state as a fallback.)
+    private var optionClick: Bool {
+        if let event = NSApp.currentEvent, [.leftMouseDown, .leftMouseUp].contains(event.type) {
+            return event.modifierFlags.contains(.option)
+        }
+        return NSEvent.modifierFlags.contains(.option)
     }
 
     @objc private func toggleLocked(_ sender: NSButton) {
@@ -1967,7 +1979,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     /// The eye in the compact panel (⌥-click = only this layer visible).
     @objc private func flipVisible(_ sender: NSButton) {
         guard let name = layerName(forTag: sender.tag) else { return }
-        if NSEvent.modifierFlags.contains(.option) {
+        if optionClick {
             isolate(name)
             return
         }
@@ -1979,12 +1991,14 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         applyChange(to: name) { $0.isLocked.toggle() }
     }
 
-    /// Shows only the given layer, hides the others.
+    /// Shows only the given layer, hides the others. When it already is the only visible layer, shows all layers again.
     private func isolate(_ name: String) {
         guard let manager = layerManager else { return }
+        let all = manager.getAllLayers()
+        let alreadyIsolated = all.allSatisfy { $0.isVisible == ($0.name == name) }
         suppressReload = true
-        for layer in manager.getAllLayers() {
-            let visible = layer.name == name
+        for layer in all {
+            let visible = alreadyIsolated || layer.name == name
             if layer.isVisible != visible { manager.updateLayer(layer.name) { $0.isVisible = visible } }
         }
         suppressReload = false

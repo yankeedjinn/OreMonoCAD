@@ -3925,6 +3925,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     }
 
     @objc func selectAllEntities(_ sender: Any?) {
+        // ⌘A while typing (text on the canvas, a value, a dialog field) selects that text, not the drawing
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.isSelectable {
+            textView.selectAll(sender)
+            return
+        }
         let selectable = document.getAllEntities().filter {
             layerManager.isLayerVisible($0.layer) && !layerManager.isLayerLocked($0.layer)
         }
@@ -4513,7 +4518,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     @objc func documentSettings(_ sender: Any?) {
         // Convert Units changes the model and the blocks – not while a block is being edited
         // (only the edited block would be converted, and its own Undo ends with the edit)
-        guard ensureNoBlockEdit() else { return }
+        guard ensureNoBlockEdit(reason: "Document settings change the whole drawing.") else { return }
         // units and grid belong to the model – from a layout it first switches to the model
         if activeTab.activeLayout != nil {
             activateSpace(nil)
@@ -4672,7 +4677,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return
         }
         // the scale (and the offer to rescale hatches) belongs to the drawing, not to a block being edited
-        guard ensureNoBlockEdit() else {
+        guard ensureNoBlockEdit(reason: "The scale \(scale.title) belongs to the whole drawing.") else {
             updateModes()
             return
         }
@@ -4817,27 +4822,12 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
 
     // MARK: Helpers
 
-    /// Before closing the window / quitting: goes through all tabs with unsaved changes.
-    /// Returns true if it is OK to continue.
+    /// Before closing the window / quitting: asks about each tab with unsaved changes in turn
+    /// (no summary dialog first). Returns true if it is OK to continue.
     func confirmDiscardChanges() -> Bool {
         guard ensureNoBlockEdit() else { return false }
         let edited = tabs.filter { $0.isEdited }
         guard !edited.isEmpty else { return true }
-        if edited.count > 1 {
-            let alert = NSAlert()
-            alert.messageText = "You have \(edited.count) drawings with unsaved changes."
-            alert.informativeText = edited.map { "• \($0.title)" }.joined(separator: "\n")
-                + "\n\nDo you want to review these changes before closing?"
-            alert.addButton(withTitle: "Review Changes…")
-            alert.addButton(withTitle: "Discard Changes")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .warning
-            switch alert.runModal() {
-            case .alertFirstButtonReturn: break
-            case .alertSecondButtonReturn: return true
-            default: return false
-            }
-        }
         for tab in edited {
             guard let index = tabs.firstIndex(where: { $0 === tab }) else { continue }
             activateTab(index)
@@ -5028,6 +5018,8 @@ extension MainViewController {
         item(appMenu, "About OreMonoCAD", #selector(NSApplication.orderFrontStandardAboutPanel(_:))).image = symbol("info.circle")
         appMenu.addItem(.separator())
         item(appMenu, "Settings…", #selector(showSettings(_:)), ",", target: self).image = symbol("gearshape")
+        // also here, next to Settings (where shortcuts are changed) – the same window as Help › Keyboard Shortcuts… and F1
+        item(appMenu, "Keyboard Shortcuts…  (F1)", #selector(showKeyboardShortcuts(_:)), modifiers: [], target: self).image = symbol("keyboard")
         appMenu.addItem(.separator())
         item(appMenu, "Hide OreMonoCAD", #selector(NSApplication.hide(_:)), "h").image = symbol("eye.slash")
         item(appMenu, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]).image = symbol("eye.slash.circle")
@@ -5318,7 +5310,8 @@ extension MainViewController {
         let alert = NSAlert()
         alert.messageText = "Simulate a crash?"
         alert.informativeText = "OreMonoCAD will stop immediately, unsaved changes are lost. "
-            + "Start it again afterwards – it should offer to save a problem report. "
+            + "Start it again afterwards – it should offer to save a problem report and to recover "
+            + "drawings changed more than about 15 seconds ago. "
             + "Run the app outside Xcode for this test; under Xcode the debugger catches the crash first."
         alert.addButton(withTitle: "Crash Now")
         alert.addButton(withTitle: "Cancel")
@@ -5386,7 +5379,9 @@ extension MainViewController {
         let interval = TimeInterval(minutes * 60)
         let now = Date()
         for tab in tabs where tab.isEdited && tab.changeCount != tab.autosavedChangeCount {
-            if ignoringInterval || now.timeIntervalSince(tab.lastAutosave) >= interval {
+            // the first change after opening or saving is auto-saved at the next tick, so a crash
+            // shortly after starting to draw does not lose everything; then the set interval applies
+            if ignoringInterval || !tab.hasAutosave || now.timeIntervalSince(tab.lastAutosave) >= interval {
                 autosave(tab)
             }
         }
@@ -5416,6 +5411,7 @@ extension MainViewController {
                                         appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
         tab.autosavedChangeCount = tab.changeCount
         tab.lastAutosave = Date()
+        tab.hasAutosave = true
         AutoSaveStore.write(file, manifest: manifest)
         let milliseconds = Int(Date().timeIntervalSince(started) * 1000)
         if milliseconds > 250 { Log.warning("Auto-save of \u{201C}\(manifest.title)\u{201D} held the app for \(milliseconds) ms") }
@@ -5426,6 +5422,7 @@ extension MainViewController {
         AutoSaveStore.remove(tab.autosaveID)
         tab.autosavedChangeCount = tab.changeCount
         tab.lastAutosave = Date()
+        tab.hasAutosave = false
     }
 
     /// Clean quit: the user decided on every drawing (save / discard) → this session's auto-saves are removed.
@@ -5500,6 +5497,7 @@ extension MainViewController {
         }
         // the tab takes over the auto-save – further auto-saving overwrites it
         tab.autosaveID = manifest.id
+        tab.hasAutosave = true
         if let path = manifest.originalPath {
             let original = URL(fileURLWithPath: path)
             tab.suggestedSaveURL = NativeFormat.isNative(original)
@@ -5885,9 +5883,20 @@ extension MainViewController {
 
     /// Before an action that doesn't go together with a block edit (another tab, save, plot…): ask.
     /// true = no edit is running (or it has just ended).
-    private func ensureNoBlockEdit() -> Bool {
+    /// `reason` (a change of the whole drawing, e.g. its scale or units): asks even when the block has no changes,
+    /// so the edit does not end without a word; without it an unchanged block edit ends quietly.
+    private func ensureNoBlockEdit(reason: String? = nil) -> Bool {
         guard let session = activeTab.blockEdit else { return true }
-        guard session.changed else { return finishBlockEdit(save: false) }
+        guard session.changed else {
+            guard let reason = reason else { return finishBlockEdit(save: false) }
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close the block \u{201C}\(session.definition.name)\u{201D}?"
+            alert.informativeText = reason + " The block is still being edited (without changes) – it closes first."
+            alert.addButton(withTitle: "Close Block")
+            alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn ? finishBlockEdit(save: false) : false
+        }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Save the changes to the block \u{201C}\(session.definition.name)\u{201D}?"

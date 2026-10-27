@@ -740,7 +740,7 @@ final class TextFormatPanel: NSViewController {
         grid.columnSpacing = 6
         grid.column(at: 0).xPlacement = .trailing
         grid.rowAlignment = .firstBaseline
-        let hint = NSTextField(wrappingLabelWithString: "Changes show right away · ⌥↩ in the text = new line · ↩ places the text")
+        let hint = NSTextField(wrappingLabelWithString: "Changes show right away · ⇧↩ in the text = new line · ↩ places the text")
         hint.font = NSFont.systemFont(ofSize: 10)
         hint.textColor = .secondaryLabelColor
 

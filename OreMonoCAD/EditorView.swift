@@ -199,10 +199,10 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the object where it should be split (snaps work, e.g. to an intersection or a midpoint). A closed polyline is opened at that point."),
         .move: (
             summary: "Moves the selected objects.",
-            usage: "Select objects (↩), click a base point, then the target – or type distance and angle. Tap ⌥ while moving to copy instead (the originals stay, a green + shows it); right after placing the copy type x5 + ↩ for five copies in a row or /5 + ↩ for five copies spread between the original and the copy. With Select you can also simply drag a selected object (⌥ works there too)."),
+            usage: "Select objects (↩), click a base point, then the target – or type distance and angle (↩ instead of the base point = shift from 0,0 by the typed distance and angle). Tap ⌥ while moving to copy instead (the originals stay, a green + shows it); right after placing the copy type x5 + ↩ for five copies in a row or /5 + ↩ for five copies spread between the original and the copy. With Select you can also simply drag a selected object (⌥ works there too)."),
         .copy: (
             summary: "Copies the selected objects, as many times as you like.",
-            usage: "Select objects (↩), click a base point, then click every place for a copy. Right after a copy, x5 + ↩ = five copies in a row, /5 + ↩ = five copies spread between the original and the copy. Esc ends."),
+            usage: "Select objects (↩), click a base point, then click every place for a copy (↩ instead of the base point = shift from 0,0 by the typed distance and angle). Right after a copy, x5 + ↩ = five copies in a row, /5 + ↩ = five copies spread between the original and the copy. Esc ends."),
         .rotate: (
             summary: "Rotates the selected objects around a point.",
             usage: "Select objects (↩), click the center of rotation, then click or type the angle. Hold Shift for 15° steps. Tap ⌥ while rotating to copy instead (the originals stay); right after placing the copy type x5 + ↩ for five copies, each turned by the same angle, or /5 + ↩ for five copies spread over the angle."),
@@ -241,13 +241,13 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Click the circle or arc, then where the text should go."),
         .text: (
             summary: "Writes text – a quick single line, a wrapping paragraph, or text with chosen font, typeface, height and rotation.",
-            usage: "Click and type right on the drawing – ↩ places it, ⌥↩ = new line, Esc cancels. The ☰ menu next to the text opens font, typeface, height, rotation, alignment and width, which turns plain text into formatted text. Hold the button (or right-click it) for Paragraph (a box that wraps) or Formatted (panel opens at once). Double-click a text to edit it the same way."),
+            usage: "Click and type right on the drawing – ↩ places it, ⇧↩ = new line, ⌘A selects all of it, Esc cancels. A click elsewhere in the drawing places it too. The ☰ menu next to the text opens font, typeface, height, rotation, alignment and width, which turns plain text into formatted text. Hold the button (or right-click it) for Paragraph (a box that wraps) or Formatted (panel opens at once). Double-click a text to edit it the same way."),
         .measure: (
             summary: "Measures without drawing anything – distance, angle, radius, area and perimeter, coordinates or length of objects.",
             usage: "Hold the button (or right-click it) to choose what to measure. Distance and Angle: click the points · Area: click the corners (↩ finishes, ⌫ removes the last one), click inside a closed area, or click a closed object · Length: click objects to add them up. The result shows on the drawing and in the bottom line; Esc clears it."),
         .blockCreate: (
             summary: "Turns the selected objects into a named block – a reusable symbol such as a door, a window, furniture or a title block.",
-            usage: "Select the objects (↩), click the base point (you will insert the block by it) and type the name. The objects become one block. Using the same name again redefines the block – every copy in the drawing changes. Explode turns a block back into objects."),
+            usage: "Select the objects (↩), click the base point (you will insert the block by it; ↩ = the origin 0,0) and type the name. The objects become one block. Using the same name again redefines the block – every copy in the drawing changes. Explode turns a block back into objects."),
         .blockInsert: (
             summary: "Places a block of this drawing – as many times as you like.",
             usage: "Hold the button (or right-click it) to choose the block. Click the insertion point, again for more copies, Esc ends. Rotation, scale and mirroring are in Properties."),
@@ -916,7 +916,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         field.drawsBackground = true
         field.isBordered = true
         field.focusRingType = .none
-        field.placeholderString = "Type the text · ↩ = place · ⌥↩ = new line · Esc = cancel"
+        field.placeholderString = "Type the text · ↩ = place · ⇧↩ = new line · Esc = cancel"
         field.usesSingleLineMode = false
         field.cell?.wraps = true
         field.cell?.isScrollable = false
@@ -1479,6 +1479,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     /// Move or dragging a selection: a tap on ⌥ switches to copying (the originals stay put).
     private var copyWhileMoving = false
+    /// Move, Rotate… has already run at least once since the tool started (↩ / space then ends the tool).
+    private var transformRan = false
     /// ⌥ went down alone – released without another key, click or scroll in between, it counts as a tap.
     private var optionTapPending = false
     private var optionDown = false
@@ -1643,6 +1645,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
 
     private func resetToolState() {
         valueBoxRequested = false
+        transformRan = false
         pendingMirror = nil
         pasteRequest = nil
         snapManager.clearAcquired()
@@ -1967,9 +1970,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 }
             } else if points.isEmpty {
                 text = currentTool == .mirror ? "Mirror: first point of the mirror line" : "\(currentTool.title): base point"
+                if currentTool == .copy && !transformRan { text += " · ↩ = displacement from 0,0" }
                 if [.move, .rotate].contains(currentTool) {
                     let title = currentTool.title
                     text = copyWhileMoving ? "\(title) (copy): base point · ⌥ = \(title.lowercased()) instead" : "\(title): base point · ⌥ = copy"
+                    if currentTool == .move && !transformRan { text += " · ↩ = displacement from 0,0" }
                 }
             } else {
                 switch currentTool {
@@ -3753,6 +3758,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             resetToolState()
             return
         }
+        transformRan = true
         let transformed = originals.map { entity -> CADEntity in
             let copy = entity.clone()
             copy.applyTransform(t)
@@ -4248,6 +4254,17 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     stage = .points
                     stateChanged()
                 }
+            } else if points.isEmpty && !transformRan {
+                // ↩ / space right after the start, before the base point
+                if currentTool == .move || currentTool == .copy {
+                    // displacement: the base point is the origin, the next point (typed distance and angle) is the shift
+                    points = [.zero]
+                    stateChanged()
+                    onMessage?("\(currentTool.title): displacement from 0,0 – type the distance, Tab, the angle, ↩ (or click the point)")
+                } else {
+                    onMessage?(currentTool == .mirror ? "Mirror: click the first point of the mirror line · Esc ends the tool"
+                                                      : "\(currentTool.title): click the base point · Esc ends the tool")
+                }
             } else if currentTool == .copy || points.isEmpty {
                 // Copy at any time, the others between two runs (no base point yet): ↩ / space ends the tool
                 onToolChangeRequested?(.select)
@@ -4272,6 +4289,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                     stage = .points
                     stateChanged()
                 }
+            } else {
+                // ↩ / space instead of the base point: the origin 0,0 is the base point (the default of a new block)
+                finishBlockCreate(base: .zero)
             }
         case .array:
             if stage == .selectObjects {
@@ -4287,6 +4307,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 }
             } else if arrayKind == .rectangular {
                 openArrayDialog(center: nil)
+            } else {
+                onMessage?("Array: click the center of the polar array · Esc ends the tool")
             }
         default:
             break
@@ -6052,6 +6074,13 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         lastKeyWasSpace = false
         lastCopyRun = nil
         copyCountEntry = nil
+        // editing a text (double-click) outside the Text tool: a click elsewhere in the drawing places it and ends the editing
+        if inlineText != nil && currentTool != .text {
+            commitInlineText()
+            window?.makeFirstResponder(self)
+            ignoreNextMouseUp = true
+            return
+        }
         window?.makeFirstResponder(self)
         // a click in the drawing ends typing – in the “only while typing” mode the box (without an entered value) hides
         valueBoxRequested = false
@@ -7194,8 +7223,10 @@ extension CADEditorView {
             cancelInlineText()
             return true
         }
-        // ⌥↩ (and ⌃↩) = new line, ↩ = insert
-        if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+        // ⇧↩ (also ⌥↩ and ⌃↩) = new line, ↩ = insert
+        let shiftReturn = commandSelector == #selector(NSResponder.insertNewline(_:))
+            && NSApp.currentEvent?.type == .keyDown && NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        if shiftReturn || commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
             textView.insertText("\n", replacementRange: textView.selectedRange())
             return true
         }
