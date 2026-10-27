@@ -1553,7 +1553,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         // Buttons of the full table (window)
         let buttons: [(String, String, Selector)] = [
             ("+", "New layer – double-click its name to rename it", #selector(addLayer)),
-            ("−", "Delete the selected layer (must be empty)", #selector(deleteLayer)),
+            ("−", "Delete the selected layer (its objects move to layer 0)", #selector(deleteLayer)),
             ("Rename…", "Rename the selected layer (or double-click its name)", #selector(renameLayer)),
             ("Set Current", "Make the selected layer current (or double-click the row)", #selector(setCurrent))
         ]
@@ -1583,7 +1583,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
         let compactItems: [(String, String, Selector)] = [
             ("plus", "New layer – double-click its name to rename it", #selector(addLayer)),
-            ("trash", "Delete the selected layer (must be empty)", #selector(deleteLayer)),
+            ("trash", "Delete the selected layer (its objects move to layer 0)", #selector(deleteLayer)),
             ("ellipsis.circle", "More: set current, rename, show or unlock all, open in a window", #selector(showMoreMenu(_:)))
         ]
         for (symbol, tip, action) in compactItems {

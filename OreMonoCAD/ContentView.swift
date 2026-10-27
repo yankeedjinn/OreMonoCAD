@@ -1342,6 +1342,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         editorView.onContextMenuRequested = { [weak self] in self?.drawingContextMenu() }
         editorView.onCommit = { [weak self] removed, added, name in
             self?.applyChange(removed: removed, added: added, actionName: name)
+            self?.warnAboutCurrentLayer(added: added)
         }
 
         layerPanel.onRenameLayer = { [weak self] oldName, newName in self?.renameLayer(oldName, to: newName) }
@@ -2536,6 +2537,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         Log.info("Change: \(actionName) (−\(change.removed.count) +\(change.added.count))")
     }
 
+    /// New objects on a hidden or locked current layer: say why they can't be seen or edited.
+    private func warnAboutCurrentLayer(added: [CADEntity]) {
+        let name = layerManager.currentLayerName
+        guard added.contains(where: { $0.layer == name }) else { return }
+        if !layerManager.isLayerVisible(name) {
+            statusBar.showMessage("Layer \u{201C}\(name)\u{201D} is hidden – the new object is not visible (turn the layer on in the Layers panel)")
+        } else if layerManager.isLayerLocked(name) {
+            statusBar.showMessage("Layer \u{201C}\(name)\u{201D} is locked – the new object cannot be edited until you unlock the layer")
+        }
+    }
+
     @objc private func applyBatch(_ batch: ReplaceBatch) {
         let target = batch.document ?? document
         // Undo/Redo of a change in another space (model ↔ layout) first shows that space
@@ -2678,32 +2690,65 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             statusBar.showMessage("Layer 0 cannot be deleted.")
             return
         }
-        let documents = activeTab.allDocuments + (activeTab.blockEdit.map { [$0.document] } ?? [])
-        let count = documents.reduce(0) { $0 + $1.getAllEntities().filter { $0.layer == name }.count }
+        let count = objects(onLayer: name).count
         if count > 0 {
-            statusBar.showMessage("Layer \(name) contains \(count) object\(count == 1 ? "" : "s") – move or delete them first.")
-            return
-        }
-        if let block = activeTab.blocks.blocks.first(where: { $0.entities.contains { $0.layer == name } }) {
-            statusBar.showMessage("Layer \(name) is used inside the block \u{201C}\(block.name)\u{201D} – edit the block first.")
-            return
+            let alert = NSAlert()
+            alert.messageText = "Do you really want to delete the layer \u{201C}\(name)\u{201D}?"
+            alert.informativeText = "It contains \(count) object\(count == 1 ? "" : "s"). \(count == 1 ? "It" : "They") will be moved to the default layer 0."
+            alert.addButton(withTitle: "Delete Layer")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .warning
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         removeLayerUndoably(name)
+        if count > 0 {
+            refreshPanels()
+            editorView.needsDisplay = true
+            statusBar.showMessage("Layer \u{201C}\(name)\u{201D} deleted – \(count) object\(count == 1 ? "" : "s") moved to layer 0")
+        }
     }
 
+    /// Objects on a layer in the model, on layouts, inside blocks and in a block being edited.
+    private func objects(onLayer name: String) -> [CADEntity] {
+        let contents = activeTab.allDocuments.map { $0.getAllEntities() } + activeTab.blocks.definitions.map { $0.entities }
+            + (activeTab.blockEdit.map { [$0.document.getAllEntities()] } ?? [])
+        return contents.flatMap { $0.filter { $0.layer == name } }
+    }
+
+    /// Viewports on layouts that hide the layer.
+    private func viewports(hidingLayer name: String) -> [ViewportEntity] {
+        return activeTab.allDocuments.flatMap { $0.getAllEntities().compactMap { $0 as? ViewportEntity } }
+            .filter { $0.frozenLayers.contains(name) }
+    }
+
+    /// Deletes the layer; its objects go to layer 0. Undo brings back the layer and its objects in one step.
     private func removeLayerUndoably(_ name: String) {
+        let moved = objects(onLayer: name)
+        let hiding = viewports(hidingLayer: name)
         guard let layer = layerManager.getLayer(name), layerManager.removeLayer(name) else { return }
-        registerLayerUndo(actionName: "Delete Layer") { $0.restoreLayer(layer) }
+        for entity in moved { entity.layer = "0" }
+        for viewport in hiding { viewport.frozenLayers.remove(name) }
+        if !moved.isEmpty {
+            for definition in activeTab.blocks.definitions { definition.contentDidChange() }
+        }
+        registerLayerUndo(actionName: "Delete Layer") { $0.restoreLayer(layer, objects: moved, hiddenIn: hiding) }
     }
 
-    private func restoreLayer(_ layer: Layer) {
+    private func restoreLayer(_ layer: Layer, objects: [CADEntity], hiddenIn viewports: [ViewportEntity]) {
         layerManager.addLayer(layer)
+        for entity in objects { entity.layer = layer.name }
+        for viewport in viewports { viewport.frozenLayers.insert(layer.name) }
+        if !objects.isEmpty {
+            for definition in activeTab.blocks.definitions { definition.contentDidChange() }
+        }
         registerLayerUndo(actionName: "Delete Layer") { $0.removeLayerUndoably(layer.name) }
     }
 
     // MARK: Menu – file
 
     @objc func undoAction(_ sender: Any?) {
+        // while drawing ⌘Z takes back only the last point (or the step in progress), not the previous object
+        if editorView.undoStepInProgress() { return }
         editorView.cancelCurrentOperation()
         if undoer.canUndo {
             Log.info("Undo: \(undoer.undoActionName)")
@@ -4828,7 +4873,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return true
         case #selector(undoAction(_:)):
             menuItem.title = undoer.undoMenuItemTitle
-            return undoer.canUndo
+            return undoer.canUndo || editorView.isBusy
         case #selector(redoAction(_:)):
             menuItem.title = undoer.redoMenuItemTitle
             return undoer.canRedo

@@ -451,6 +451,18 @@ enum DrawingTool: Int, CaseIterable {
 
     /// Tools that work on the selected objects and finish immediately (Explode, Join, hatch edits).
     static let selectionCommands: [DrawingTool] = [.explode, .join, .hatchRebuild, .hatchCut]
+
+    /// Tools that work with the objects selected beforehand – every other tool clears the selection when it starts.
+    var usesSelection: Bool {
+        switch self {
+        case .select, .move, .copy, .rotate, .scale, .mirror, .stretch, .array, .align,
+             .explode, .join, .hatchRebuild, .hatchCut, .wallFromCurve, .matchProperties, .selectSimilar,
+             .filter, .editPoints, .blockCreate, .zoomIn, .zoomOut, .zoomExtents, .zoomSelected, .zoomWindow:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 // MARK: - Arc Methods
@@ -539,8 +551,16 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     }
 
     var currentTool: DrawingTool = .select {
+        willSet {
+            // switching to another tool keeps a polyline, spline or wall in progress (like Esc) instead of dropping it
+            if newValue != currentTool { finishShapeInProgress() }
+        }
         didSet {
-            if oldValue != currentTool { selectedPoints.removeAll() }
+            if oldValue != currentTool {
+                selectedPoints.removeAll()
+                // A tool that doesn't work with the selected objects drops the selection (drawing, dimensions, Trim…)
+                if !currentTool.usesSelection { selectionManager?.clearSelection() }
+            }
             if currentTool != .select { lastTool = currentTool }
             // Select Similar takes the selection as its samples each time it starts
             similarSamples.removeAll()
@@ -3412,6 +3432,36 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         points.removeAll()
         picked.removeAll()
         stateChanged()
+    }
+
+    /// A polyline, spline or wall with at least two points is finished as it is (open) – used before the tool changes.
+    private func finishShapeInProgress() {
+        guard points.count >= 2 else { return }
+        switch currentTool {
+        case .polyline, .spline: finishOpenEnded(closed: false)
+        case .wall: finishWall(closed: false)
+        default: break
+        }
+    }
+
+    /// ⌘Z while drawing: a shape built point by point loses its last point (like ⌫), any other step in progress
+    /// is only canceled – the objects drawn before stay. Returns false when nothing is in progress (a normal Undo).
+    func undoStepInProgress() -> Bool {
+        if awaitingCloseAnswer {
+            cancelClosePrompt()
+            return true
+        }
+        let pointByPoint: [DrawingTool] = [.polyline, .spline, .wall, .leader, .revisionCloud, .wipeout]
+        if (pointByPoint.contains(currentTool) || (currentTool == .measure && measureKind == .areaPoints)) && !points.isEmpty {
+            points.removeLast()
+            stateChanged()
+            return true
+        }
+        // continuous lines: the normal Undo removes the last line (the chain ends)
+        if currentTool == .line && lineChainCount > 0 { return false }
+        guard isBusy else { return false }
+        cancelCurrentOperation()
+        return true
     }
 
     /// Ends the chain of continuous lines.
