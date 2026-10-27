@@ -28,7 +28,7 @@ enum ToolGroup: Int, CaseIterable {
 
 enum DrawingTool: Int, CaseIterable {
     case select, line, xline, circle, arc, ellipse, polygon, rectangle, polyline, spline, wall, wallFromCurve, hatch, hatchRebuild, hatchCut
-    case trim, extend, fillet, chamfer, magicTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties, filter
+    case trim, extend, fillet, chamfer, magicTrim, breakObject, breakAtPoint, offset, explode, join, editPoints, matchProperties, filter, selectSimilar
     case move, copy, rotate, scale, mirror, stretch, array, align
     case dimLinear, dimAligned, dimContinue, dimAngular, dimRadius, dimDiameter, leader
     case text, roomLabel, measure, revisionCloud, wipeout, scaleBar, northArrow
@@ -60,6 +60,7 @@ enum DrawingTool: Int, CaseIterable {
         case .editPoints: return "Edit Points"
         case .matchProperties: return "Match Properties"
         case .filter: return "Filter"
+        case .selectSimilar: return "Select Similar"
         case .join: return "Join"
         case .hatch: return "Hatch"
         case .magicTrim: return "MagicTrim"
@@ -111,7 +112,7 @@ enum DrawingTool: Int, CaseIterable {
     static let help: [DrawingTool: (summary: String, usage: String)] = [
         .select: (
             summary: "Selects objects so you can edit, move or delete them.",
-            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position) · hold the right button (or Control-click) for the context menu · Space switches to Select from any tool, a second Space clears the selection."),
+            usage: "Click an object · Shift-click adds or removes · drag left→right = objects fully inside, right→left = everything crossed (or click two corners instead of dragging; Esc or Space between them drops the window) · drag a selected object to move it · the blue grips of selected objects edit their points (click or drag a grip, then click the new position) · hold the right button (or Control-click) for the context menu · Space switches to Select from any tool, a second Space clears the selection."),
         .line: (
             summary: "A straight line between two points.",
             usage: "Click the start and the end (or drag). Type length and angle in the box at the cursor. With LNC on (⌥7, or the Line key again while drawing), lines continue from the last end – ↩/Esc ends, C closes."),
@@ -165,10 +166,13 @@ enum DrawingTool: Int, CaseIterable {
             usage: "Type the distance (or 0 = through a point), click the object, then click the side. Repeats until Esc. Without a distance the copy goes through the clicked point. An ellipse or a spline gives a polyline that follows it closely."),
         .matchProperties: (
             summary: "Copies the look of one object – layer, color, lineweight, and for texts, dimensions and hatches their style – onto other objects.",
-            usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (or click its two corners; left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Hold the button (or right-click it) to choose which properties are copied."),
+            usage: "Click the source object (or have one selected when you start), then click the objects to change, or drag a window over them (or click its two corners; left→right = fully inside, right→left = crossed). Repeats until ↩, right-click or Esc. Tick what is copied in the purple bar above the drawing (or hold the button, or right-click it)."),
         .filter: (
             summary: "Selects the objects that match the properties you choose – object type, layer, color, linetype, lineweight, block name, hatch pattern, a piece of text, text height, length or area.",
             usage: "Click it (or Edit › Filter…), tick one or more properties and pick their values – an object must match all ticked ones. Search the whole drawing or only the current selection (so a second Filter narrows the first). Whole drawing = its visible objects on unlocked layers, Current selection = all selected objects; the linetype is that of the object's layer. The found objects become the selection and the Select tool is on – move, copy, delete or edit them as usual."),
+        .selectSimilar: (
+            summary: "Selects all objects like the selected ones – the same object type, layer, color, lineweight or name and style, as you tick them.",
+            usage: "Select one or more sample objects first (⇧⌘A starts it, as Edit › Select Similar does), or click one after starting (a window picks several). The objects like them are selected at once. Tick what must match in the purple bar above the drawing – the selection follows right away. Only visible objects on unlocked layers are added. ↩, right-click, Esc or Done ends it and the selection stays."),
         .fillet: (
             summary: "Rounds the corner between two lines or polyline segments with an arc.",
             usage: "Type the radius (0 = sharp corner), then click both lines on the sides you want to keep. Two neighboring segments of one polyline get an arc inside the polyline; the first and the last segment of an open polyline close it; a polyline end + a line are joined into one polyline."),
@@ -311,7 +315,12 @@ enum DrawingTool: Int, CaseIterable {
 
     /// Keyboard shortcut on the drawing area – custom from Settings, otherwise the default (Select: the space bar).
     var shortcut: String? {
-        return Shortcuts.key(for: self) ?? (self == .select ? "Space" : nil)
+        switch self {
+        // Select is the space bar, Select Similar the Edit menu key – both outside the custom shortcuts
+        case .select: return Shortcuts.key(for: self) ?? "Space"
+        case .selectSimilar: return Shortcuts.key(for: self) ?? "⇧⌘A"
+        default: return Shortcuts.key(for: self)
+        }
     }
 
     /// The tool's default shortcut.
@@ -370,7 +379,7 @@ enum DrawingTool: Int, CaseIterable {
         switch self {
         case .select, .line, .xline, .circle, .arc, .ellipse, .polygon, .rectangle, .polyline, .spline, .hatch, .hatchRebuild, .hatchCut: return .draw
         case .wall, .wallFromCurve: return .architecture
-        case .trim, .extend, .fillet, .chamfer, .magicTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter: return .modify
+        case .trim, .extend, .fillet, .chamfer, .magicTrim, .breakObject, .breakAtPoint, .offset, .explode, .join, .editPoints, .matchProperties, .filter, .selectSimilar: return .modify
         case .move, .copy, .rotate, .scale, .mirror, .stretch, .array, .align: return .transform
         case .dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter, .leader, .text, .roomLabel, .measure, .revisionCloud, .wipeout, .scaleBar, .northArrow: return .dimension
         case .blockCreate, .blockInsert, .blockManager: return .block
@@ -386,7 +395,8 @@ enum DrawingTool: Int, CaseIterable {
     /// The button shows the most recently used tool; shortcuts and the Tools menu work for each one separately.
     static let paletteFamilies: [[DrawingTool]] = [[.circle, .ellipse, .polygon], [.magicTrim, .trim, .extend],
                                                     [.fillet, .chamfer], [.dimLinear, .dimAligned, .dimContinue, .dimAngular, .dimRadius, .dimDiameter],
-                                                    [.revisionCloud, .wipeout], [.scaleBar, .northArrow]]
+                                                    [.revisionCloud, .wipeout], [.scaleBar, .northArrow],
+                                                    [.filter, .selectSimilar]]
 
     var paletteFamily: [DrawingTool]? {
         return DrawingTool.paletteFamilies.first { $0.contains(self) }
@@ -532,6 +542,9 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         didSet {
             if oldValue != currentTool { selectedPoints.removeAll() }
             if currentTool != .select { lastTool = currentTool }
+            // Select Similar takes the selection as its samples each time it starts
+            similarSamples.removeAll()
+            similarSelectedCount = nil
             resetToolState()
             // Explode / Join with already selected objects runs immediately – except when repeated with Enter / right click,
             // when it waits for confirmation (so the command doesn't accidentally run on the result of the previous step)
@@ -1585,7 +1598,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     private var expectsPoint: Bool {
         if dragMoveBase != nil || activeGrip != nil || pasteRequest != nil { return true }
         switch currentTool {
-        case .select, .trim, .extend, .fillet, .chamfer, .magicTrim, .editPoints, .matchProperties, .roomLabel: return false
+        case .select, .trim, .extend, .fillet, .chamfer, .magicTrim, .editPoints, .matchProperties, .selectSimilar, .roomLabel: return false
         case .dimRadius, .dimDiameter, .offset: return !picked.isEmpty
         case .measure: return measureKind.usesPoints
         case .dimContinue: return chainSource != nil
@@ -1673,6 +1686,16 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 matchSource = selectedEntities.first
                 selectionManager.clearSelection()
             }
+        case .selectSimilar:
+            stage = .points
+            // the objects selected beforehand are the samples (after selectTool has cleared the status bar)
+            if similarSamples.isEmpty, !selectedEntities.isEmpty {
+                similarSamples = selectedEntities
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.currentTool == .selectSimilar else { return }
+                    self.applySelectSimilar()
+                }
+            }
         case .dimContinue:
             stage = .points
             // continue from the most recently created dimension, if it is still in the drawing
@@ -1738,7 +1761,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             return "Mirror: delete the original objects?  Y = yes · N, ↩, click or right-click = no (keep them) · Esc = cancel"
         }
         if selectionBoxAwaitsCorner {
-            return "Click the opposite corner · Esc = cancel"
+            return "Click the opposite corner · Esc or space = cancel"
         }
         if let entry = copyCountEntry {
             let how = entry.first == "/" ? "spread between the original and the placed copy" : "repeating the step"
@@ -1965,8 +1988,12 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             if let source = matchSource {
                 text = "Match Properties: click or window the objects to change (from \(source.typeName): \(matchSummary(of: source))) · ↩, right-click or Esc = end"
             } else {
-                text = "Match Properties: click the source object · hold the Match Properties button to choose what is copied"
+                text = "Match Properties: click the source object · tick what is copied in the bar above the drawing"
             }
+        case .selectSimilar:
+            text = similarSamples.isEmpty
+                ? "Select Similar: click a sample object (or drag a window over several) · tick what must match in the bar above"
+                : "Select Similar: tick what must match in the bar above · click another sample to start over · ↩, right-click or Esc = done"
         case .dimContinue:
             text = chainSource == nil
                 ? "Continue Dimension: click the dimension to continue from (near the end to go on from)"
@@ -4185,7 +4212,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             finishWallFromCurve()
         case .measure:
             if measureKind == .areaPoints && points.count >= 3 { finishMeasuredArea() }
-        case .dimContinue, .matchProperties, .xline:
+        case .dimContinue, .matchProperties, .selectSimilar, .xline:
             onToolChangeRequested?(.select)
         case .blockCreate:
             if stage == .selectObjects {
@@ -5359,7 +5386,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
     // MARK: Match properties
 
     /// The object whose properties are transferred.
-    private var matchSource: CADEntity?
+    private(set) var matchSource: CADEntity?
 
     /// What is transferred from the source (for the prompt).
     private func matchSummary(of source: CADEntity) -> String {
@@ -5393,6 +5420,35 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
             onCommit?(removed, added, "Match Properties")
             onMessage?("Properties copied to \(added.count) object\(added.count == 1 ? "" : "s")" + (locked > 0 ? " · \(locked) on locked layers skipped" : ""))
         }
+        stateChanged()
+    }
+
+    // MARK: Select similar
+
+    /// The objects the similar ones are matched to (empty = waiting for a click on a sample).
+    private var similarSamples: [CADEntity] = []
+    /// How many objects Select Similar has selected (nil = no sample yet) – for the options bar.
+    private(set) var similarSelectedCount: Int?
+
+    /// Selects the samples and every object like them (as ticked in Edit › Select Similar Matches) – visible ones
+    /// on unlocked layers. Runs again whenever the ticks change, always from the same samples.
+    func applySelectSimilar() {
+        guard let selectionManager = selectionManager else { return }
+        // samples removed meanwhile (Undo, Delete) drop out
+        let present = Set(allEntities.map { $0.id })
+        similarSamples = similarSamples.filter { present.contains($0.id) }
+        guard !similarSamples.isEmpty else {
+            similarSelectedCount = nil
+            stateChanged()
+            return
+        }
+        let properties = AppSettings.similarProperties
+        let found = SelectSimilar.matches(of: similarSamples, in: editableEntities, properties: properties)
+        let sampleIDs = Set(similarSamples.map { $0.id })
+        let added = Set(found.map { $0.id }).subtracting(sampleIDs).count
+        selectionManager.select(similarSamples + found)
+        similarSelectedCount = sampleIDs.count + added
+        onMessage?("Select Similar: \(added) more object\(added == 1 ? "" : "s") with the same " + SelectSimilar.describe(properties))
         stateChanged()
     }
 
@@ -6237,6 +6293,16 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
                 selectionBoxEnd = screenPoint
             }
 
+        case .selectSimilar:
+            // a click on an object = a new sample, into empty space = a window over several samples
+            if let sample = entity(at: worldPoint) {
+                similarSamples = [sample]
+                applySelectSimilar()
+            } else {
+                selectionBoxStart = screenPoint
+                selectionBoxEnd = screenPoint
+            }
+
         case .dimContinue:
             if chainSource == nil {
                 pickChainSource(at: worldPoint)
@@ -6610,7 +6676,10 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         let screenPoint = convert(event.locationInWindow, from: nil)
         let flags = event.modifierFlags
         let precise = event.hasPreciseScrollingDeltas
-        if precise && !flags.contains(.command) && !AppSettings.trackpadScrollZooms {
+        // Trackpad and Magic Mouse events carry a gesture phase; a mouse wheel never does,
+        // even when its driver sends smooth (precise) deltas – so the wheel always zooms.
+        let isGesture = precise && (!event.phase.isEmpty || !event.momentumPhase.isEmpty)
+        if isGesture && !flags.contains(.command) && !AppSettings.trackpadScrollZooms {
             // trackpad / Magic Mouse: two-finger pan
             interactiveViewChange { viewport.pan(by: CGPoint(x: event.scrollingDeltaX, y: -event.scrollingDeltaY)) }
             return
@@ -6719,6 +6788,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         } else if currentTool == .matchProperties {
             if abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 {
                 applyMatch(to: entitiesInBox(from: start, to: end))
+            }
+        } else if currentTool == .selectSimilar {
+            let samples = abs(end.x - start.x) > 3 || abs(end.y - start.y) > 3 ? entitiesInBox(from: start, to: end) : []
+            if samples.isEmpty {
+                onMessage?("Click an object (or drag a window over several) to use as a sample.")
+            } else {
+                similarSamples = samples
+                applySelectSimilar()
             }
         } else {
             finishSelectionBox(from: start, to: end)
@@ -6886,6 +6963,14 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         }
 
         switch event.keyCode {
+        // a window started with a click: the space bar drops it like Esc, the tool goes on
+        case 49 where selectionBoxAwaitsCorner && modifiers.isEmpty:
+            selectionBoxStart = nil
+            selectionBoxEnd = nil
+            onPromptChanged?(prompt)
+            needsDisplay = true
+            return
+
         case 53: // Escape
             if selectionBoxAwaitsCorner {
                 // only the window started with a click is dropped, the tool goes on

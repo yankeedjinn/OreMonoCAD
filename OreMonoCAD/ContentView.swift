@@ -102,6 +102,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     private var findController: FindReplaceController?
     /// The “Editing block…” bar above the drawing area (only during block editing).
     private var blockEditBar: BlockEditBar?
+    /// The options bar of Select Similar and Match Properties (ToolOptionsBar.swift).
+    private var toolOptionsBar: ToolOptionsBar?
 
     private var currentFileURL: URL? {
         get { return activeTab.fileURL }
@@ -1172,8 +1174,9 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         let bottomDock = bottomDockHeight
         frame.origin.y += bottomDock
         frame.size.height -= bottomDock
-        // block editing: the bar gets its own strip above the drawing, so it never covers the place you click
-        let barStrip = blockEditStripHeight
+        // block editing and the tool options: the bars get their own strip above the drawing, so they never cover
+        // the place you click
+        let barStrip = blockEditStripHeight + toolOptionsStripHeight
         frame.size.height -= barStrip
         // a small window with wide side columns: the drawing shrinks to nothing, never to a negative size
         frame.size.width = max(frame.size.width, 0)
@@ -1184,6 +1187,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                   height: LayoutBarView.height)
         paletteBottomBar?.frame = NSRect(x: frame.minX, y: frame.minY - bottomDock, width: frame.width, height: bottomDock)
         positionBlockEditBar()
+        positionToolOptionsBar()
         layoutColumnHandles()
     }
 
@@ -1311,7 +1315,10 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             self?.editorView.polarEnabled = true
             self?.markSettingsChanged()
         }
-        editorView.onPromptChanged = { [weak self] prompt in self?.statusBar.setPrompt(prompt) }
+        editorView.onPromptChanged = { [weak self] prompt in
+            self?.statusBar.setPrompt(prompt)
+            self?.updateToolOptionsBar()
+        }
         editorView.onXLineKindChanged = { [weak self] kind in self?.toolbarView.setXLineKind(kind) }
         editorView.onMessage = { [weak self] message in self?.statusBar.showMessage(message) }
         editorView.onBlockEditRequested = { [weak self] reference in
@@ -1780,6 +1787,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         toolbarView.setSelectedTool(tool)
         statusBar.showMessage("")
         updateStatusBar()
+        updateToolOptionsBar()
     }
 
     // MARK: Toolbar delegate
@@ -2000,6 +2008,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
     func toolbarDidChangeMatchProperties() {
         if currentTool != .matchProperties { selectTool(.matchProperties) }
         statusBar.setPrompt(editorView.prompt)
+        updateToolOptionsBar()
         view.window?.makeFirstResponder(editorView)
     }
 
@@ -3877,27 +3886,11 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         selectionManager.select(selectable)
     }
 
-    /// Edit › Select Similar (⇧⌘A): adds to the selection all objects that match it
-    /// in the chosen properties (Edit › Select Similar Matches) – in the open space, on visible
-    /// and unlocked layers.
+    /// Edit › Select Similar (⇧⌘A): starts the Select Similar tool – the selected objects are the samples,
+    /// what must match is ticked in the options bar above the drawing.
     @objc func selectSimilar(_ sender: Any?) {
-        let all = document.getAllEntities()
-        let selected = selectionManager.getSelectedEntities(from: all)
-        guard !selected.isEmpty else {
-            statusBar.showMessage("Select Similar: first select one or more objects – the others like them are then added")
-            NSSound.beep()
-            return
-        }
-        let candidates = all.filter { layerManager.isLayerVisible($0.layer) && !layerManager.isLayerLocked($0.layer) }
-        let properties = AppSettings.similarProperties
-        let found = SelectSimilar.matches(of: selected, in: candidates, properties: properties)
-        // the original selection stays (including objects on locked layers, if they were selected)
-        let before = Set(selected.map { $0.id })
-        let added = found.filter { !before.contains($0.id) }.count
-        selectionManager.select(found, additive: true)
-        statusBar.showMessage("Select Similar: \(added) more object\(added == 1 ? "" : "s") with the same "
-                              + SelectSimilar.describe(properties) + " · Edit › Select Similar Matches changes what must match")
-        editorView.needsDisplay = true
+        selectTool(.selectSimilar)
+        view.window?.makeFirstResponder(editorView)
     }
 
     /// Edit › Filter… (⌥S on the drawing area): selects the objects that match the ticked properties (Filter.swift) –
@@ -4132,6 +4125,8 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             properties = [.type]
         }
         AppSettings.similarProperties = properties
+        if currentTool == .selectSimilar { editorView.applySelectSimilar() }
+        updateToolOptionsBar()
     }
 
     @objc func selectToolFromMenu(_ sender: NSMenuItem) {
@@ -4901,7 +4896,7 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         case #selector(groupSelection(_:)):
             return selectionManager.count >= 2
         case #selector(selectSimilar(_:)):
-            return !selectionManager.isEmpty
+            return true
         case #selector(ungroupSelection(_:)):
             return !selectionManager.isEmpty
                 && selectionManager.getSelectedEntities(from: document.getAllEntities()).contains { $0.groupID != nil }
@@ -5031,7 +5026,7 @@ extension MainViewController {
         editMenu.addItem(.separator())
         item(editMenu, "Delete", #selector(deleteSelection), "\u{8}", target: self).image = symbol("trash")
         item(editMenu, "Select All", #selector(selectAllEntities(_:)), "a", target: self).image = DrawingTool.select.icon(pointSize: 13)
-        item(editMenu, "Select Similar", #selector(selectSimilar(_:)), "a", modifiers: [.command, .shift], target: self).image = icon(.selectSimilar)
+        item(editMenu, "Select Similar", #selector(selectSimilar(_:)), "a", modifiers: [.command, .shift], target: self).image = DrawingTool.selectSimilar.icon(pointSize: 13)
         item(editMenu, "Find and Replace…", #selector(findAndReplace(_:)), "f", target: self).image = symbol("magnifyingglass")
         let similarMenu = submenu("Select Similar Matches", in: editMenu, image: settingsIcon)
         for property in SimilarProperty.allCases {
@@ -5975,8 +5970,101 @@ extension MainViewController {
         guard let bar = blockEditBar, !bar.isHidden, let editor = editorView else { return }
         let frame = editor.frame
         let width = bar.preferredWidth(maximum: max(200, frame.width - 24))
-        bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY + (blockEditStripHeight - BlockEditBar.height) / 2,
+        // above the tool options bar, if that one is shown
+        bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY + toolOptionsStripHeight + (blockEditStripHeight - BlockEditBar.height) / 2,
                            width: width, height: BlockEditBar.height)
+        bar.needsLayout = true
+    }
+
+    // MARK: Tool options bar
+
+    /// Shows the options bar while Select Similar or Match Properties runs (with the current ticks and state),
+    /// hides it for other tools.
+    private func updateToolOptionsBar() {
+        guard currentTool == .selectSimilar || currentTool == .matchProperties else {
+            if let bar = toolOptionsBar, !bar.isHidden {
+                bar.isHidden = true
+                updateEditorViewFrame()
+            }
+            return
+        }
+        let bar = toolOptionsBar ?? ToolOptionsBar(frame: NSRect(x: 0, y: 0, width: 480, height: ToolOptionsBar.height))
+        if toolOptionsBar == nil {
+            bar.onToggle = { [weak self] index, isOn in self?.toolOptionToggled(index, isOn: isOn) }
+            bar.onDone = { [weak self] in
+                guard let self = self else { return }
+                self.selectTool(.select)
+                self.view.window?.makeFirstResponder(self.editorView)
+            }
+            toolOptionsBar = bar
+        }
+        if currentTool == .selectSimilar {
+            let chosen = AppSettings.similarProperties
+            let text: String
+            if let count = editorView.similarSelectedCount {
+                text = "Select Similar \u{00B7} \(count) object\(count == 1 ? "" : "s") selected \u{00B7} must match:"
+            } else {
+                text = "Select Similar \u{00B7} click a sample object \u{00B7} must match:"
+            }
+            bar.configure(text: text,
+                          options: SimilarProperty.allCases.map { ToolOption(title: $0.title, detail: $0.detail, isOn: chosen.contains($0)) },
+                          doneHelp: "End Select Similar – the selection stays (↩, right-click or Esc does the same)")
+        } else {
+            let chosen = AppSettings.matchProperties
+            let text = editorView.matchSource == nil
+                ? "Match Properties \u{00B7} click the source object \u{00B7} copy:"
+                : "Match Properties \u{00B7} click or window the objects to change \u{00B7} copy:"
+            bar.configure(text: text,
+                          options: MatchProperty.allCases.map { ToolOption(title: $0.title, detail: $0.detail, isOn: chosen.contains($0)) },
+                          doneHelp: "End Match Properties (↩, right-click or Esc does the same)")
+        }
+        if bar.superview == nil { view.addSubview(bar, positioned: .above, relativeTo: editorView) }
+        if bar.isHidden {
+            bar.isHidden = false
+            updateEditorViewFrame()
+        } else {
+            positionToolOptionsBar()
+        }
+    }
+
+    /// A box in the options bar was ticked or unticked – the same settings as Edit › Select Similar Matches
+    /// and the menu of the Match Properties button.
+    private func toolOptionToggled(_ index: Int, isOn: Bool) {
+        if currentTool == .selectSimilar {
+            let all = SimilarProperty.allCases
+            guard all.indices.contains(index) else { return }
+            var properties = AppSettings.similarProperties
+            if isOn { properties.insert(all[index]) } else { properties.remove(all[index]) }
+            if properties.isEmpty {
+                statusBar.showMessage("At least one property has to match – Object Type stays on")
+                properties = [.type]
+            }
+            AppSettings.similarProperties = properties
+            editorView.applySelectSimilar()
+        } else if currentTool == .matchProperties {
+            let all = MatchProperty.allCases
+            guard all.indices.contains(index) else { return }
+            var properties = AppSettings.matchProperties
+            if isOn { properties.insert(all[index]) } else { properties.remove(all[index]) }
+            AppSettings.matchProperties = properties
+            statusBar.setPrompt(editorView.prompt)
+        }
+        updateToolOptionsBar()
+        view.window?.makeFirstResponder(editorView)
+    }
+
+    /// The strip above the drawing area that holds the tool options bar (0 when it is hidden).
+    private var toolOptionsStripHeight: CGFloat {
+        guard let bar = toolOptionsBar, !bar.isHidden else { return 0 }
+        return ToolOptionsBar.height + 8
+    }
+
+    private func positionToolOptionsBar() {
+        guard let bar = toolOptionsBar, !bar.isHidden, let editor = editorView else { return }
+        let frame = editor.frame
+        let width = bar.preferredWidth(maximum: max(200, frame.width - 24))
+        bar.frame = NSRect(x: frame.midX - width / 2, y: frame.maxY + (toolOptionsStripHeight - ToolOptionsBar.height) / 2,
+                           width: width, height: ToolOptionsBar.height)
         bar.needsLayout = true
     }
 }

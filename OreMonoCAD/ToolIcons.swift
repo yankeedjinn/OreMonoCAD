@@ -14,7 +14,7 @@ import Cocoa
 
 /// Commands of the main menu that are not tools but have an icon of their own.
 enum MenuIcon: String {
-    case selectSimilar, group, ungroup, pasteAtOrigin, drawingCoordinates, geodeticBasePoint, rotateToCoordinates
+    case group, ungroup, pasteAtOrigin, drawingCoordinates, geodeticBasePoint, rotateToCoordinates
     case editBlock, model, layouts, newLayout, duplicateLayout, viewport, toolPanel, drawingAids
 }
 
@@ -318,6 +318,11 @@ enum ToolIcons {
         case .filter:
             // a funnel – only some objects get through
             p.polyline([(3, 20), (21, 20), (14, 11.5), (14, 4.5), (10, 2.5), (10, 11.5)], closed: true)
+        case .selectSimilar:
+            // the selected sample (dashed, as a selection) and two objects like it that get selected too
+            p.circle(7, 16, 4.2, dashed: true)
+            p.circle(17.5, 16, 4.2, accent: true)
+            p.circle(12, 6.5, 4.2, accent: true)
         case .join:
             // two chain links: the original piece and the joined one
             p.roundedRect(8.7, 8.7, 12, 6.4, radius: 3.2, angle: 45)
@@ -658,10 +663,6 @@ enum ToolIcons {
 
     private static func drawMenuIcon(_ icon: MenuIcon, _ p: IconPainter) {
         switch icon {
-        case .selectSimilar:
-            // two equal circles
-            p.circle(7, 12, 5)
-            p.circle(17, 12, 5, accent: true)
         case .group:
             // two shapes in a dashed frame
             p.rect(2.5, 2.5, 19, 19, dashed: true, accent: true)
