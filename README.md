@@ -4,6 +4,20 @@ A small 2D CAD editor for macOS – a fancy drawing board: more than a sketchpad
 
 It is a personal project: built for one architect's everyday drawing, kept deliberately simple.
 
+![A floor plan in OreMonoCAD](docs/screenshots/plan.png)
+
+## Screenshots
+
+| A sheet with a viewport and a title block | The welcome screen |
+|---|---|
+| ![Sheet A3 with a viewport](docs/screenshots/sheet.png) | ![Welcome screen](docs/screenshots/welcome.png) |
+
+**MagicTrim** – drag across the parts you want to remove:
+
+| Before | After |
+|---|---|
+| ![MagicTrim before](docs/screenshots/magictrim-before.png) | ![MagicTrim after](docs/screenshots/magictrim-after.png) |
+
 ## Features
 
 - Lines, polylines (with a constant width), rectangles, arcs, circles, ellipses, polygons, splines, construction lines
