@@ -248,6 +248,9 @@ nonisolated struct DrawingSettingsRecord: Codable {
     /// display of the background grid and the X/Y axes (always written; nil in older files = the app setting)
     var showGrid: Bool?
     var showAxes: Bool?
+    /// color scheme for new layers; a custom scheme also stores its colors
+    var layerColorScheme: String?
+    var layerColors: [RGBARecord]?
 }
 
 /// A single entity. Fields are filled according to the type, the rest stay nil (and are not written to JSON).

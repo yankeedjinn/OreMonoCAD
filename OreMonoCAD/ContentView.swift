@@ -1352,6 +1352,14 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
             return Set(self.selectionManager.getSelectedEntities(from: self.document.getAllEntities()).map { $0.layer })
         }
         layerPanel.onSelectLayerObjects = { [weak self] name in self?.selectObjects(onLayer: name) }
+        layerPanel.colorScheme = { [weak self] in self?.activeTab.layerColorScheme ?? LayerColorScheme.defaultScheme }
+        layerPanel.onChooseColorScheme = { [weak self] scheme in
+            guard let self = self else { return }
+            self.activeTab.layerColorScheme = scheme
+            self.hasUnsavedChanges = true
+            self.statusBar.showMessage("New layers get the colors of the \u{201C}\(scheme.name)\u{201D} scheme")
+        }
+        layerPanel.onRecolorLayers = { [weak self] in self?.recolorLayers() }
 
         propertiesPanel.onChangeLayer = { [weak self] name in self?.changeSelection(actionName: "Change Layer") { $0.layer = name } }
         propertiesPanel.onChangeColor = { [weak self] color in self?.changeSelection(actionName: "Change Color") { $0.color = color } }
@@ -2685,6 +2693,33 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
         hasUnsavedChanges = true
     }
 
+    /// Every layer except 0 gets a color of the drawing's scheme, in the order of the layers.
+    private func recolorLayers() {
+        let colors = activeTab.layerColorScheme.nsColors
+        let layers = layerManager.getAllLayers().filter { $0.name != "0" }
+        guard !colors.isEmpty, !layers.isEmpty else {
+            statusBar.showMessage("There are no layers to recolor besides layer 0")
+            return
+        }
+        var newColors: [String: NSColor] = [:]
+        for (i, layer) in layers.enumerated() { newColors[layer.name] = colors[i % colors.count] }
+        applyLayerColors(newColors, actionName: "Recolor Layers")
+        refreshPanels()
+        editorView.needsDisplay = true
+        statusBar.showMessage("Layers recolored with the \u{201C}\(activeTab.layerColorScheme.name)\u{201D} scheme")
+    }
+
+    /// Sets layer colors; Undo brings back the previous ones.
+    private func applyLayerColors(_ colors: [String: NSColor], actionName: String) {
+        var previous: [String: NSColor] = [:]
+        for (name, color) in colors {
+            guard let layer = layerManager.getLayer(name) else { continue }
+            previous[name] = layer.color
+            layerManager.updateLayer(name) { $0.color = color }
+        }
+        registerLayerUndo(actionName: actionName) { $0.applyLayerColors(previous, actionName: actionName) }
+    }
+
     private func deleteLayer(_ name: String) {
         if name == "0" {
             statusBar.showMessage("Layer 0 cannot be deleted.")
@@ -3214,13 +3249,17 @@ final class MainViewController: NSViewController, ToolbarViewDelegate, NSMenuIte
                                      geoX: tab.geoReference?.x,
                                      geoHeightZero: tab.geoReference?.heightZero,
                                      showGrid: tab.showGrid,
-                                     showAxes: tab.showAxes)
+                                     showAxes: tab.showAxes,
+                                     layerColorScheme: tab.layerColorScheme.name,
+                                     layerColors: tab.layerColorScheme.isCustom ? tab.layerColorScheme.nsColors.map { RGBARecord($0) } : nil)
     }
 
     private func applySettings(_ settings: DrawingSettingsRecord?) {
         // older drawings and drawings without settings follow the app setting
         editorView.showGrid = settings?.showGrid ?? AppSettings.showGrid
         editorView.showAxes = settings?.showAxes ?? AppSettings.showAxes
+        activeTab.layerColorScheme = LayerColorScheme.stored(name: settings?.layerColorScheme,
+                                                             colors: settings?.layerColors?.map { $0.color })
         guard let settings = settings else { return }
         if let paper = settings.scalePaper, let model = settings.scaleModel, paper > 0, model > 0 {
             editorView.drawingScale = DrawingScale(paper: paper, model: model)

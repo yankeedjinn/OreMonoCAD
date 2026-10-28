@@ -273,6 +273,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// The value box option – also changed by a key (⌥6, F12), so it is refreshed when shown.
     private var valueBoxCheck: NSButton?
     private let hatchRescalePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// Custom schemes can be added in the Layers panel while the window is open, so the list is refreshed when shown.
+    private let layerSchemePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private var actions: [MenuAction] = []
 
     init() {
@@ -298,11 +300,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func refresh() {
         valueBoxCheck?.state = AppSettings.valueBoxAlways ? .on : .off
         hatchRescalePopup.selectItem(at: AppSettings.HatchRescale.allCases.firstIndex(of: AppSettings.hatchRescale) ?? 0)
+        reloadLayerSchemes()
         textStyleLabel.stringValue = textStyleSummary?() ?? ""
         dimStyleLabel.stringValue = "\(AppSettings.dimArrowStyle.title) · text \(LineType.format(AppSettings.dimTextHeightMM)) mm"
             + " · ends \(LineType.format(AppSettings.dimArrowSizeMM)) mm on paper · \(AppSettings.dimDecimals) decimal\(AppSettings.dimDecimals == 1 ? "" : "s")"
         shortcutsPane?.reload()
         snapPane?.reload()
+    }
+
+    private func reloadLayerSchemes() {
+        layerSchemePopup.removeAllItems()
+        layerSchemePopup.addItems(withTitles: LayerColorScheme.all.map { $0.name })
+        layerSchemePopup.selectItem(withTitle: LayerColorScheme.defaultScheme.name)
     }
 
     // MARK: Building
@@ -380,6 +389,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let unitsRow = NSStackView(views: [NSTextField(labelWithString: "Units of a new drawing:"), unitsPopup])
         unitsRow.spacing = 8
 
+        // color scheme for new layers (LayerColorSchemes.swift)
+        reloadLayerSchemes()
+        layerSchemePopup.toolTip = "Colors new layers take in a new drawing. Each drawing remembers its own scheme – change it with the palette button of the Layers panel"
+        let layerSchemeAction = MenuAction { [weak self] in
+            guard let popup = self?.layerSchemePopup, let name = popup.titleOfSelectedItem,
+                  let scheme = LayerColorScheme.named(name) else { return }
+            LayerColorScheme.defaultScheme = scheme
+        }
+        actions.append(layerSchemeAction)
+        layerSchemePopup.target = layerSchemeAction
+        layerSchemePopup.action = #selector(MenuAction.run(_:))
+        let layerSchemeRow = NSStackView(views: [NSTextField(labelWithString: "Layer color scheme of a new drawing:"), layerSchemePopup])
+        layerSchemeRow.spacing = 8
+
         // angles and feet-and-inches (Units.swift)
         let anglePopup = NSPopUpButton(frame: .zero, pullsDown: false)
         anglePopup.addItems(withTitles: AngleUnit.allCases.map { $0.title })
@@ -445,6 +468,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let drawing = pane([
             unitsRow,
             note("A new tab takes the settings of the current drawing; an empty window after launch starts with these units."),
+            layerSchemeRow,
+            note("A drawing without its own scheme (an older drawing, DXF) gets this one too."),
             angleRow,
             bearingsCheck,
             feetCheck,

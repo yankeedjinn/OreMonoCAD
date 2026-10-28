@@ -22,6 +22,7 @@ enum SnapType: String, CaseIterable {
     case nearest = "Nearest"
     case node = "Node"
     case insertion = "Insertion"
+    case origin = "Origin"
 
     /// Description for the menu and settings.
     var detail: String {
@@ -38,12 +39,13 @@ enum SnapType: String, CaseIterable {
         case .nearest: return "Any point on an object (only when no other snap is close)"
         case .node: return "Fit points of splines"
         case .insertion: return "Insertion point of texts and blocks"
+        case .origin: return "Origin of the drawing (0,0) and of the current UCS"
         }
     }
 
     /// The default set (as after installation).
     static let defaultSet: Set<SnapType> = [.endpoint, .midpoint, .center, .quadrant, .intersection,
-                                            .extensionLine, .perpendicular, .node, .insertion]
+                                            .extensionLine, .perpendicular, .node, .insertion, .origin]
 }
 
 struct SnapPoint {

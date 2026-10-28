@@ -13,12 +13,19 @@ enum MenuRows {
     /// Only menus with at least one image change.
     static func apply(to menu: NSMenu) {
         let items = menu.items.filter { !$0.isSeparatorItem && $0.submenu == nil && $0.view == nil }
-        guard items.contains(where: { $0.image != nil }) else { return }
+        guard items.contains(where: { $0.image != nil || ($0 as? SwatchMenuItem)?.swatches != nil }) else { return }
         let layout = MenuRowLayout(items: items)
         for item in items {
             item.view = MenuRowView(item: item, layout: layout)
         }
     }
+}
+
+/// A menu item with a row of color samples to the right of its title (layer color schemes).
+final class SwatchMenuItem: NSMenuItem {
+    var swatches: NSImage?
+    /// Right-click on the row (e.g. removing a custom scheme); the menu closes first.
+    var onRightClick: (() -> Void)?
 }
 
 /// A menu item of a tool: when the mouse rests on its row, the tool's HOW TO USE shows next to the menu.
@@ -47,6 +54,8 @@ struct MenuRowLayout {
 
     let iconWidth: CGFloat
     let textWidth: CGFloat
+    /// Width of the color samples right of the titles (0 = none).
+    let swatchWidth: CGFloat
     let hasState: Bool
 
     let inset: CGFloat = 5          // the highlight keeps this far from the menu edge
@@ -55,7 +64,10 @@ struct MenuRowLayout {
     let rightPadding: CGFloat = 14
 
     init(items: [NSMenuItem]) {
-        iconWidth = max(16, items.compactMap { $0.image?.size.width }.max() ?? 16)
+        let images = items.compactMap { $0.image?.size.width }
+        // a menu of color samples only has no icon column
+        iconWidth = images.isEmpty ? 0 : max(16, images.max() ?? 16)
+        swatchWidth = items.compactMap { ($0 as? SwatchMenuItem)?.swatches?.size.width }.max() ?? 0
         hasState = items.contains { $0.state != .off }
         var widest: CGFloat = 0
         for item in items {
@@ -66,7 +78,8 @@ struct MenuRowLayout {
     }
 
     var textX: CGFloat { return inset + 4 + (hasState ? checkWidth : 0) + iconWidth + gap }
-    var rowWidth: CGFloat { return textX + textWidth + rightPadding + inset }
+    var swatchX: CGFloat { return textX + textWidth + 14 }
+    var rowWidth: CGFloat { return (swatchWidth > 0 ? swatchX + swatchWidth : textX + textWidth) + rightPadding + inset }
 
     static func width(of text: String, font: NSFont) -> CGFloat {
         return (text as NSString).size(withAttributes: [.font: font]).width
@@ -96,7 +109,7 @@ final class MenuRowView: NSView {
         self.layout = layout
         if let subtitle = item.subtitle, !subtitle.isEmpty { subtitleHeight = layout.subtitleHeight(subtitle) }
         let textHeight = titleHeight + (subtitleHeight > 0 ? subtitleHeight + 1 : 0)
-        let iconHeight = item.image?.size.height ?? 0
+        let iconHeight = max(item.image?.size.height ?? 0, (item as? SwatchMenuItem)?.swatches?.size.height ?? 0)
         let height = max(22, textHeight + 6, iconHeight + 4)
         super.init(frame: NSRect(x: 0, y: 0, width: layout.rowWidth, height: height))
         autoresizingMask = [.width]
@@ -158,6 +171,14 @@ final class MenuRowView: NSView {
         NSApp.sendAction(action, to: item.target, from: item)
     }
 
+    override func rightMouseUp(with event: NSEvent) {
+        guard let action = (item as? SwatchMenuItem)?.onRightClick else { return super.rightMouseUp(with: event) }
+        MenuUsageTip.shared.cancel()
+        item?.menu?.cancelTracking()
+        // after the menu has closed, so a dialog can open
+        DispatchQueue.main.async { action() }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let item = item else { return }
         let highlighted = isHighlighted
@@ -183,6 +204,12 @@ final class MenuRowView: NSView {
             let size = image.size
             draw(image, in: NSRect(x: x + (layout.iconWidth - size.width) / 2, y: (bounds.height - size.height) / 2,
                                    width: size.width, height: size.height), ink: isActive ? ink : .tertiaryLabelColor)
+        }
+
+        if let swatches = (item as? SwatchMenuItem)?.swatches {
+            let size = swatches.size
+            draw(swatches, in: NSRect(x: layout.swatchX, y: (bounds.height - size.height) / 2, width: size.width, height: size.height),
+                 ink: ink)
         }
 
         let textTop = (bounds.height - titleHeight - (subtitleHeight > 0 ? subtitleHeight + 1 : 0)) / 2

@@ -54,7 +54,7 @@ final class SnapTracker {
     /// Called on every mouse movement with the object snap point under the cursor (nil = none).
     func hover(over snap: SnapPoint?) {
         let usable: Set<SnapType> = [.endpoint, .midpoint, .center, .geometricCenter, .quadrant,
-                                     .intersection, .node, .insertion]
+                                     .intersection, .node, .insertion, .origin]
         guard enabled, let snap = snap, usable.contains(snap.type) else {
             cancelDwell()
             toggledPoint = nil

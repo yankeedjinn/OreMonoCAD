@@ -1359,6 +1359,11 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         context.restoreGState()
     }
 
+    /// Points for the Origin snap: 0,0 of the drawing and the origin of the current UCS (when it is moved).
+    private var snapOrigins: [CGPoint] {
+        return ucsOrigin == .zero ? [.zero] : [.zero, ucsOrigin]
+    }
+
     /// Point for rectangle selection: snapping to objects and the grid.
     private func pickPoint(for event: NSEvent) -> CGPoint {
         let screenPoint = convert(event.locationInWindow, from: nil)
@@ -1367,7 +1372,8 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if snapEnabled, let snap = snapManager.findSnapPoint(near: point,
                                                              in: entitiesNear(point, tolerance: snapTolerance / viewport.getCurrentZoom())
                                                                 + blockBackgroundNear(point, tolerance: snapTolerance / viewport.getCurrentZoom()),
-                                                             tolerance: snapTolerance / viewport.getCurrentZoom()) {
+                                                             tolerance: snapTolerance / viewport.getCurrentZoom(),
+                                                             origins: snapOrigins) {
             activeSnap = snap
             point = snap.point
         } else if gridSnapEnabled, gridSize > 0 {
@@ -3251,7 +3257,7 @@ final class CADEditorView: NSView, NSTextFieldDelegate {
         if snapEnabled, let snap = snapManager.findSnapPoint(near: worldPoint,
                                                              in: entitiesNear(worldPoint, tolerance: tolerance)
                                                                 + blockBackgroundNear(worldPoint, tolerance: tolerance),
-                                                             tolerance: tolerance, from: reference) {
+                                                             tolerance: tolerance, from: reference, origins: snapOrigins) {
             activeSnap = snap
             worldPoint = snap.point
             snapTracker.hover(over: snap)
@@ -7376,6 +7382,11 @@ enum SnapMarker {
         case .insertion:
             context.stroke(CGRect(x: p.x - s, y: p.y - s * 0.2, width: s * 1.2, height: s * 1.2))
             context.stroke(CGRect(x: p.x - s * 0.2, y: p.y - s, width: s * 1.2, height: s * 1.2))
+        case .origin:
+            // a full cross with a dot: “zero of the axes”
+            lines([CGPoint(x: p.x - s, y: p.y), CGPoint(x: p.x + s, y: p.y)])
+            lines([CGPoint(x: p.x, y: p.y - s), CGPoint(x: p.x, y: p.y + s)])
+            context.fillEllipse(in: CGRect(x: p.x - s * 0.4, y: p.y - s * 0.4, width: s * 0.8, height: s * 0.8))
         }
         context.restoreGState()
     }

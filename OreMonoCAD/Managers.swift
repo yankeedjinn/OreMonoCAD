@@ -789,9 +789,10 @@ class SnapManager {
     }
 
     /// Finds the nearest snap point within tolerance (in world coordinates).
-    /// `reference` = the previous point (for perpendicular and tangent).
+    /// `reference` = the previous point (for perpendicular and tangent), `origins` = fixed points for the Origin snap
+    /// (0,0 of the drawing and of the current UCS).
     func findSnapPoint(near point: CGPoint, in entities: [CADEntity], tolerance: CGFloat,
-                       from reference: CGPoint? = nil) -> SnapPoint? {
+                       from reference: CGPoint? = nil, origins: [CGPoint] = []) -> SnapPoint? {
         var best: SnapPoint?
         var bestEntity: CADEntity?
         var bestDistance = tolerance
@@ -842,6 +843,10 @@ class SnapManager {
                     }
                 }
             }
+        }
+
+        if enabledSnaps.contains(.origin) {
+            for origin in origins { consider(SnapPoint(point: origin, type: .origin)) }
         }
 
         // perpendicular and tangent from the previous point

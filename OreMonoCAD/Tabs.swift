@@ -59,6 +59,8 @@ final class DrawingTab {
     /// Geodetic base point (tie to S-JTSK), nil = not set.
     var geoReference: GeoReference?
     var polarIncrement: CGFloat = 15
+    /// Colors new layers take (Layers panel); a new drawing gets the default from Settings.
+    var layerColorScheme = LayerColorScheme.defaultScheme
 
     // sheets (layouts) and plotting
     var layouts: [DrawingLayout] = []

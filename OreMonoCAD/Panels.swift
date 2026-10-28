@@ -1451,6 +1451,11 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     var onDeleteLayer: ((String) -> Void)?
     /// Select all objects of the layer in the drawing.
     var onSelectLayerObjects: ((String) -> Void)?
+    /// The color scheme of the drawing – new layers take its colors.
+    var colorScheme: (() -> LayerColorScheme)?
+    var onChooseColorScheme: ((LayerColorScheme) -> Void)?
+    /// Gives all layers except 0 the colors of the scheme (undoable, so the drawing does it).
+    var onRecolorLayers: (() -> Void)?
     /// Layers that the selected objects lie on (the ○ mark in the compact panel).
     var selectedObjectLayers: (() -> Set<String>)?
     /// Detach into its own window / return to the side panel / maximize the window.
@@ -1555,7 +1560,8 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             ("+", "New layer – double-click its name to rename it", #selector(addLayer)),
             ("−", "Delete the selected layer (its objects move to layer 0)", #selector(deleteLayer)),
             ("Rename…", "Rename the selected layer (or double-click its name)", #selector(renameLayer)),
-            ("Set Current", "Make the selected layer current (or double-click the row)", #selector(setCurrent))
+            ("Set Current", "Make the selected layer current (or double-click the row)", #selector(setCurrent)),
+            ("Color Scheme", Self.colorSchemeTip, #selector(showColorSchemeMenu(_:)))
         ]
         var x: CGFloat = 10
         for (label, tip, action) in buttons {
@@ -1583,6 +1589,7 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
         let compactItems: [(String, String, Selector)] = [
             ("plus", "New layer – double-click its name to rename it", #selector(addLayer)),
+            ("paintpalette", Self.colorSchemeTip, #selector(showColorSchemeMenu(_:))),
             ("trash", "Delete the selected layer (its objects move to layer 0)", #selector(deleteLayer)),
             ("ellipsis.circle", "More: set current, rename, show or unlock all, open in a window", #selector(showMoreMenu(_:)))
         ]
@@ -2166,6 +2173,116 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         _ = withRows(menu).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }
 
+    // MARK: Color schemes
+
+    private static let colorSchemeTip = "Color scheme for new layers – each new layer gets the next color of the scheme. "
+        + "Click to choose a scheme, recolor all layers or save the colors of your layers as a custom scheme. "
+        + "The color of one layer still changes with a click on its color square"
+
+    @objc private func showColorSchemeMenu(_ sender: NSButton) {
+        let current = colorScheme?() ?? LayerColorScheme.defaultScheme
+        var schemes = LayerColorScheme.all
+        // a custom scheme that came with the drawing from another Mac
+        if !schemes.contains(where: { $0.name == current.name }) { schemes.append(current) }
+        let slots = schemes.map { $0.colors.count }.max() ?? 8
+        let menu = NSMenu(title: "Color Scheme")
+        for scheme in schemes {
+            let item = SwatchMenuItem(title: scheme.name, action: #selector(chooseColorScheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = scheme.name
+            item.swatches = scheme.strip(slots: slots)
+            item.state = scheme.name == current.name ? .on : .off
+            if scheme.isCustom && LayerColorScheme.custom.contains(where: { $0.name == scheme.name }) {
+                item.toolTip = "New layers get these colors. Right-click to remove this custom scheme"
+                item.onRightClick = { [weak self] in self?.confirmRemoveCustomScheme(scheme.name) }
+            } else {
+                item.toolTip = "New layers get these colors"
+            }
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let recolor = NSMenuItem(title: "Recolor All Layers with This Scheme", action: #selector(recolorLayers), keyEquivalent: "")
+        recolor.target = self
+        recolor.toolTip = "Gives every layer except 0 a color of the scheme, in order (⌘Z undoes it)"
+        menu.addItem(recolor)
+        let add = NSMenuItem(title: "Add Custom Scheme…", action: #selector(addCustomScheme), keyEquivalent: "")
+        add.target = self
+        add.toolTip = "Color your layers first – their colors are saved as a new scheme for all drawings"
+        menu.addItem(add)
+        let custom = LayerColorScheme.custom
+        if !custom.isEmpty {
+            let remove = NSMenuItem(title: "Remove Custom Scheme", action: nil, keyEquivalent: "")
+            let submenu = NSMenu(title: "Remove Custom Scheme")
+            for scheme in custom {
+                let item = NSMenuItem(title: scheme.name, action: #selector(removeCustomScheme(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = scheme.name
+                submenu.addItem(item)
+            }
+            remove.submenu = submenu
+            menu.addItem(remove)
+        }
+        _ = withRows(menu).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+    }
+
+    @objc private func chooseColorScheme(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        let current = colorScheme?()
+        guard let scheme = LayerColorScheme.named(name) ?? (current?.name == name ? current : nil) else { return }
+        onChooseColorScheme?(scheme)
+    }
+
+    @objc private func recolorLayers() {
+        onRecolorLayers?()
+    }
+
+    @objc private func addCustomScheme() {
+        guard let manager = layerManager else { return }
+        var colors: [Int] = []
+        for layer in manager.getAllLayers() where layer.name != "0" {
+            let hex = LayerColorScheme.hex(layer.color)
+            if !colors.contains(hex) { colors.append(hex) }
+        }
+        colors = Array(colors.prefix(LayerColorScheme.maxCustomColors))
+        guard colors.count >= 2 else {
+            showWarning("Color your layers first – a custom scheme takes the colors of the layers (at least two different colors besides layer 0).")
+            return
+        }
+        guard let name = askForName(title: "Add Custom Scheme",
+                                    message: "Name of the scheme with the \(colors.count) colors of your layers:",
+                                    initial: "My Scheme", button: "Add Scheme") else { return }
+        if LayerColorScheme.builtIn.contains(where: { $0.name == name }) {
+            showWarning("“\(name)” is a built-in scheme. Choose another name.")
+            return
+        }
+        let scheme = LayerColorScheme(name: name, colors: colors, isCustom: true)
+        var custom = LayerColorScheme.custom
+        if let index = custom.firstIndex(where: { $0.name == name }) {
+            custom[index] = scheme
+        } else {
+            custom.append(scheme)
+        }
+        LayerColorScheme.custom = custom
+        onChooseColorScheme?(scheme)
+    }
+
+    @objc private func removeCustomScheme(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        confirmRemoveCustomScheme(name)
+    }
+
+    /// Drawings that use the scheme keep its colors; only the menu and Settings lose it.
+    private func confirmRemoveCustomScheme(_ name: String) {
+        let alert = NSAlert()
+        alert.messageText = "Do you really want to remove the scheme \u{201C}\(name)\u{201D}?"
+        alert.informativeText = "Drawings that use it keep its colors."
+        alert.addButton(withTitle: "Remove Scheme")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        LayerColorScheme.custom.removeAll { $0.name == name }
+    }
+
     @objc private func menuSetCurrent() {
         guard let name = menuLayer else { return }
         layerManager?.setCurrentLayer(name)
@@ -2225,9 +2342,8 @@ final class LayerPanelView: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         searchField.stringValue = ""
         filterText = ""
         let name = manager.uniqueLayerName()
-        let colors: [NSColor] = [.red, .yellow, .green, .cyan, .blue, .magenta]
-        let color = colors[(manager.count - 1 + colors.count) % colors.count]
-        manager.addLayer(Layer(name: name, color: color))
+        let scheme = colorScheme?() ?? LayerColorScheme.defaultScheme
+        manager.addLayer(Layer(name: name, color: scheme.nextColor(usedBy: manager.getAllLayers())))
         if let row = layers.firstIndex(where: { $0.name == name }) {
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             tableView.scrollRowToVisible(row)
